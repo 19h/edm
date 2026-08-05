@@ -62,6 +62,7 @@ pub mod single;
 pub mod thread;
 pub mod time;
 pub mod topn;
+pub mod view;
 pub mod weight;
 
 use crate::graph::{Pools, TradeGraph};
@@ -125,39 +126,12 @@ pub fn solve(
 
 #[cfg(test)]
 mod exactness {
-    //! The exactness rule, enforced against this crate's own source.
+    //! The one rule this crate cannot check from outside.
     //!
-    //! Every claim in this crate rests on the arithmetic being exact, and the
-    //! way that stops being true is not a decision but a drift: one convenient
-    //! `as f64` inside a comparison and the total order quietly becomes a
-    //! partial one. So the rule is mechanical.
-    //!
-    //! This belongs in `cargo xtask gates` alongside the purity and
-    //! parity-isolation checks. It lives here because that file has another
-    //! owner while this crate is being written; moving it is a two-line change
-    //! and the check itself does not need to move with it.
-
-    /// The files where the search happens and floating point may not appear.
-    const SOLVING_PATH: [(&str, &str); 7] = [
-        ("num.rs", include_str!("num.rs")),
-        ("weight.rs", include_str!("weight.rs")),
-        ("single.rs", include_str!("single.rs")),
-        ("round.rs", include_str!("round.rs")),
-        ("ratio.rs", include_str!("ratio.rs")),
-        ("bounded.rs", include_str!("bounded.rs")),
-        ("distinct.rs", include_str!("distinct.rs")),
-    ];
-
-    #[test]
-    fn the_solving_path_contains_no_floating_point() {
-        for (name, source) in SOLVING_PATH {
-            assert!(
-                !source.contains("f64") && !source.contains("f32"),
-                "{name} names a floating-point type; the exactness claims in this crate \
-                 are only available over the integers"
-            );
-        }
-    }
+    //! The `route-exactness` and `purity` gates in `cargo xtask gates` own the
+    //! source scan and the dependency tree. What is left here is the manifest
+    //! itself, which is worth failing in the same commit as the mistake rather
+    //! than at the next gate run.
 
     #[test]
     fn this_crate_takes_exactly_one_thing_from_the_port() {
@@ -184,19 +158,4 @@ mod exactness {
         assert_eq!(named, vec!["edm-core.workspace = true"]);
     }
 
-    #[test]
-    fn the_solving_path_does_not_divide_its_way_out_of_a_ratio() {
-        // A rate must never be collapsed to a quotient for comparison. The
-        // sanctioned division is `Ratio::credits_per_hour_floor`, which is a
-        // display path and lives in `num.rs`.
-        for (name, source) in SOLVING_PATH {
-            if name == "num.rs" {
-                continue;
-            }
-            assert!(
-                !source.contains("credits_per_hour_floor"),
-                "{name} formats a rate; formatting belongs to the caller"
-            );
-        }
-    }
 }

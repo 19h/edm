@@ -31,6 +31,42 @@ pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
     Column::new("value", "Value").min_width(12),
 ];
 
+/// A ranked route per row. Nothing here is ported; `edm route` is a new
+/// command \[C25\], and these widths were chosen for its own content.
+///
+/// `Stops` is the only column with a floor, so it is the only one squeezed;
+/// the rest are dropped whole, and `Guarantee` goes last-but-one because a
+/// claim about the search is worth more than a distance. `Rate` is never
+/// dropped: it is what the ranking is *by*.
+pub const ROUTE_COLUMNS: &[Column] = &[
+    Column::new("rank", "#").right(),
+    Column::new("stops", "Stops").min_width(20),
+    Column::new("profit", "Profit").right().priority(2),
+    Column::new("rate", "Cr/h").right(),
+    Column::new("first", "Cr/h lap 1").right().priority(3),
+    Column::new("time", "Lap").right().priority(1),
+    Column::new("claim", "Claim").priority(4),
+];
+
+/// One leg per row, for `--detail`.
+///
+/// There is no `From` column. The legs are in flying order and the block names
+/// the origin, so a `From` would repeat every station twice — and, more to the
+/// point, a third squeezable column would cost a squeeze round after every drop
+/// (see `fitting_terminates_within_two_steps_per_column`, whose bound holds
+/// because no set here declares more than two floors).
+pub const LEG_COLUMNS: &[Column] = &[
+    Column::new("to", "To").min_width(12),
+    Column::new("commodity", "Commodity").min_width(10),
+    Column::new("units", "Tons").right(),
+    Column::new("buy", "Buy").right().priority(3),
+    Column::new("sell", "Sell").right().priority(3),
+    Column::new("profit", "Profit").right(),
+    Column::new("limiter", "Limited by").priority(2),
+    Column::new("distance", "Distance").right().priority(5),
+    Column::new("time", "Time").right().priority(4),
+];
+
 /// `COMMODITY_COLUMNS` (`market-request.ts:621`) — the market listing.
 ///
 /// Only `Commodity` declares a floor, so it is the only column that is ever
@@ -123,6 +159,8 @@ pub const MARKET_POINT_COLUMNS: &[Column] = &[
 pub const ALL: &[(&str, &[Column])] = &[
     ("FIELD", FIELD_COLUMNS),
     ("ROUTE_FIELD", ROUTE_FIELD_COLUMNS),
+    ("ROUTE", ROUTE_COLUMNS),
+    ("LEG", LEG_COLUMNS),
     ("COMMODITY", COMMODITY_COLUMNS),
     ("INVENTORY", INVENTORY_COLUMNS),
     ("SWEEP", SWEEP_COLUMNS),

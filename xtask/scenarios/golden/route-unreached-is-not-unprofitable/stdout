@@ -91,3 +91,5 @@
 +----------------+--------------+
    every price below was read live from the Companion API during this run
    1 market in radius was not reached and is absent from the ranking, not ranked low
+== BEST ROUND TRIPS ================================================================================
+   no profitable round trip in this data

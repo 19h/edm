@@ -16,6 +16,7 @@
 pub mod acquire;
 pub mod cache;
 pub mod discover;
+pub mod ingest;
 pub mod pacer;
 pub mod plan;
 pub mod pool;

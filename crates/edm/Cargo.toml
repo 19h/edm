@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 edm-core.workspace = true
+edm-route.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 flate2.workspace = true

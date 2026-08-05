@@ -14,7 +14,7 @@
 //! than an assumption. A run that refuses is a run whose wire log is empty.
 
 use edm_core::ardent::{self, Lookup, ReferenceSystem};
-use edm_core::cli::config::RouteConfig;
+use edm_core::cli::config::{RouteConfig, Shape};
 use edm_core::pace::{Bucket, Budget};
 use edm_core::render::views::{self, RouteCoverage};
 use edm_core::select;
@@ -24,7 +24,14 @@ use crate::ardent::ArdentClient;
 use crate::cmd::{App, CmdResult};
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs, Timer};
+use edm_route::model::{Limits, ShipConfig};
+use edm_route::num::{Credits, Tons};
+use edm_route::report::RouteKind;
+use edm_route::time::TimeModel;
+use edm_route::view;
+
 use crate::route::acquire;
+use crate::route::ingest;
 use crate::route::cache::Cache;
 use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
 use crate::route::pacer::{Pacer, Pacing};
@@ -155,12 +162,81 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     };
     out.emit(&views::route_coverage(&coverage));
 
+    rank(out, config, &acquired, &selection.keep);
+
     // A market in radius that was never read is not a market that ranked
     // badly, and the exit code says so.
     if !acquired.unreached.is_empty() || coverage.breaker_tripped {
         out.set_exit(crate::out::EXIT_FAILURE);
     }
     Ok(())
+}
+
+/// Solve, and print what the search will actually claim.
+fn rank(
+    out: &crate::out::Out,
+    config: &RouteConfig,
+    acquired: &acquire::Acquired,
+    stations: &[ardent::ArdentStation],
+) {
+    let (markets, commodities, crossing) =
+        ingest::markets(&acquired.listings, stations, ingest::floors(config));
+    if crossing.non_integral > 0 {
+        // Never silently rounded: a fractional price is the wire reporting
+        // something this program has no model for.
+        out.line(&format!(
+            "{} commodity rows carried a non-integral price or quantity and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.non_integral))
+        ));
+    }
+
+    let solution = edm_route::solve(&markets, time_model(config), &ship(config), &limits(config));
+
+    // Only the shape that was asked for. Printing all three would bury the
+    // answer, and the two the user did not ask for carry different claims.
+    let (kind, routes) = match config.shape {
+        Shape::OneWay => (RouteKind::SingleHop, &solution.single),
+        Shape::RoundTrip => (RouteKind::RoundTrip, &solution.round_trip),
+        Shape::Loop | Shape::BoundedLoop(_) => (RouteKind::Loop { stops: 0 }, &solution.loops),
+    };
+    out.emit(&view::ranking(kind, routes, &markets));
+
+    if config.detail {
+        for route in routes {
+            out.emit(&view::legs(route, &markets, &commodities));
+        }
+    }
+}
+
+/// The travel model, with every constant a flag.
+fn time_model(config: &RouteConfig) -> TimeModel {
+    TimeModel { jump_range_ly: config.jump_range_ly, ..TimeModel::default() }
+}
+
+/// The ship, or the absence of one.
+///
+/// An omitted `--cargo` or `--credits` means *unbounded*, not zero: the answer
+/// is then the best route the data admits for a ship that can carry it, which
+/// is the right default for "what is out there".
+fn ship(config: &RouteConfig) -> ShipConfig {
+    ShipConfig {
+        cargo: config.cargo.map_or(ShipConfig::default().cargo, |tons| Tons(tons as i64)),
+        credits: config
+            .credits
+            .map_or(ShipConfig::default().credits, |credits| Credits(credits as i64)),
+    }
+}
+
+fn limits(config: &RouteConfig) -> Limits {
+    Limits {
+        top_n: config.top,
+        min_profit: Credits(config.min_profit as i64),
+        max_stops: match config.shape {
+            Shape::BoundedLoop(k) => Some(k),
+            _ => None,
+        },
+        ..Limits::default()
+    }
 }
 
 /// The pacing a run is built with.

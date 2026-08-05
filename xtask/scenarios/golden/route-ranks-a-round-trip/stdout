@@ -11,7 +11,7 @@
 | markets to poll         | 2                                              |
 | CAPI requests           | 2  (one per market)                            |
 | estimated transfer      | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
-| pacing                  | 2 req/s                                        |
+| pacing                  | 8 req/s                                        |
 | estimated wall clock    | 1s                                             |
 | ceiling                 | 2 of 2,000   (--max-requests to raise)         |
 +-------------------------+------------------------------------------------+
@@ -26,4 +26,22 @@
 +----------------+--------------+
    every price below was read live from the Companion API during this run
 == BEST ROUND TRIPS ================================================================================
-   no profitable round trip in this data
++---+-----------------------+--------------+--------------+--------------+--------+----------------+
+| # | Stops                 |       Profit |         Cr/h |   Cr/h lap 1 |    Lap | Claim          |
++===+=======================+==============+==============+==============+========+================+
+| 1 | Galileo (Sol) -> Tit~ | 3,292,800 cr | 43,273,489/h | 28,848,992/h | 4m 33s | proved optimal |
++---+-----------------------+--------------+--------------+--------------+--------+----------------+
+   prices were read at one instant and are already ageing; another commander may have traded them
+   since
+   distances are straight lines; the real jump graph may be longer
+   permits, allegiance and landing-pad availability are not modelled
+   times come from a calibrated model, not from your ship
+   legs below --min-profit were excluded; the result is optimal for what remained
+== LEGS  from Galileo (Sol) ========================================================================
++------------------+------------+------+----------+-----------+--------------+------------+--------+
+| To               | Commodity  | Tons |      Buy |      Sell |       Profit | Limited by |   Time |
++==================+============+======+==========+===========+==============+============+========+
+| Titan City (Sol) | Gold       |  784 | 9,000 cr | 11,500 cr | 1,960,000 cr | hold full  | 2m 16s |
+| Galileo (Sol)    | Silver     |  784 | 4,500 cr |  6,200 cr | 1,332,800 cr | hold full  | 2m 16s |
++------------------+------------+------+----------+-----------+--------------+------------+--------+
+   columns hidden to fit 100 cols: Distance

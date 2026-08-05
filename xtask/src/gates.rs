@@ -19,6 +19,7 @@ pub(crate) fn run() -> Result<()> {
         ("no-committed-credentials", no_committed_credentials),
         ("parity-isolation", parity_isolation),
         ("no-dotenv-leakage", no_dotenv_leakage),
+        ("route-exactness", route_exactness),
     ] {
         match check(&root) {
             Ok(()) => println!("  pass  {name}"),
@@ -100,17 +101,66 @@ fn no_dotenv_leakage(root: &Path) -> Result<()> {
 /// to validate the EDDN message against its published schema — drags in
 /// reqwest, and a test-only dependency cannot make the shipped crate impure.
 fn purity(root: &Path) -> Result<()> {
-    let tree = cargo_tree(root, &["-p", "edm-core", "-e", "normal"])?;
-    let forbidden: Vec<&str> = ["tokio", "reqwest", "rustix", "getrandom"]
-        .into_iter()
-        .filter(|name| {
-            tree.lines().any(|line| line.split_whitespace().any(|word| word == *name))
-        })
-        .collect();
-    if forbidden.is_empty() {
+    // `edm-route` is held to the same rule and for a sharper reason: its whole
+    // value is that a search is reproducible, and a clock, a socket or an
+    // entropy source reaching it would end that quietly.
+    for package in ["edm-core", "edm-route"] {
+        let tree = cargo_tree(root, &["-p", package, "-e", "normal"])?;
+        let forbidden: Vec<&str> = ["tokio", "reqwest", "rustix", "getrandom"]
+            .into_iter()
+            .filter(|name| {
+                tree.lines().any(|line| line.split_whitespace().any(|word| word == *name))
+            })
+            .collect();
+        if !forbidden.is_empty() {
+            bail!("{package}'s normal dependency tree reaches {}", forbidden.join(", "));
+        }
+    }
+    Ok(())
+}
+
+/// The optimiser's claims are only available over the integers.
+///
+/// Every exactness statement in `edm-route` — that Dinkelbach terminates on the
+/// optimum rather than near it, that a ranking is a total order, that two runs
+/// over a shuffled input agree — rests on the arithmetic being exact. The way
+/// that stops being true is not a decision but a drift: one convenient `as f64`
+/// inside a comparison and the total order quietly becomes a partial one, and
+/// nothing fails. So the rule is mechanical and it is checked here rather than
+/// left to review.
+///
+/// `f64` is legal in `time.rs`, which evaluates a square root, and in the
+/// display paths. It is not legal anywhere the search compares two things.
+fn route_exactness(root: &Path) -> Result<()> {
+    const SOLVING_PATH: [&str; 7] =
+        ["num.rs", "weight.rs", "single.rs", "round.rs", "ratio.rs", "bounded.rs", "distinct.rs"];
+    let dir = root.join("crates").join("edm-route").join("src");
+
+    let mut offenders = Vec::new();
+    for name in SOLVING_PATH {
+        let path = dir.join(name);
+        let source = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        for (number, line) in source.lines().enumerate() {
+            if line.contains("f64") || line.contains("f32") {
+                offenders.push(format!("{name}:{}: {}", number + 1, line.trim_ascii()));
+            }
+            // A rate must never be collapsed to a quotient to compare it. The
+            // sanctioned division is `Ratio::credits_per_hour_floor`, a display
+            // path that lives in `num.rs`.
+            if name != "num.rs" && line.contains("credits_per_hour_floor") {
+                offenders.push(format!("{name}:{}: formats a rate", number + 1));
+            }
+        }
+    }
+
+    if offenders.is_empty() {
         return Ok(());
     }
-    bail!("edm-core's normal dependency tree reaches {}", forbidden.join(", "))
+    bail!(
+        "the solving path must stay exact:\n  {}",
+        offenders.join("\n  ")
+    )
 }
 
 /// **[R96]** — no signal handling at all.
