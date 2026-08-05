@@ -26,7 +26,7 @@
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
-use icu_collator::{Collator, CollatorBorrowed, options::CollatorOptions};
+use icu_collator::{Collator, CollatorBorrowed, CollatorPreferences, options::CollatorOptions};
 
 /// Built once. Construction parses collation data, so doing it per comparison
 /// would dominate the cost of every sort in the program.
@@ -36,7 +36,7 @@ fn collator() -> &'static CollatorBorrowed<'static> {
         // Root locale, default options: tertiary strength (so case breaks
         // ties), non-ignorable punctuation — which is what `localeCompare`
         // does by default.
-        Collator::try_new(Default::default(), CollatorOptions::default())
+        Collator::try_new(CollatorPreferences::default(), CollatorOptions::default())
             .expect("ICU4X ships compiled root collation data")
     })
 }

@@ -49,18 +49,17 @@ fn shortest_digits(v: f64) -> Significand {
         }
     };
 
-    let n;
-    if int_part == "0" {
+    let n = if int_part == "0" {
         // `0.000ddd` — the leading fractional zeros are not significant, they
         // are exponent.
         let lead = frac_part.len() - frac_part.trim_start_matches('0').len();
         push(&frac_part.as_bytes()[lead..]);
-        n = exp - lead as i32;
+        exp - lead as i32
     } else {
         push(int_part.as_bytes());
         push(frac_part.as_bytes());
-        n = int_part.len() as i32 + exp;
-    }
+        int_part.len() as i32 + exp
+    };
 
     // ryu writes `100.0` and `1e21`; the trailing zeros in the former are
     // padding, not significance, and would inflate `k`. A shortest
@@ -204,11 +203,15 @@ pub fn thousands(t: f64) -> String {
     if neg {
         out.push('-');
     }
-    for i in 0..width {
-        if i > 0 && (width - i) % 3 == 0 {
+    // The significand, then zero padding out to the full positional width —
+    // which is how values above 2^53 render every digit despite carrying only
+    // seventeen significant ones.
+    let padded = buf[..k].iter().copied().chain(core::iter::repeat(b'0')).take(width);
+    for (i, digit) in padded.enumerate() {
+        if i > 0 && (width - i).is_multiple_of(3) {
             out.push(',');
         }
-        out.push(if i < k { buf[i] as char } else { '0' });
+        out.push(char::from(digit));
     }
     out
 }
@@ -347,34 +350,30 @@ pub fn js_round(x: f64) -> f64 {
 /// `Math.min` — NaN-propagating, and `-0` sorts below `+0`.
 #[must_use]
 pub fn js_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if a < b {
-        a
-    } else if b < a {
-        b
-    } else if a.is_sign_negative() {
-        a
-    } else {
-        b
+    use core::cmp::Ordering;
+    match a.partial_cmp(&b) {
+        Some(Ordering::Less) => a,
+        Some(Ordering::Greater) => b,
+        // Numerically equal, which for zeroes is not the same as identical:
+        // `Math.min(0, -0)` is `-0`, and the sign survives into `String(n)`.
+        Some(Ordering::Equal) => {
+            if a.is_sign_negative() { a } else { b }
+        }
+        None => f64::NAN,
     }
 }
 
 /// `Math.max` — NaN-propagating, and `+0` sorts above `-0`.
 #[must_use]
 pub fn js_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if a > b {
-        a
-    } else if b > a {
-        b
-    } else if a.is_sign_negative() {
-        b
-    } else {
-        a
+    use core::cmp::Ordering;
+    match a.partial_cmp(&b) {
+        Some(Ordering::Greater) => a,
+        Some(Ordering::Less) => b,
+        Some(Ordering::Equal) => {
+            if a.is_sign_negative() { b } else { a }
+        }
+        None => f64::NAN,
     }
 }
 

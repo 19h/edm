@@ -23,6 +23,17 @@ disallowed_types = "deny"
 cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
 cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# Exact `f64` equality is not a mistake here — it is what JavaScript's `===`
+# does, and several behaviours depend on it (`-0 === 0` is true, `NaN === NaN`
+# is false). The sanctioned comparisons live behind `js::js_min`/`js_max`/
+# `truthy`/`safe_int`; the rest are transcriptions of TypeScript comparisons.
+float_cmp = "allow"
+# `Commodity` mirrors the Companion API's own field set.
+struct_excessive_bools = "allow"
+# This codebase explains itself in prose, and the lint cannot tell a proper noun
+# (ChaCha20, CPython, JavaScript) from an unquoted code item.
+doc_markdown = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 module_name_repetitions = "allow"

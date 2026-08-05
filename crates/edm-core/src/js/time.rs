@@ -39,18 +39,16 @@ pub fn iso8601_from_ms(ms: f64) -> Option<String> {
     let second = rem % 60_000 / 1000;
     let milli = rem % 1000;
 
-    let mut out = String::with_capacity(28);
-    if (0..=9999).contains(&year) {
-        out.push_str(&format!("{year:04}"));
+    // ECMA-262 §21.4.1.33: four digits inside 0..=9999, otherwise an expanded
+    // year with a mandatory sign and six digits.
+    let year = if (0..=9999).contains(&year) {
+        format!("{year:04}")
     } else {
-        // ECMA-262 §21.4.1.33 expanded years: a mandatory sign and six digits.
-        out.push(if year < 0 { '-' } else { '+' });
-        out.push_str(&format!("{:06}", year.abs()));
-    }
-    out.push_str(&format!(
-        "-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{milli:03}Z"
-    ));
-    Some(out)
+        format!("{}{:06}", if year < 0 { '-' } else { '+' }, year.abs())
+    };
+    Some(format!(
+        "{year}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{milli:03}Z"
+    ))
 }
 
 /// Days since 1970-01-01 to a proleptic Gregorian `(year, month, day)`.
@@ -106,4 +104,38 @@ pub fn milliseconds_display(milliseconds: f64) -> String {
 fn pad_start_2(v: f64) -> String {
     let s = js_number(v);
     if s.len() >= 2 { s } else { format!("0{s}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The expanded-year form and the `TimeClip` bound, stated directly rather
+    /// than left to the sampled corpus.
+    #[test]
+    fn expanded_years_and_range() {
+        assert_eq!(iso8601_from_ms(0.0).unwrap(), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso8601_from_ms(8.64e15).unwrap(), "+275760-09-13T00:00:00.000Z");
+        assert_eq!(iso8601_from_ms(-8.64e15).unwrap(), "-271821-04-20T00:00:00.000Z");
+        assert!(iso8601_from_ms(8.64e15 + 1.0).is_none());
+        assert!(iso8601_from_ms(f64::NAN).is_none());
+    }
+
+    /// `padStart(2, "0")` pads but never truncates, so a long uptime widens the
+    /// clock rather than wrapping it. R21.
+    #[test]
+    fn uptime_clock_widens_past_two_digits() {
+        assert_eq!(milliseconds_display(360_000_000.0), "360,000,000 ms (uptime 100:00:00)");
+        assert_eq!(milliseconds_display(0.0), "0 ms (uptime 00:00:00)");
+    }
+
+    /// The seconds are interpolated ungrouped even though the same value would
+    /// carry commas through `formatInteger` elsewhere. R21.
+    #[test]
+    fn unix_seconds_are_ungrouped() {
+        assert_eq!(
+            unix_seconds_display(1_700_000_000.0),
+            "1700000000 (2023-11-14T22:13:20.000Z)"
+        );
+    }
 }

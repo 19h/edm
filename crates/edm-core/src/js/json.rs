@@ -169,7 +169,7 @@ impl<'a> IntoIterator for &'a JsObject {
     >;
 
     fn into_iter(self) -> Self::IntoIter {
-        fn project<'a>(pair: &'a (Box<str>, JsValue)) -> (&'a str, &'a JsValue) {
+        fn project(pair: &(Box<str>, JsValue)) -> (&str, &JsValue) {
             (pair.0.as_ref(), &pair.1)
         }
         self.entries.iter().map(project)
@@ -424,7 +424,8 @@ fn write_json_string(out: &mut String, s: &str) {
             '\u{D}' => out.push_str("\\r"),
             c if (c as u32) < 0x20 => {
                 // Lowercase hex, as JavaScript emits it.
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                use fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", c as u32);
             }
             c => out.push(c),
         }
