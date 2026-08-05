@@ -1,0 +1,15 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== INVENTORY  3 items ======================================
++--------------------------------+-------+------------+---+
+| Commodity                      |   Qty |      Value | S |
++================================+=======+============+===+
+| Advanced Catalysers Mk II Pri~ | 1,024 | 12,345,678 | S |
+| Onionhead Alpha Strain         |    16 |      8,150 | . |
++--------------------------------+-------+------------+---+
+| Hydrogen Fuel                  |     - |          - | . |
++--------------------------------+-------+------------+---+
+   columns hidden to fit 60 cols: Marked, Owner, Origin,
+   Position (x / y / z)

@@ -1,0 +1,11 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== TRADES  2 requests over 1 round — complete ==============
++---+------------+-----+-------+---------+------+-------+
+| # | Commodity  | Qty |  Unit |   Total | HTTP | Cargo |
++===+============+=====+=======+=========+======+=======+
+| 1 | Gold       |  12 | 9,401 | 112,812 |  200 | 12/64 |
+| 2 | Tobacco    |   4 | 5,380 |  21,520 |  200 | 16/64 |
++---+------------+-----+-------+---------+------+-------+

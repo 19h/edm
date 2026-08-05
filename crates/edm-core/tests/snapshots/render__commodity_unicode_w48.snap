@@ -1,0 +1,16 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== COMMODITIES  3 entries in 1 categories ======
++--------------+-------+-------+--------+------+
+| Commodity    |   Buy |  Sell | Demand | CPRI |
++==============+=======+=======+========+======+
+| SALVAGE — RECOVERED  3 items | 1 supplied |~ |
++--------------+-------+-------+--------+------+
+| Grüne Ölpro~ | 1,204 | 1,180 |      - | ..RI |
+| 東京ステーション記念品~ |   412 |   400 |     18 | C... |
+| 🚀🛰️🪐 Dee~ | 9,001 | 8,900 |      - | ..R. |
++--------------+-------+-------+--------+------+
+   columns hidden to fit 48 cols: ID, Fence,
+   Mean, Stk, Dmd, Stock

@@ -1,0 +1,12 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== REQUEST  GET /market ============================================================================
++----------+--------------+
+| Field    | Value        |
++==========+==============+
+| method   | GET          |
+| marketId | 3229028096   |
+| dryRun   | no           |
++----------+--------------+

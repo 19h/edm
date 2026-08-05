@@ -1,0 +1,14 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== TRADES  3 requests over 2 rounds — hold is full =========
++---+----------------+-------+------------+----------------+
+| # | Commodity      |   Qty |       Unit |          Total |
++===+================+=======+============+================+
+| 1 | Advanced Cata~ | 1,024 | 12,345,678 | 12,641,974,272 |
+| 2 | Onionhead Alp~ |    16 |      8,150 |        130,400 |
++---+----------------+-------+------------+----------------+
+| 3 | Hydrogen Fuel  |     0 |        110 |              0 |
++---+----------------+-------+------------+----------------+
+   columns hidden to fit 60 cols: Cargo, HTTP

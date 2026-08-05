@@ -1,0 +1,13 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== SWEEP RESULTS  2 markets ====================
++------------+------------------+------+------+
+|  Market ID | Name             | HTTP | Comm |
++============+==================+======+======+
+| 3229028096 | Jameson Memorial |  200 |  112 |
+| 3223343616 | Abraham Lincoln  |  429 |    - |
++------------+------------------+------+------+
+   columns hidden to fit 48 cols: Try, Sup, Dem,
+   EDDN

@@ -1,0 +1,19 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== COMMODITIES  3 entries in 2 categories ======
++--------------+-------+-------+--------+------+
+| Commodity    |   Buy |  Sell | Demand | CPRI |
++==============+=======+=======+========+======+
+| CHEMICALS  2 items | 1 supplied | 1 in dema~ |
++--------------+-------+-------+--------+------+
+| Explosives   |   312 |   296 |      - | ..R. |
+| Hydrogen Fu~ |   110 |   104 |  3,412 | .P.. |
++--------------+-------+-------+--------+------+
+| METALS  1 items | 0 supplied | 1 in demand   |
++--------------+-------+-------+--------+------+
+| Gold         | 9,428 | 9,301 |    812 | C..I |
++--------------+-------+-------+--------+------+
+   columns hidden to fit 48 cols: ID, Fence,
+   Mean, Stk, Dmd, Stock

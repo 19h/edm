@@ -1,0 +1,12 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== MARKETS FOUND BY SCAN  2 points =============================================
++------------+------------------+----------+-----------+-------------------+
+|  Market ID | Name             | Type     | Economy   | Faction           |
++============+==================+==========+===========+===================+
+| 3229028096 | Jameson Memorial | Orbis    | High Tech | Pilots Federation |
+| 3223343616 | Abraham Lincoln  | Coriolis | Refinery  | Mother Gaia       |
++------------+------------------+----------+-----------+-------------------+
+   columns hidden to fit 80 cols: Found at

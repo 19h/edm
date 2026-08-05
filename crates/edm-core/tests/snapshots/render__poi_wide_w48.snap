@@ -1,0 +1,18 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== MARKETS FOUND BY SCAN  2 points =============
++------------+---------------------------------+
+|  Market ID | Name                            |
++============+=================================+
+| ORBIS STARPORT                               |
++------------+---------------------------------+
+| 3229028096 | Jameson Memorial Fleet Landing~ |
++------------+---------------------------------+
+| FLEET CARRIER                                |
++------------+---------------------------------+
+| 3700286976 | K7Q-BQL Nostromo Deep Space An~ |
++------------+---------------------------------+
+   columns hidden to fit 48 cols: Found at,
+   Faction, Economy, Type

@@ -1,0 +1,20 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== COMMODITIES  4 entries in 2 categories ======
++--------------------+------------+------------+
+| Commodity          |        Buy |       Sell |
++====================+============+============+
+| CONSUMER ITEMS  2 items | 1 supplied | 2 in~ |
++--------------------+------------+------------+
+| Advanced Catalyse~ | 12,345,678 | 12,345,600 |
+| Hydrogen Fuel      |        110 |        104 |
++--------------------+------------+------------+
+| LEGAL DRUGS  2 items | 2 supplied | 0 in de~ |
++--------------------+------------+------------+
+| Onionhead Alpha S~ |      8,214 |      8,100 |
+| Tobacco            |      5,412 |      5,300 |
++--------------------+------------+------------+
+   columns hidden to fit 48 cols: ID, Fence,
+   Mean, Stk, Dmd, Stock, Demand, CPRI
