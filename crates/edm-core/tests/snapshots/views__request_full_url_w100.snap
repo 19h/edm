@@ -1,0 +1,36 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit_all(&views::request(&view, true), width)"
+---
+== REQUEST  GET /2.0/elite/market/list =============================================================
++--------------+------------------------------------------------------+
+| Field        | Value                                                |
++==============+======================================================+
+| TARGET                                                              |
++--------------+------------------------------------------------------+
+| method       | GET                                                  |
+| endpoint     | https://api.orerve.net/2.0/elite/market/list         |
+| query        | 252 chars base64 QUJDREVGR0hJSktMTU5P...MjM0NTY3ODk= |
++--------------+------------------------------------------------------+
+| HEADERS                                                             |
++--------------+------------------------------------------------------+
+| encrypted    | 1                                                    |
+| fdev-retry   | 0/2                                                  |
+| fdev-season  | 4                                                    |
+| fdev-semver  | 4.4.0.3                                              |
+| nonce        | a1b2c3d4e5f6                                         |
+| request-time | 1700000000000                                        |
+| user-agent   | EDGame/11.0/Win64                                    |
++--------------+------------------------------------------------------+
+| ENVELOPE                                                            |
++--------------+------------------------------------------------------+
+| marketID     | 3223343616                                           |
+| machineToken | <80 chars>                                           |
+| fTime        | 1700000000                                           |
+| plaintext    | 212 bytes                                            |
+| nonce        | a1b2c3d4e5f6                                         |
+| fTime        | 1700000000 (2023-11-14T22:13:20.000Z)                |
+| requestTime  | 1,700,000,000,000 ms (uptime 472222:13:20)           |
++--------------+------------------------------------------------------+
+== REQUEST URL =====================================================================================
+https://api.orerve.net/2.0/elite/market/list?QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk=QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk=QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk=

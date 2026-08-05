@@ -1,0 +1,31 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== MARKETS  Colonia ============================
++------------+----------------+-----+-----+
+|  Market ID | Name           | Imp | Exp |
++============+================+=====+=====+
+| STARPORT  1 | 1 with a commodity market |
++------------+----------------+-----+-----+
+| 3223343616 | Jaques Station |   3 |   1 |
++------------+----------------+-----+-----+
+| OUTPOST  1 | 0 with a commodity market  |
++------------+----------------+-----+-----+
+| 3223343617 | Brady Terminal |   - |   - |
++------------+----------------+-----+-----+
+| CARRIER  2 | 1 with a commodity market  |
++------------+----------------+-----+-----+
+| 3705689345 | A1B-C2D        |   - |   - |
+| 3705689344 | K7Q-B0X        |   1 |   - |
++------------+----------------+-----+-----+
+| SURFACESTATION  1 | 1 with a commodity~ |
++------------+----------------+-----+-----+
+| 3806349056 | Colonia Hub    |   - |   1 |
++------------+----------------+-----+-----+
+   columns hidden to fit 48 cols: Body, Faction,
+   Economy, Dist (Ls), CBOYF
+   CBOYF =
+   Commodities/Blackmarket/Outfitting/shipYard/reFuel
+   service available | Imp,Exp = commodities
+   traded
