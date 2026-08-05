@@ -205,7 +205,18 @@ pub fn listing(
 ) -> Vec<Route> {
     let capacity = limits.top_n.saturating_mul(limits.shortlist_factor.max(1));
     let mut runners_up: TopN<RankKey, Route> = TopN::new(capacity.saturating_sub(1));
-    let mut seen: Vec<Vec<i64>> = vec![head.rank.stations.clone()];
+    // A set, not a `Vec`. `seen` grows to `RUNNER_UP_BUDGET` — two hundred
+    // thousand entries — and a linear `contains` over it is ~2e10 `Vec<i64>`
+    // comparisons: a **fixed forty-second stall, in complete silence, on every
+    // run large enough to saturate the budget**, which is about two hundred
+    // markets upward. It does not shrink with a narrower search, because the
+    // budget is a constant. Measured at 40.4 s for n=200 and 43.6 s for n=800.
+    //
+    // `rank.stations` is already canonically rotated by `RankKey::build`
+    // (report.rs) — a cycle has no start, so the smallest market id is rotated
+    // to the front — which is exactly what makes it a sound hash key.
+    let mut seen: std::collections::HashSet<Vec<i64>> =
+        std::collections::HashSet::from([head.rank.stations.clone()]);
     let mut routes = vec![head];
 
     for nodes in enumerate_cycles(graph, geometry, *stops.end(), RUNNER_UP_BUDGET) {
@@ -213,10 +224,9 @@ pub fn listing(
             continue;
         }
         let Some(route) = route_of(graph, geometry, &nodes) else { continue };
-        if seen.contains(&route.rank.stations) {
+        if !seen.insert(route.rank.stations.clone()) {
             continue;
         }
-        seen.push(route.rank.stations.clone());
         let key = route.rank.clone();
         runners_up.offer(
             key,
