@@ -1,0 +1,204 @@
+---
+source: crates/edm/tests/markets.rs
+expression: run.stdout
+---
+{
+  "request": {
+    "method": "GET",
+    "endpoint": "https://api.orerve.net/2.0/elite/starsystem",
+    "url": "https://api.orerve.net/2.0/elite/starsystem?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",
+    "headers": {
+      "encrypted": "1",
+      "fdev-retry": "0/2",
+      "fdev-season": "4",
+      "fdev-semver": "4.4.0.3",
+      "nonce": "000000000000",
+      "request-time": "12345000",
+      "user-agent": "EDGame/11.0/Win64"
+    },
+    "envelope": {
+      "cmdrId": "F1234567",
+      "language": "en",
+      "systemAddr": 3238296097059,
+      "cachedTimeStamp": 0,
+      "fTime": 1700000000,
+      "machineId": "machine-1",
+      "machineToken": "80 chars (hidden)",
+      "authToken": "2024 chars (hidden)"
+    },
+    "plaintextLength": 2236,
+    "nonce": "000000000000",
+    "frontierTime": 1700000000,
+    "requestTime": 12345000
+  },
+  "system": {
+    "name": "Colonia",
+    "address": 3238296097059,
+    "coordinates": {
+      "x": -9530.5,
+      "y": -910.28125,
+      "z": 19808.125
+    },
+    "via": "system name",
+    "station": null
+  },
+  "address": 3238296097059,
+  "addressParts": {
+    "massCode": 3,
+    "massCodeLetter": "d",
+    "boxelSize": 80,
+    "sector": {
+      "x": 31,
+      "y": 31,
+      "z": 34
+    },
+    "boxel": {
+      "x": 9,
+      "y": 4,
+      "z": 4
+    },
+    "index": 94,
+    "origin": {
+      "x": -9585,
+      "y": -985,
+      "z": 19735
+    }
+  },
+  "status": 200,
+  "payload": {
+    "starsystem": {
+      "starsystem": {
+        "minorFactions": {
+          "1234": {
+            "name": "Jaques"
+          }
+        }
+      },
+      "polities": {
+        "0": {
+          "controllingMinorFaction": 1234,
+          "markets": {
+            "3229009408": {
+              "id": 3229009408,
+              "name": "Jaques Station",
+              "poiType": "Starport",
+              "distFromSystem": 286,
+              "bodyName": "Colonia 2",
+              "imported": {
+                "a": 1,
+                "b": 1
+              },
+              "exported": {
+                "c": 1
+              },
+              "services": {
+                "commodities": "ok",
+                "blackmarket": "ok",
+                "refuel": "ok"
+              },
+              "economies": {
+                "0": {
+                  "name": "Tourism",
+                  "proportion": 1
+                }
+              }
+            },
+            "3229009409": {
+              "id": 3229009409,
+              "name": "Ohm City",
+              "poiType": "Outpost",
+              "distFromSystem": 417,
+              "bodyName": "Colonia 5",
+              "imported": {
+                "a": 1
+              },
+              "exported": {
+                "b": 1
+              },
+              "services": {
+                "commodities": "ok"
+              },
+              "economies": {
+                "0": {
+                  "name": "Industrial",
+                  "proportion": 1
+                }
+              }
+            },
+            "3229009410": {
+              "id": 3229009410,
+              "name": "Kinsey Orbital",
+              "poiType": "Starport",
+              "distFromSystem": 1200,
+              "imported": {
+                "a": 1
+              },
+              "exported": {
+                "b": 1,
+                "c": 1
+              },
+              "services": {
+                "commodities": "ok",
+                "outfitting": "ok"
+              }
+            },
+            "3229009411": {
+              "id": 3229009411,
+              "name": "Colonia Hub",
+              "poiType": "DockablePlanetStation",
+              "distFromSystem": 90,
+              "imported": {
+                "a": 1
+              },
+              "exported": {
+                "b": 1
+              },
+              "services": {
+                "commodities": "ok"
+              }
+            },
+            "3229009412": {
+              "id": 3229009412,
+              "name": "Centauri Depot",
+              "poiType": "Outpost",
+              "distFromSystem": 33,
+              "imported": {
+                "a": 1
+              },
+              "exported": {
+                "b": 1
+              },
+              "services": {
+                "commodities": "ok"
+              }
+            },
+            "3229009413": {
+              "id": 3229009413,
+              "name": "Idle Beacon",
+              "poiType": "Outpost",
+              "distFromSystem": 12,
+              "services": {
+                "refuel": "ok"
+              }
+            },
+            "3229009414": {
+              "id": 3229009414,
+              "name": "K3M-B4G",
+              "poiType": "FleetCarrier",
+              "distFromSystem": 5,
+              "imported": {
+                "a": 1
+              },
+              "exported": {
+                "b": 1
+              },
+              "services": {
+                "commodities": "ok"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+---
+source: crates/edm/tests/market_sweep.rs
+expression: run.stderr
+---
+GET /2.0/elite/market/list failed: HTTP 500 Internal Server Error
+GET /2.0/elite/market/list failed: HTTP 404 Not Found

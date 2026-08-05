@@ -1,0 +1,80 @@
+---
+source: crates/edm/tests/market_single.rs
+expression: run.stdout
+---
+{
+  "marketId": 4306502403,
+  "station": null,
+  "status": 200,
+  "eddn": null,
+  "payload": {
+    "id": 4306502403,
+    "credits": 1000000,
+    "debt": 0,
+    "allowsDumping": true,
+    "commodities": {
+      "128049204": {
+        "id": 128049204,
+        "name": "Gold",
+        "categoryname": "Metals",
+        "stock": 120,
+        "stockBracket": 2,
+        "buyPrice": 9000,
+        "sellPrice": 8900,
+        "fencePrice": 0,
+        "demand": 0,
+        "demandBracket": 0,
+        "meanPrice": 9500,
+        "consumer": 0,
+        "producer": 1,
+        "rare": 0,
+        "legality": ""
+      },
+      "128049205": {
+        "id": 128049205,
+        "name": "Silver",
+        "categoryname": "Metals",
+        "stock": 40,
+        "stockBracket": 1,
+        "buyPrice": 4600,
+        "sellPrice": 4550,
+        "fencePrice": 0,
+        "demand": 0,
+        "demandBracket": 0,
+        "meanPrice": 4800,
+        "consumer": 0,
+        "producer": 1,
+        "rare": 0,
+        "legality": ""
+      },
+      "128049669": {
+        "id": 128049669,
+        "name": "Biowaste",
+        "categoryname": "Waste",
+        "stock": 0,
+        "stockBracket": 0,
+        "buyPrice": 0,
+        "sellPrice": 60,
+        "fencePrice": 0,
+        "demand": 900,
+        "demandBracket": 3,
+        "meanPrice": 65,
+        "consumer": 1,
+        "producer": 0,
+        "rare": 0,
+        "legality": ""
+      }
+    },
+    "inventory": [
+      {
+        "commodity": "Gold",
+        "qty": 10,
+        "value": 90000,
+        "stolen": false,
+        "marked": 0,
+        "owner": 0,
+        "origin": 0
+      }
+    ]
+  }
+}

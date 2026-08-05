@@ -1,0 +1,53 @@
+---
+source: crates/edm/tests/trade.rs
+expression: run.stdout
+---
+{
+  "plan": {
+    "marketId": "4306502403",
+    "transactionType": "buy",
+    "items": [
+      {
+        "id": 128049204,
+        "name": "Gold"
+      },
+      {
+        "id": 128049205,
+        "name": "Silver"
+      }
+    ],
+    "fill": true,
+    "cargo": 100,
+    "stolen": false,
+    "watch": false,
+    "intervalMs": 1000,
+    "attemptLimit": 0
+  },
+  "outcome": "hold is full",
+  "rounds": 1,
+  "trades": [
+    {
+      "round": 1,
+      "commodity": "Gold",
+      "commodityId": 128049204,
+      "qty": 90,
+      "unitPrice": 9000,
+      "status": 200,
+      "cargoUsed": 100,
+      "credits": 1000000
+    }
+  ],
+  "credits": 1000000,
+  "cargoUsed": 100,
+  "inventory": [
+    {
+      "commodity": "Gold",
+      "qty": 100,
+      "value": 90000,
+      "stolen": false,
+      "marked": 0,
+      "owner": 0,
+      "origin": 0
+    }
+  ]
+}

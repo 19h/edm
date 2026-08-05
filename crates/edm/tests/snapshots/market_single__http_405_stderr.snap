@@ -1,0 +1,6 @@
+---
+source: crates/edm/tests/market_single.rs
+expression: run.stderr
+---
+GET /2.0/elite/market/list failed: HTTP 405 Method Not Allowed
+This endpoint accepts PUT, OPTIONS — retry with --method PUT
