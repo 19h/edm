@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod consts;
 pub mod domain;
 pub mod js;
 pub mod render;
