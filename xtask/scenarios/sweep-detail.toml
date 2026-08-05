@@ -1,0 +1,104 @@
+# `--detail` prints each market's full snapshot from *inside* the worker.
+#
+# The ordering is the whole point. `sweepMarkets` emits the snapshot at ts:1546,
+# immediately after that market's progress line and therefore in completion
+# order — not in a block after the pool has drained, and not in listing order.
+# One worker makes the two orders coincide, so this runs three so they cannot.
+#
+# Written because the first cut of the port had no hook for emitting from inside
+# the worker and collected the snapshots afterwards instead. That produced the
+# right set of lines in the wrong places, which is exactly the kind of thing a
+# suite with no `--detail` coverage would have shipped.
+why = "`--detail` renders every market's commodity table interleaved with the progress lines, in completion order (ts:1546). Two markets answer with different payloads at different delays so the interleaving is observable."
+argv = ["market", "Colonia", "--detail", "--concurrency", "3", "--carriers", "--all-markets"]
+
+[[route]]
+path = "/v2/system/name/Colonia"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-system.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-sweep.json"
+
+# Alpha answers slowly and Bravo quickly, so Bravo's snapshot must appear first
+# even though Alpha is enqueued first.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009401&"
+
+[[route.reply]]
+status = 200
+delay-ms = 120
+encode = "capi"
+payload-file = "payloads/market.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009402&"
+
+[[route.reply]]
+status = 200
+delay-ms = 10
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+# The rest carry distinct delays too: with three workers in flight the harness
+# insists no two replies share a completion instant, because a tie is resolved by
+# promise settlement in Bun and by worker index here, and those can differ.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009403&"
+
+[[route.reply]]
+status = 200
+delay-ms = 30
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009404&"
+
+[[route.reply]]
+status = 200
+delay-ms = 55
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009405&"
+
+[[route.reply]]
+status = 200
+delay-ms = 80
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009406&"
+
+[[route.reply]]
+status = 200
+delay-ms = 105
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009407&"
+
+[[route.reply]]
+status = 200
+delay-ms = 135
+encode = "capi"
+payload-file = "payloads/market-small.json"

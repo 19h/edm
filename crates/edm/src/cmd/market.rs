@@ -365,7 +365,18 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         url: &app.overrides.eddn_url,
         system_name: &resolved.system.name,
     });
+    // `--detail` renders from inside the worker, right after that market's
+    // progress line, which is where the original prints it (ts:1546).
+    let detail = |visit: &sweep::MarketVisit| {
+        if let Some(snapshot) = visit.snapshot() {
+            app.out.emit(&views::market_snapshot(
+                &snapshot,
+                &format!("MARKET  {} ({})", visit.name, js::js_number(visit.market_id)),
+            ));
+        }
+    };
     let cx = Cx {
+        detail: Some(&detail),
         origin: &app.overrides.origin,
         http: app.http,
         clock: &app.ports.clock,
@@ -394,22 +405,7 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     let snapshots: Vec<Option<MarketSnapshot<'_>>> =
         visits.iter().map(sweep::MarketVisit::snapshot).collect();
 
-    // DEVIATION, not a choice: `sweepMarkets` prints `--detail` snapshots from
-    // inside the worker (ts:1550), interleaved with the progress lines and in
-    // completion order. `crate::sweep::sweep` has no hook for that and belongs
-    // to another change, so they are emitted here instead — still before the
-    // SWEEP RESULTS table, but in listing order and after the last progress
-    // line. Reported rather than papered over.
-    if pool.detail && !pool.quiet {
-        for (visit, snapshot) in visits.iter().zip(&snapshots) {
-            if let Some(snapshot) = snapshot {
-                app.out.emit(&views::market_snapshot(
-                    snapshot,
-                    &format!("MARKET  {} ({})", visit.name, js::js_number(visit.market_id)),
-                ));
-            }
-        }
-    }
+
 
     if app.session.json {
         // ts:1658

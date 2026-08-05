@@ -20,7 +20,23 @@ so renumbering them is a breaking change to the test suite.
 | 6 | `edm_core::domain` | done — including the batch state machine |
 | 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
 | 11-12 | sweep and commands | sweep done; command entry points pending |
-| 13 | `cargo xtask parity` | **green — 64 of 64 scenarios byte-identical** |
+| 13 | `cargo xtask parity` | **green — 65 of 65 scenarios byte-identical** |
+
+## Known gaps
+
+Opt-in behaviour that is registered but not implemented. None affects the
+default path, and none is exercised by the harness.
+
+- **`EDM_STRICT_JSON=1`** is honoured at the command layer but not for the five
+  diagnostics inside `exchange::send`, which write through `Out` and would need
+  it to carry the flag.
+- **C23** — `--method connect/trace/track` and a non-ASCII `--user-agent` are
+  not rejected. No message was ever pinned for them.
+- **C9 (`EDM_EDDN_ONCE=1`)** and **`EDM_EDDN_BRACKET=passthrough`** have no
+  implementation; the second needs a slot in `eddn::build_message`.
+- **R86 reports the clamped delay.** `timeout_failure` reads a `Duration`, so a
+  `--timeout` above `INT32_MAX/1000` prints `1 ms` where the original prints the
+  raw value. C22's clamp itself is implemented.
 
 ## Measured deviations from the design
 

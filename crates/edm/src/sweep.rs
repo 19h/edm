@@ -91,6 +91,13 @@ pub struct Cx<'a, H, C, E> {
     pub request_time_override: Option<u32>,
     /// Set when `--eddn` or `--eddn-test` was given.
     pub eddn: Option<&'a EddnPublish<'a>>,
+    /// `--detail`: renders one market's full snapshot.
+    ///
+    /// Called from *inside* the worker, immediately after that market's
+    /// progress line, because the original prints it there (ts:1546) — so the
+    /// snapshots interleave with the progress lines in completion order rather
+    /// than arriving in a block afterwards.
+    pub detail: Option<&'a dyn Fn(&MarketVisit)>,
 }
 
 /// The EDDN side of a sweep.
@@ -442,6 +449,13 @@ pub async fn sweep<H: HttpTransport, C: Clock, E: Entropy>(
                         attempts: job.attempts,
                         eddn: visit.eddn.as_ref(),
                     }));
+                }
+
+                if let Some(render) = cx.detail
+                    && settings.detail
+                    && !settings.quiet
+                {
+                    render(&visit);
                 }
 
                 mine.push((job.index, visit));
