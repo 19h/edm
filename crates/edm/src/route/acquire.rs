@@ -1,0 +1,337 @@
+//! Reading a region's live prices, paced.
+//!
+//! One authenticated request per market, through the shared [`Pacer`] and the
+//! two-stage [`pool`]. The cache is consulted first, and what it answers is
+//! never sent — a market that was read four minutes ago is not read again.
+//!
+//! The output is deliberately a *pair*: what was read, and what was not. A
+//! market that could not be reached must never be indistinguishable from one
+//! that ranked badly, so [`Acquired::unreached`] is carried all the way to the
+//! coverage table rather than being logged and dropped.
+
+use std::cell::RefCell;
+
+use edm_core::ardent::ArdentStation;
+use edm_core::consts::{MARKET_LIST, STARSYSTEM};
+use edm_core::domain::MarketSnapshot;
+use edm_core::domain::starsystem::read_market_points;
+use edm_core::js;
+use edm_core::js::json::JsValue;
+
+use crate::capi::{self, Credentials, HeaderConfig, Stamp};
+use crate::exchange::SendOptions;
+use crate::net::HttpTransport;
+use crate::out::Out;
+use crate::ports::{Clock, Entropy, Fs, Timer};
+use crate::route::cache::{Cache, Hits};
+use crate::route::pacer::Pacer;
+use crate::route::pool::{self, Abandoned, Job, Outcome, Pool};
+use crate::sweep::next_stamp;
+
+/// One market's live listing.
+#[derive(Clone, Debug)]
+pub struct Listing {
+    pub market_id: f64,
+    pub station_name: String,
+    pub system_name: String,
+    /// The decrypted payload, kept whole so a snapshot can borrow from it.
+    pub document: JsValue,
+    /// When these prices were read. A cached listing carries the instant of the
+    /// *original* read, not of the run that reused it — a price is as old as
+    /// the price, whatever fetched it.
+    pub read_at_ms: f64,
+    pub from_cache: bool,
+}
+
+impl Listing {
+    /// The parsed listing, or `None` if the payload was not one.
+    #[must_use]
+    pub fn snapshot(&self) -> Option<MarketSnapshot<'_>> {
+        edm_core::domain::parse_market_snapshot(&self.document)
+    }
+}
+
+/// What a sweep reached, and what it did not.
+#[derive(Debug, Default)]
+pub struct Acquired {
+    pub listings: Vec<Listing>,
+    /// Markets in radius that were never read. Named in the coverage table.
+    pub unreached: Vec<Abandoned>,
+    pub cache: Hits,
+    pub tally: pool::Tally,
+}
+
+/// Everything the sweep needs that it cannot decide for itself.
+pub struct Cx<'a, H, C, E, F> {
+    pub http: &'a H,
+    pub clock: &'a C,
+    pub entropy: &'a E,
+    pub fs: &'a F,
+    pub out: &'a Out,
+    /// `EDM_ORIGIN_OVERRIDE`, or the Companion API's own origin.
+    ///
+    /// An argument rather than a constant, because a sweep that read the
+    /// constant would go to the live API while the harness believed it was
+    /// talking to a mock — a mistake this codebase has already made once.
+    pub origin: &'a str,
+    pub credentials: &'a Credentials,
+    pub headers: &'a HeaderConfig,
+    pub method_override: Option<&'a str>,
+    pub nonce_override: Option<edm_core::wire::Nonce>,
+    pub frontier_time_override: Option<f64>,
+    pub request_time_override: Option<u32>,
+    pub cache: &'a Cache,
+    pub workers: usize,
+    pub quiet: bool,
+    /// `--verify-systems`: read each system's `starsystem` payload and take
+    /// *its* market list, instead of Ardent's.
+    ///
+    /// Off by default. Step 0 established that the Companion API answers for a
+    /// market the commander is not docked at, which is what makes Ardent's
+    /// market ids usable directly — and a starsystem payload costs about
+    /// twenty-five market reads. What the read buys is a market Ardent has
+    /// never seen; the coverage block says so either way.
+    pub verify_systems: bool,
+    /// The language the `starsystem` read asks for, when it happens at all.
+    pub language: &'a str,
+}
+
+impl<H, C, E, F> std::fmt::Debug for Cx<'_, H, C, E, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cx")
+            .field("origin", &self.origin)
+            .field("workers", &self.workers)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Read every selected market, reusing the cache where it is still fresh.
+///
+/// The cache pass runs first and to completion, because it costs nothing and
+/// its result changes what the sweep is: a run that finds everything cached
+/// sends no requests at all, and must be able to say so before it starts.
+///
+/// Under `--verify-systems` the pool is seeded with **system** jobs instead,
+/// and each one's markets are queued the instant that system's payload lands —
+/// which is what the two-stage pool is for. Stage two is not a barrier behind
+/// stage one, so the pool stays saturated rather than idling while the last few
+/// systems trickle in.
+pub async fn sweep<H, C, E, F, T>(
+    cx: &Cx<'_, H, C, E, F>,
+    pacer: &Pacer<'_, C, T, E>,
+    markets: &[ArdentStation],
+    systems: &[(String, f64)],
+) -> Acquired
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+{
+    let now = cx.clock.now_ms();
+    let mut listings = Vec::with_capacity(markets.len());
+    let mut hits = Hits::default();
+    let mut to_poll = Vec::new();
+
+    if cx.verify_systems {
+        // Discovery comes from the Companion API itself, so nothing is known
+        // about which markets exist until the system reads land — and the cache
+        // cannot be consulted for markets nobody has named yet.
+        for (name, address) in systems {
+            to_poll.push(Job::System { name: name.clone(), address: *address });
+        }
+        let fresh = RefCell::new(Vec::<Listing>::new());
+        let pool = Pool { pacer, out: cx.out, workers: cx.workers, quiet: cx.quiet };
+        let (tally, unreached) = pool::run(&pool, to_poll, |job| {
+            let fresh = &fresh;
+            async move {
+                match job {
+                    Job::System { name, address } => read_system(cx, &name, address).await,
+                    Job::Market { market_id, station, system } => {
+                        poll(cx, market_id, &station, &system, fresh).await
+                    }
+                }
+            }
+        })
+        .await;
+        let mut found = fresh.into_inner();
+        found.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
+        return Acquired { listings: found, unreached, cache: hits, tally };
+    }
+
+    for market in markets {
+        let lookup = cx.cache.get(cx.fs, market.market_id, now);
+        lookup.tally(&mut hits);
+        match lookup.entry() {
+            Some(entry) => listings.push(Listing {
+                market_id: market.market_id,
+                station_name: market.station_name.clone(),
+                system_name: market.system_name.clone(),
+                document: entry.payload,
+                read_at_ms: entry.read_at_ms,
+                from_cache: true,
+            }),
+            None => to_poll.push(Job::Market {
+                market_id: market.market_id,
+                station: market.station_name.clone(),
+                system: market.system_name.clone(),
+            }),
+        }
+    }
+
+    let fresh = RefCell::new(Vec::<Listing>::new());
+    let pool = Pool { pacer, out: cx.out, workers: cx.workers, quiet: cx.quiet };
+    let (tally, unreached) = pool::run(&pool, to_poll, |job| {
+        let fresh = &fresh;
+        async move {
+            let Job::Market { market_id, station, system } = job else {
+                // The sweep seeds market jobs only; a system job here would be
+                // a programming error, not a runtime condition.
+                return Outcome::default();
+            };
+            poll(cx, market_id, &station, &system, fresh).await
+        }
+    })
+    .await;
+
+    listings.append(&mut fresh.into_inner());
+    // Deterministic order regardless of which worker finished first, so two
+    // runs over the same region rank identically.
+    listings.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
+
+    Acquired { listings, unreached, cache: hits, tally }
+}
+
+/// One `starsystem` read, whose market list becomes the pool's next stage.
+async fn read_system<H, C, E, F>(cx: &Cx<'_, H, C, E, F>, name: &str, address: f64) -> Outcome
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+{
+    let stamp: Stamp = next_stamp(
+        cx.clock,
+        cx.entropy,
+        cx.nonce_override,
+        cx.frontier_time_override,
+        cx.request_time_override,
+    );
+    let request = capi::prepare(
+        cx.origin,
+        STARSYSTEM,
+        cx.method_override,
+        capi::starsystem_fields(address, cx.language, 0.0, cx.credentials, stamp.frontier_time),
+        stamp,
+        cx.headers,
+    );
+    let exchange = crate::exchange::send(
+        cx.http,
+        cx.out,
+        &request,
+        false,
+        SendOptions { quiet: true, ignore_dry_run: false },
+        |_| {},
+        |exchange| crate::cmd::emit_response(cx.out, exchange),
+    )
+    .await;
+
+    let Some(exchange) = exchange else {
+        return Outcome { status: None, ok: false, ..Outcome::default() };
+    };
+    let retry_after = exchange.headers.get("retry-after");
+    let document = exchange.decrypted.as_deref().and_then(|text| JsValue::parse(text).ok());
+    let Some(JsValue::Obj(payload)) = document else {
+        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+    };
+
+    let follow_on = read_market_points(&payload)
+        .into_iter()
+        .map(|point| Job::Market {
+            market_id: point.market_id,
+            station: point.name.into_owned(),
+            system: name.to_owned(),
+        })
+        .collect();
+    Outcome { status: Some(exchange.status), retry_after, ok: true, follow_on }
+}
+
+/// One market poll.
+async fn poll<H, C, E, F>(
+    cx: &Cx<'_, H, C, E, F>,
+    market_id: f64,
+    station: &str,
+    system: &str,
+    fresh: &RefCell<Vec<Listing>>,
+) -> Outcome
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+{
+    let stamp: Stamp = next_stamp(
+        cx.clock,
+        cx.entropy,
+        cx.nonce_override,
+        cx.frontier_time_override,
+        cx.request_time_override,
+    );
+    let request = capi::prepare(
+        cx.origin,
+        MARKET_LIST,
+        cx.method_override,
+        capi::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
+        stamp,
+        cx.headers,
+    );
+
+    // Quiet, but not silent: `send` still prints the RESPONSE table when a
+    // quiet poll fails, because the headers are where the diagnosis is \[R74\].
+    // Passing a no-op for both would drop that block for every 429 in a sweep,
+    // which is precisely the failure a wide run needs to see.
+    let exchange = crate::exchange::send(
+        cx.http,
+        cx.out,
+        &request,
+        false,
+        SendOptions { quiet: true, ignore_dry_run: false },
+        |_| {},
+        |exchange| crate::cmd::emit_response(cx.out, exchange),
+    )
+    .await;
+
+    let Some(exchange) = exchange else {
+        // No status at all: a transport failure or a timeout, which
+        // `is_transient_status` treats as worth retrying.
+        return Outcome { status: None, ok: false, ..Outcome::default() };
+    };
+
+    let retry_after = exchange.headers.get("retry-after");
+    let document = exchange
+        .decrypted
+        .as_deref()
+        .and_then(|text| JsValue::parse(text).ok())
+        .filter(|doc| edm_core::domain::parse_market_snapshot(doc).is_some());
+
+    let Some(document) = document else {
+        // A 200 that does not decrypt to a market listing is not a success.
+        // Treating it as one would put an empty market in the graph and rank a
+        // route through it as unprofitable rather than as unread.
+        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+    };
+
+    let now = cx.clock.now_ms();
+    cx.cache.put(cx.fs, market_id, &document, now);
+    fresh.borrow_mut().push(Listing {
+        market_id,
+        station_name: station.to_owned(),
+        system_name: system.to_owned(),
+        document,
+        read_at_ms: now,
+        from_cache: false,
+    });
+
+    Outcome { status: Some(exchange.status), retry_after, ok: true, follow_on: Vec::new() }
+}

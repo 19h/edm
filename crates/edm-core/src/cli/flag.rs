@@ -112,6 +112,14 @@ pub enum Flag {
     Cache,
     Refresh,
     FastEstimate,
+    /// `--verify-systems`: read each system's Companion API `starsystem`
+    /// payload rather than trusting Ardent's market list.
+    ///
+    /// Off by default because it costs about twenty-five times what the market
+    /// reads it discovers do — a starsystem payload is ~500 KB against a
+    /// market's ~20 KB, and near Sol there is roughly one starport per system.
+    /// What it buys is a market Ardent has never seen, which is real but rare.
+    VerifySystems,
 }
 
 /// Which flag table a parse resolves names against.
@@ -127,7 +135,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 77] = [
+    pub const ALL: [Self; 78] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -205,6 +213,7 @@ impl Flag {
         Self::Cache,
         Self::Refresh,
         Self::FastEstimate,
+        Self::VerifySystems,
     ];
 
     /// How many distinct flags exist; the width of an [`crate::cli::Args`] slot
@@ -269,6 +278,7 @@ impl Flag {
             "cache" => Self::Cache,
             "refresh" => Self::Refresh,
             "fastestimate" => Self::FastEstimate,
+            "verifysystems" => Self::VerifySystems,
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
             _ => return None,
@@ -334,6 +344,7 @@ impl Flag {
             Self::Cache => "--cache",
             Self::Refresh => "--refresh",
             Self::FastEstimate => "--fast-estimate",
+            Self::VerifySystems => "--verify-systems",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the
             // canonical key, which for these is already the documented

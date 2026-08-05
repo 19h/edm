@@ -1383,3 +1383,15 @@ fn route_flags_do_not_leak_into_other_commands() {
     let error = parse(&argv).unwrap_err();
     assert_eq!(error.to_string(), "Unknown option --radius");
 }
+
+/// `route` reuses `--concurrency` rather than inventing a name, and takes the
+/// ported sweep's clamp with it. The two mean the same thing — how much
+/// latency is hidden — and a second name for it would be a second thing to get
+/// wrong.
+#[test]
+fn route_reuses_the_concurrency_flag_and_its_clamp() {
+    assert_eq!(route(&["route", "Sol"]).unwrap().workers, 5);
+    assert_eq!(route(&["route", "Sol", "--concurrency", "3"]).unwrap().workers, 3);
+    assert_eq!(route(&["route", "Sol", "--concurrency", "0"]).unwrap().workers, 1);
+    assert_eq!(route(&["route", "Sol", "--concurrency", "99"]).unwrap().workers, 16);
+}

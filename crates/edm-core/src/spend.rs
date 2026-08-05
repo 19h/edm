@@ -194,8 +194,17 @@ pub fn confirmation_message(estimate: &Estimate) -> String {
 /// A transfer range, rendered the way the plan table shows it.
 #[must_use]
 pub fn transfer_range(estimate: &Estimate) -> String {
-    let mib = |bytes: f64| js::format_integer(js::js_round(bytes / (1024.0 * 1024.0)));
-    format!("{}-{} MB", mib(estimate.bytes_low), mib(estimate.bytes_high))
+    // Kilobytes below a megabyte, because "0-0 MB" for a forty-kilobyte sweep
+    // is not a rounding artefact the reader should have to decode — and the
+    // small end of the range is exactly where a user is deciding whether the
+    // sweep is worth running at all.
+    const MB: f64 = 1024.0 * 1024.0;
+    if estimate.bytes_high < MB {
+        let kb = |bytes: f64| js::format_integer(js::js_round(bytes / 1024.0));
+        return format!("{}-{} KB", kb(estimate.bytes_low), kb(estimate.bytes_high));
+    }
+    let mb = |bytes: f64| js::format_integer(js::js_round(bytes / MB));
+    format!("{}-{} MB", mb(estimate.bytes_low), mb(estimate.bytes_high))
 }
 
 /// Wall clock, rendered coarsely because the estimate does not deserve

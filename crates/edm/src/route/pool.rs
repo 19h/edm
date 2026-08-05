@@ -29,7 +29,7 @@ use crate::route::pacer::Pacer;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Job {
     /// Read a system's `starsystem` payload.
-    System { name: String },
+    System { name: String, address: f64 },
     /// Read one market's listing.
     Market { market_id: f64, station: String, system: String },
 }
@@ -39,7 +39,7 @@ impl Job {
     #[must_use]
     pub fn label(&self) -> &str {
         match self {
-            Self::System { name } => name,
+            Self::System { name, .. } => name,
             Self::Market { station, .. } => station,
         }
     }
@@ -107,6 +107,12 @@ struct Ticket {
 /// pace or retry — both are this function's business, and doing either inside
 /// the closure would put two independent limiters on the same wire.
 ///
+/// The job arrives **by value**. A `Fn(&Job) -> Fut` cannot be written in
+/// today's Rust without boxing: `Fut` would have to be generic over the borrow's
+/// lifetime, which only a higher-ranked bound could say and only for a named
+/// future type. Cloning two `String`s per attempt is nothing beside the HTTP
+/// request the closure is about to make.
+///
 /// The return is the tally plus every job that was given up on. Those are the
 /// markets the coverage table must name: absent from the ranking because they
 /// were never read, not because they ranked low.
@@ -119,7 +125,7 @@ where
     C: Clock,
     T: Timer,
     E: Entropy,
-    F: Fn(&Job) -> Fut,
+    F: Fn(Job) -> Fut,
     Fut: Future<Output = Outcome>,
 {
     if seed.is_empty() {
@@ -168,7 +174,7 @@ where
                     // spent queued behind the rate limit is not that.
                     ticket.first_attempt_ms = pool.pacer.now_ms();
                 }
-                let outcome = attempt(&ticket.job).await;
+                let outcome = attempt(ticket.job.clone()).await;
 
                 if outcome.ok {
                     pool.pacer.observe_ok();
@@ -284,7 +290,11 @@ mod tests {
     }
 
     fn systems(names: &[&str]) -> Vec<Job> {
-        names.iter().map(|name| Job::System { name: (*name).to_owned() }).collect()
+        names
+            .iter()
+            .enumerate()
+            .map(|(n, name)| Job::System { name: (*name).to_owned(), address: n as f64 })
+            .collect()
     }
 
     fn market(id: f64, station: &str, system: &str) -> Job {

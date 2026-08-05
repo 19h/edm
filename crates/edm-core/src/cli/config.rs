@@ -979,6 +979,14 @@ pub struct RouteConfig {
     pub min_demand: f64,
 
     // Spending.
+    /// Workers behind the pacer.
+    ///
+    /// `--concurrency`, the same flag and the same clamp the ported sweep
+    /// uses, because it means the same thing. It decides only how much
+    /// per-request latency is hidden: the rate limit is what bounds the run,
+    /// and eight workers behind a four-per-second bucket still issue four per
+    /// second.
+    pub workers: u32,
     pub rate_per_second: f64,
     pub max_requests: f64,
     pub confirmed: bool,
@@ -988,6 +996,9 @@ pub struct RouteConfig {
     pub cache_dir: Option<String>,
     pub ardent_queries: u32,
     pub fast_estimate: bool,
+    /// `--verify-systems`. See [`Flag::VerifySystems`] — off by default, and
+    /// the reason the default plan prices no starsystem reads at all.
+    pub verify_systems: bool,
 
     pub dry_run: bool,
     pub json: bool,
@@ -1063,6 +1074,12 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         min_profit: cli.optional_number(Flag::MinProfit)?.unwrap_or(DEFAULT_MIN_PROFIT),
         min_supply: cli.optional_number(Flag::MinSupply)?.unwrap_or(1.0),
         min_demand: cli.optional_number(Flag::MinDemand)?.unwrap_or(1.0),
+        workers: {
+            let declared =
+                cli.optional_number(Flag::Concurrency)?.unwrap_or(f64::from(DEFAULT_CONCURRENCY));
+            // Clamped into 1..=MAX_CONCURRENCY, so the cast is exact.
+            js::js_max(1.0, js::js_min(f64::from(MAX_CONCURRENCY), declared)) as u32
+        },
         rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
         max_requests: cli
             .optional_number(Flag::MaxRequests)?
@@ -1076,6 +1093,7 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
             .optional_number(Flag::ArdentQueries)?
             .unwrap_or(DEFAULT_ARDENT_QUERIES) as u32,
         fast_estimate: cli.switch_value(Flag::FastEstimate, false)?,
+        verify_systems: cli.switch_value(Flag::VerifySystems, false)?,
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         json: cli.switch_value(Flag::Json, false)?,
         detail: cli.switch_value(Flag::Detail, false)?,

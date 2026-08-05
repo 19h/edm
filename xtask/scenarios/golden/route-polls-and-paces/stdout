@@ -11,7 +11,17 @@
 | markets to poll         | 2                                              |
 | CAPI requests           | 2  (one per market)                            |
 | estimated transfer      | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
-| pacing                  | 4 req/s                                        |
+| pacing                  | 2 req/s                                        |
 | estimated wall clock    | 1s                                             |
 | ceiling                 | 2 of 2,000   (--max-requests to raise)         |
 +-------------------------+------------------------------------------------+
+== ROUTE COVERAGE ==================================================================================
++----------------+--------------+
+| Field          | Value        |
++================+==============+
+| markets polled | 2 of 2       |
+| markets priced | 2            |
+| requests sent  | 2            |
+| elapsed        | 1s           |
++----------------+--------------+
+   every price below was read live from the Companion API during this run

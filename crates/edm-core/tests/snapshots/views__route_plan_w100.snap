@@ -8,7 +8,7 @@ expression: "emit(blocks, width)"
 +=========================+================================================+
 | reference               | Sol                                            |
 | radius                  | 20 Ly (complete, 1 Ardent query)               |
-| systems                 | 412 in radius, 118 worth reading               |
+| systems                 | 412 in radius, 118 to verify                   |
 | stations known          | 1,230 (Ardent)                                 |
 |   - Odyssey settlements | -771   (--settlements to keep)                 |
 |   - fleet carriers      | -194   (--include-carriers to keep)            |

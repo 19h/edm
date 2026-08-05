@@ -112,6 +112,17 @@ impl<'a> Cli<'a> {
         self.args
     }
 
+    /// One environment variable, read through the snapshot rather than the
+    /// process.
+    ///
+    /// Every environment read in this program goes through here or through
+    /// [`Self::optional_value`], which is what makes `EnvSnapshot`'s first-wins
+    /// rule and the parity harness's scrubbing apply to all of them \[R55\].
+    #[must_use]
+    pub fn env(&self, name: &str) -> Option<&'a str> {
+        self.env.get(name)
+    }
+
     /// `optionalValue` (`market-request.ts:980`).
     ///
     /// Three things here are easy to get wrong. The stored value is trimmed on

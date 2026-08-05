@@ -15,6 +15,7 @@
 
 use edm_core::ardent::{self, Lookup, ReferenceSystem};
 use edm_core::cli::config::RouteConfig;
+use edm_core::pace::{Bucket, Budget};
 use edm_core::render::views::{self, RouteCoverage};
 use edm_core::select;
 use edm_core::spend::{Counts, SizePrior};
@@ -22,14 +23,18 @@ use edm_core::spend::{Counts, SizePrior};
 use crate::ardent::ArdentClient;
 use crate::cmd::{App, CmdResult};
 use crate::net::HttpTransport;
-use crate::ports::{Clock, Entropy, Fs};
+use crate::ports::{Clock, Entropy, Fs, Timer};
+use crate::route::acquire;
+use crate::route::cache::Cache;
 use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
+use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
 
 /// Run the command.
-pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
+    timer: &T,
 ) -> CmdResult {
     let out = app.out;
     let ardent = ArdentClient::new(app.http, &app.overrides.ardent_base);
@@ -54,8 +59,18 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     };
 
     let selection = select::select(stations, config, &centre.coordinates);
-    let systems_to_read =
-        if config.fast_estimate { systems_with_markets } else { systems_holding(&selection) };
+    // Zero unless `--verify-systems`. Ardent's market ids are usable directly —
+    // step 0 established that the Companion API answers for a market the
+    // commander is not docked at — and a starsystem payload is ~500 KB against
+    // a market's ~20 KB, so reading one per system to rediscover ids we already
+    // have would be twenty-five times the transfer for the same prices.
+    let systems_to_read = if !config.verify_systems {
+        0
+    } else if config.fast_estimate {
+        systems_with_markets
+    } else {
+        systems_holding(&selection)
+    };
 
     let survey = Survey {
         complete_to_ly: enumeration.complete_to_ly,
@@ -75,16 +90,101 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return Ok(());
     }
 
-    // The sweep itself is not yet wired; a run that reaches here has been
-    // priced and permitted and has sent nothing.
+    // Everything above this line is free. Everything below it costs a request.
+    // Validated once, here, rather than per request: a malformed `--nonce`
+    // must fail before a single market is polled, not on the hundredth.
+    let stamp_overrides = app.stamp_overrides()?;
+    // `--language` reaches the wire unvalidated, so a non-ASCII value changes
+    // the envelope's byte length \[R65\]. Read once, before the sweep, so that
+    // is a single decision rather than one per system.
+    let query = edm_core::cli::config::starsystem_query(
+        &app.cli,
+        edm_core::cli::config::CachedTimestamp::SweepZero,
+    )
+    .map_err(|error| error.message().to_owned())?;
+    let started_ms = app.ports.clock.now_ms();
+    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &app.ports.entropy);
+    let sweep_cx = acquire::Cx {
+        http: app.http,
+        clock: &app.ports.clock,
+        entropy: &app.ports.entropy,
+        fs: &app.ports.fs,
+        out,
+        origin: &app.overrides.origin,
+        credentials: &app.credentials,
+        headers: &app.headers,
+        method_override: app.session.method_override.as_deref(),
+        nonce_override: stamp_overrides.nonce,
+        frontier_time_override: stamp_overrides.frontier_time,
+        request_time_override: stamp_overrides.request_time,
+        cache: &cache_for(app, config),
+        workers: config.workers as usize,
+        quiet: config.json,
+        verify_systems: config.verify_systems,
+        language: &query.language,
+    };
+    // Only the systems that still hold a candidate market are worth an
+    // authoritative read; the rest were emptied by the filter and a 500 KB
+    // payload would confirm nothing.
+    let systems: Vec<(String, f64)> = holding_systems(&enumeration, &selection);
+    let acquired = acquire::sweep(&sweep_cx, &pacer, &selection.keep, &systems).await;
+
+    let spent = pacer.spent();
     let coverage = RouteCoverage {
         systems_total: survey.counts.systems_to_read,
+        systems_read: survey.counts.systems_to_read,
+        systems_failed: 0,
         markets_found: selection.keep.len(),
+        markets_polled: acquired.listings.len(),
+        markets_priced: acquired.listings.iter().filter(|l| l.snapshot().is_some()).count(),
+        markets_failed: acquired.unreached.len(),
+        cache_hits: acquired.cache.fresh,
+        requests_sent: spent.requests,
+        throttled: spent.throttled,
+        elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
         truncated_to_ly: enumeration.truncated.then_some(enumeration.complete_to_ly),
-        ..RouteCoverage::default()
+        breaker_tripped: pacer.tripped().is_some(),
     };
     out.emit(&views::route_coverage(&coverage));
+
+    // A market in radius that was never read is not a market that ranked
+    // badly, and the exit code says so.
+    if !acquired.unreached.is_empty() || coverage.breaker_tripped {
+        out.set_exit(crate::out::EXIT_FAILURE);
+    }
     Ok(())
+}
+
+/// The pacing a run is built with.
+fn pacing(config: &RouteConfig) -> Pacing {
+    Pacing {
+        bucket: Bucket {
+            rate: config.rate_per_second,
+            // One burst token, not a bucketful: a wide sweep that opened with
+            // sixteen simultaneous requests would look exactly like the abuse
+            // the rate limit exists to stop, and the burst buys nothing when
+            // there are a thousand markets to get through.
+            burst: 1.0,
+            min_rate: edm_core::js::js_min(config.rate_per_second, 0.5),
+        },
+        budget: Budget::default(),
+        ..Pacing::default()
+    }
+}
+
+/// Where this run's cache lives, and how it is used.
+///
+/// The two environment variables come from the run's own [`EnvSnapshot`], not
+/// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
+/// harness* \[R55\]. Reading the process environment directly here would give
+/// the cache a home the rest of the program cannot see.
+fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
+    let root = Cache::locate(
+        app.cli.env("XDG_CACHE_HOME"),
+        app.cli.env("HOME"),
+        config.cache_dir.as_deref(),
+    );
+    Cache::new(root, config.max_age_minutes, config.cache, config.refresh)
 }
 
 /// The reference system, as a point to enumerate around.
@@ -124,6 +224,22 @@ async fn gather<H: HttpTransport>(
         stations.append(&mut found);
     }
     (stations, answered)
+}
+
+/// The systems `--verify-systems` reads, with the addresses those reads need.
+fn holding_systems(
+    enumeration: &discover::Enumeration,
+    selection: &select::Selection,
+) -> Vec<(String, f64)> {
+    let mut wanted: Vec<&str> = selection.keep.iter().map(|s| s.system_name.as_str()).collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    enumeration
+        .systems
+        .iter()
+        .filter(|system| wanted.binary_search(&system.name.as_str()).is_ok())
+        .map(|system| (system.name.clone(), system.address))
+        .collect()
 }
 
 /// How many systems still hold a market worth reading.

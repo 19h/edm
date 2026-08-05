@@ -773,3 +773,63 @@ fn a_complete_sweep_carries_no_warnings() {
 fn an_empty_region_makes_no_claim_about_prices() {
     assert!(views::RouteCoverage::default().notes().is_empty());
 }
+
+/// A sweep that reads no starsystem payloads — the default — must not print a
+/// row about how many of them it read. "0 of 0" is a row about a decision, not
+/// a measurement, and it invites the reader to hunt for a failure.
+#[test]
+fn coverage_omits_the_system_row_when_no_system_was_read() {
+    let coverage = views::RouteCoverage {
+        markets_found: 2,
+        markets_polled: 2,
+        markets_priced: 2,
+        requests_sent: 2,
+        ..views::RouteCoverage::default()
+    };
+    let text = emit(&views::route_coverage(&coverage), 200);
+    assert!(!text.contains("systems read"), "{text}");
+    assert!(text.contains("markets polled | 2 of 2"), "{text}");
+}
+
+/// A forty-kilobyte sweep must not be priced as "0-0 MB". The small end of the
+/// range is exactly where a user decides whether to run at all.
+#[test]
+fn a_small_sweep_is_priced_in_kilobytes() {
+    use edm_core::spend::{Counts, Estimate, SizePrior};
+    let estimate = Estimate::build(
+        Counts {
+            systems: 3,
+            systems_to_read: 0,
+            stations_known: 4,
+            markets_to_poll: 2,
+            cached_fresh: 0,
+        },
+        Vec::new(),
+        4.0,
+        &SizePrior::default(),
+    );
+    assert_eq!(edm_core::spend::transfer_range(&estimate), "28-52 KB");
+}
+
+/// And the default plan says nothing about starsystem reads it will not make.
+#[test]
+fn the_default_plan_does_not_mention_starsystem_reads() {
+    use edm_core::spend::{Counts, Estimate, SizePrior};
+    let estimate = Estimate::build(
+        Counts {
+            systems: 412,
+            systems_to_read: 0,
+            stations_known: 1_230,
+            markets_to_poll: 157,
+            cached_fresh: 0,
+        },
+        Vec::new(),
+        4.0,
+        &SizePrior::default(),
+    );
+    let text = cells(&route_plan_blocks(&estimate)).concat().join("\n");
+    assert!(text.contains("157  (one per market)"), "{text}");
+    assert!(text.contains("412 in radius"), "{text}");
+    assert!(!text.contains("starsystem"), "{text}");
+    assert!(!text.contains("worth reading"), "{text}");
+}

@@ -1,0 +1,64 @@
+# route-polls-and-paces
+why = "The acquisition path end to end: Ardent proposes two starports, the gate permits three requests, and both markets are polled through the pacer. `expect-frontier-requests = 3` counts the starsystem read and the two market reads, and `expect-min-gap-ms` proves the pacer paced them rather than firing all three at once — the failure the original has, where a 429 is requeued immediately with no delay and no header read."
+argv = ["route", "Sol", "--radius", "10", "--rps", "2", "--no-cache", "--concurrency", "2"]
+oracle = "none"
+expect-frontier-requests = 2
+expect-min-gap-ms = 400
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/nearby"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-nearby-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Alpha%20Centauri/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Barnard's%20Star/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+# Both surviving starports answer with a listing.
+[[route]]
+path = "/2.0/elite/market/list"
+
+# Distinct delays because two workers can hold a market read at once, so the
+# completion order would otherwise be a race.
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+delay-ms = 30
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+delay-ms = 60

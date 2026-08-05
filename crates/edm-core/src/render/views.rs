@@ -787,11 +787,17 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         field_row("radius", coverage),
         field_row(
             "systems",
-            format!(
-                "{} in radius, {} worth reading",
-                int(estimate.systems as f64),
-                int(estimate.systems_to_read as f64)
-            ),
+            if estimate.systems_to_read == 0 {
+                // Not "0 worth reading": by default no system is read at all,
+                // and a zero here would read as "the filter emptied them".
+                format!("{} in radius", int(estimate.systems as f64))
+            } else {
+                format!(
+                    "{} in radius, {} to verify",
+                    int(estimate.systems as f64),
+                    int(estimate.systems_to_read as f64)
+                )
+            },
         ),
         field_row("stations known", format!("{} (Ardent)", int(estimate.stations_known as f64))),
     ];
@@ -808,14 +814,22 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
     if estimate.cached_fresh > 0 {
         rows.push(field_row("cached and still fresh", int(estimate.cached_fresh as f64)));
     }
+    // The split is only worth showing when there are two kinds. By default a
+    // sweep reads no starsystem payloads at all, and "= 0 starsystem + 135
+    // market" would invite the reader to look for a decision that was not
+    // taken here.
     rows.push(field_row(
         "CAPI requests",
-        format!(
-            "{}  = {} starsystem + {} market",
-            int(estimate.requests),
-            int(estimate.systems_to_read as f64),
-            int(estimate.markets_to_poll as f64)
-        ),
+        if estimate.systems_to_read == 0 {
+            format!("{}  (one per market)", int(estimate.requests))
+        } else {
+            format!(
+                "{}  = {} starsystem + {} market",
+                int(estimate.requests),
+                int(estimate.systems_to_read as f64),
+                int(estimate.markets_to_poll as f64)
+            )
+        },
     ));
     rows.push(field_row(
         "estimated transfer",
@@ -846,11 +860,28 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
 pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
     use crate::js::format_integer as int;
 
-    let mut rows = vec![
-        field_row("systems read", format!("{} of {}", int(coverage.systems_read as f64), int(coverage.systems_total as f64))),
-        field_row("markets polled", format!("{} of {}", int(coverage.markets_polled as f64), int(coverage.markets_found as f64))),
-        field_row("markets priced", int(coverage.markets_priced as f64)),
-    ];
+    let mut rows = Vec::new();
+    // Only when systems were read at all: `--verify-systems` is off by
+    // default, and "0 of 0" is a row about a decision, not a measurement.
+    if coverage.systems_total > 0 {
+        rows.push(field_row(
+            "systems read",
+            format!(
+                "{} of {}",
+                int(coverage.systems_read as f64),
+                int(coverage.systems_total as f64)
+            ),
+        ));
+    }
+    rows.push(field_row(
+        "markets polled",
+        format!(
+            "{} of {}",
+            int(coverage.markets_polled as f64),
+            int(coverage.markets_found as f64)
+        ),
+    ));
+    rows.push(field_row("markets priced", int(coverage.markets_priced as f64)));
     if coverage.systems_failed > 0 {
         rows.push(field_row("systems failed", int(coverage.systems_failed as f64)));
     }

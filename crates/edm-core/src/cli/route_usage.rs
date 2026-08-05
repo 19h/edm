@@ -47,6 +47,11 @@ Which markets (all of these prune before anything is sent)
   --settlements            Odyssey settlements are excluded by default; they
                            cannot berth a large ship at all
   --min-supply <n>         default 1        --min-demand <n>   default 1
+  --verify-systems         read each system's own market list from the Companion
+                           API instead of trusting Ardent's. Authoritative, and
+                           about 25x the transfer: a starsystem payload is
+                           ~500 KB against a market's ~20 KB, and it exists to
+                           find a market Ardent has never seen
 
 Spending
   Every market in range costs one authenticated request. The plan is printed
