@@ -1,5 +1,6 @@
 ---
 source: crates/edm-core/tests/views.rs
+assertion_line: 42
 expression: "emit(blocks, width)"
 ---
 == ROUTE COVERAGE ==============================

@@ -16,6 +16,6 @@ expression: "emit(blocks, width)"
 | throttled      | 3 (429 or 503) |
 | elapsed        | 71s            |
 +----------------+----------------+
-   every price below was read live from the Companion API during this run
+   22 of 149 prices came from the cache rather than this run; --refresh re-reads them
    6 markets in radius were not reached and are absent from the ranking, not ranked low
    2 systems failed, so any market in them is unknown to this run

@@ -35,17 +35,24 @@ pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
 /// command \[C25\], and these widths were chosen for its own content.
 ///
 /// `Stops` is the only column with a floor, so it is the only one squeezed;
-/// the rest are dropped whole, and `Guarantee` goes last-but-one because a
-/// claim about the search is worth more than a distance. `Rate` is never
-/// dropped: it is what the ranking is *by*.
+/// the rest are dropped whole.
+///
+/// **`Rate` and `Claim` both have priority zero, so neither is ever dropped.**
+/// That is the same rule `Route::rate` enforces in Rust — the number is only
+/// reachable together with the guarantee that qualifies it — carried into the
+/// table, where it is otherwise very easy to lose. The first live run of this
+/// command dropped `Claim` to fit an ordinary 100-column terminal and printed
+/// twenty rates with no statement of what was proved about any of them, which
+/// is the failure this arrangement exists to prevent. `Cr/h lap 1` goes first
+/// because it is the same quantity measured differently.
 pub const ROUTE_COLUMNS: &[Column] = &[
     Column::new("rank", "#").right(),
     Column::new("stops", "Stops").min_width(20),
-    Column::new("profit", "Profit").right().priority(2),
+    Column::new("profit", "Profit").right().priority(3),
     Column::new("rate", "Cr/h").right(),
-    Column::new("first", "Cr/h lap 1").right().priority(3),
-    Column::new("time", "Lap").right().priority(1),
-    Column::new("claim", "Claim").priority(4),
+    Column::new("first", "Cr/h lap 1").right().priority(4),
+    Column::new("time", "Lap").right().priority(2),
+    Column::new("claim", "Claim"),
 ];
 
 /// One leg per row, for `--detail`.

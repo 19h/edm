@@ -615,6 +615,18 @@ fn execute(
         }
     }
     command.env("COLUMNS", &scenario.columns);
+    // A cache directory of this side's own.
+    //
+    // `route` caches market listings under `$XDG_CACHE_HOME`, and without this
+    // every scenario would read and write the developer's real `~/.cache` —
+    // so one scenario's sweep would silently change what the next one sends.
+    // It was found the honest way: `route-ceiling-refuses` began proceeding
+    // past a ceiling because an earlier scenario had already cached one of the
+    // two markets it was counting. A test suite that writes to a home
+    // directory is also just bad manners.
+    let cache = dir.join("cache");
+    std::fs::create_dir_all(&cache)?;
+    command.env("XDG_CACHE_HOME", &cache);
     for (name, value) in credentials().into_iter().chain(stamp()) {
         command.env(name, value);
     }

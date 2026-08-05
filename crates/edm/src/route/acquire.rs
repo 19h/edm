@@ -105,11 +105,53 @@ impl<H, C, E, F> std::fmt::Debug for Cx<'_, H, C, E, F> {
     }
 }
 
-/// Read every selected market, reusing the cache where it is still fresh.
+/// What the cache already answers, and what is left to buy.
 ///
-/// The cache pass runs first and to completion, because it costs nothing and
-/// its result changes what the sweep is: a run that finds everything cached
-/// sends no requests at all, and must be able to say so before it starts.
+/// Split out from [`sweep`] and run **before the spend gate**, because its
+/// result changes what the sweep costs: a run that finds everything cached
+/// sends no requests at all, and a plan that priced twenty-two requests and
+/// then sent none is a plan nobody can check. It costs nothing but a few file
+/// reads, so there is no reason to guess instead.
+#[derive(Debug, Default)]
+pub struct Prepared {
+    /// Already known, and still fresh.
+    pub cached: Vec<Listing>,
+    /// One job per market that has to be read.
+    pub to_poll: Vec<Job>,
+    pub hits: Hits,
+}
+
+/// Consult the cache for every selected market.
+pub fn prepare<F: Fs>(
+    cache: &Cache,
+    fs: &F,
+    markets: &[ArdentStation],
+    now_ms: f64,
+) -> Prepared {
+    let mut prepared = Prepared { cached: Vec::with_capacity(markets.len()), ..Prepared::default() };
+    for market in markets {
+        let lookup = cache.get(fs, market.market_id, now_ms);
+        lookup.tally(&mut prepared.hits);
+        match lookup.entry() {
+            Some(entry) => prepared.cached.push(Listing {
+                market_id: market.market_id,
+                station_name: market.station_name.clone(),
+                system_name: market.system_name.clone(),
+                document: entry.payload,
+                read_at_ms: entry.read_at_ms,
+                from_cache: true,
+            }),
+            None => prepared.to_poll.push(Job::Market {
+                market_id: market.market_id,
+                station: market.station_name.clone(),
+                system: market.system_name.clone(),
+            }),
+        }
+    }
+    prepared
+}
+
+/// Read every market the cache could not answer for.
 ///
 /// Under `--verify-systems` the pool is seeded with **system** jobs instead,
 /// and each one's markets are queued the instant that system's payload lands —
@@ -119,7 +161,7 @@ impl<H, C, E, F> std::fmt::Debug for Cx<'_, H, C, E, F> {
 pub async fn sweep<H, C, E, F, T>(
     cx: &Cx<'_, H, C, E, F>,
     pacer: &Pacer<'_, C, T, E>,
-    markets: &[ArdentStation],
+    prepared: Prepared,
     systems: &[(String, f64)],
 ) -> Acquired
 where
@@ -129,15 +171,17 @@ where
     F: Fs,
     T: Timer,
 {
-    let now = cx.clock.now_ms();
-    let mut listings = Vec::with_capacity(markets.len());
-    let mut hits = Hits::default();
-    let mut to_poll = Vec::new();
+    let Prepared { cached: mut listings, mut to_poll, hits } = prepared;
 
     if cx.verify_systems {
         // Discovery comes from the Companion API itself, so nothing is known
         // about which markets exist until the system reads land — and the cache
         // cannot be consulted for markets nobody has named yet.
+        // Discovery comes from the Companion API itself here, so the cache's
+        // per-market answers cannot be used: nothing is known about which
+        // markets exist until the system reads land.
+        to_poll.clear();
+        listings.clear();
         for (name, address) in systems {
             to_poll.push(Job::System { name: name.clone(), address: *address });
         }
@@ -158,26 +202,6 @@ where
         let mut found = fresh.into_inner();
         found.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
         return Acquired { listings: found, unreached, cache: hits, tally };
-    }
-
-    for market in markets {
-        let lookup = cx.cache.get(cx.fs, market.market_id, now);
-        lookup.tally(&mut hits);
-        match lookup.entry() {
-            Some(entry) => listings.push(Listing {
-                market_id: market.market_id,
-                station_name: market.station_name.clone(),
-                system_name: market.system_name.clone(),
-                document: entry.payload,
-                read_at_ms: entry.read_at_ms,
-                from_cache: true,
-            }),
-            None => to_poll.push(Job::Market {
-                market_id: market.market_id,
-                station: market.station_name.clone(),
-                system: market.system_name.clone(),
-            }),
-        }
     }
 
     let fresh = RefCell::new(Vec::<Listing>::new());

@@ -946,11 +946,26 @@ impl RouteCoverage {
     pub fn notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
 
+        // What was actually read, not what a sweep usually does. A run served
+        // entirely from the cache printing "read live during this run" is the
+        // exact class of untruth the rest of this table exists to prevent —
+        // and it is what the second live run of this command produced.
+        let fresh = self.markets_priced.saturating_sub(self.cache_hits);
         if self.markets_priced > 0 {
-            notes.push(
-                "every price below was read live from the Companion API during this run".to_owned(),
-            );
+            notes.push(if self.cache_hits == 0 {
+                "every price below was read live from the Companion API during this run".to_owned()
+            } else if fresh == 0 {
+                "every price below came from the cache, not from this run; --refresh re-reads them"
+                    .to_owned()
+            } else {
+                format!(
+                    "{} of {} prices came from the cache rather than this run; --refresh re-reads them",
+                    crate::js::format_integer(self.cache_hits as f64),
+                    crate::js::format_integer(self.markets_priced as f64),
+                )
+            });
         }
+
         if self.markets_failed > 0 {
             let (count, verb) = plural(self.markets_failed, "market", "was", "were");
             notes.push(format!(

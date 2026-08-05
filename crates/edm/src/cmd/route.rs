@@ -66,6 +66,17 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     };
 
     let selection = select::select(stations, config, &centre.coordinates);
+
+    // Before the gate, not after it: the cache decides how many requests the
+    // sweep will actually send, and a plan that priced twenty-two and then
+    // sent none is a plan nobody can check. A few file reads.
+    let cache = cache_for(app, config);
+    let prepared = acquire::prepare(
+        &cache,
+        &app.ports.fs,
+        &selection.keep,
+        app.ports.clock.now_ms(),
+    );
     // Zero unless `--verify-systems`. Ardent's market ids are usable directly —
     // step 0 established that the Companion API answers for a market the
     // commander is not docked at — and a starsystem payload is ~500 KB against
@@ -87,7 +98,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             systems_to_read,
             stations_known: selection.considered,
             markets_to_poll: selection.keep.len(),
-            cached_fresh: 0,
+            cached_fresh: prepared.hits.fresh,
         },
         exclusions: selection.exclusions.clone(),
     };
@@ -132,7 +143,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         nonce_override: stamp_overrides.nonce,
         frontier_time_override: stamp_overrides.frontier_time,
         request_time_override: stamp_overrides.request_time,
-        cache: &cache_for(app, config),
+        cache: &cache,
         workers: config.workers as usize,
         quiet: config.json,
         verify_systems: config.verify_systems,
@@ -142,24 +153,17 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // authoritative read; the rest were emptied by the filter and a 500 KB
     // payload would confirm nothing.
     let systems: Vec<(String, f64)> = holding_systems(&enumeration, &selection);
-    let acquired = acquire::sweep(&sweep_cx, &pacer, &selection.keep, &systems).await;
+    let acquired = acquire::sweep(&sweep_cx, &pacer, prepared, &systems).await;
 
-    let spent = pacer.spent();
-    let coverage = RouteCoverage {
-        systems_total: survey.counts.systems_to_read,
-        systems_read: survey.counts.systems_to_read,
-        systems_failed: 0,
-        markets_found: selection.keep.len(),
-        markets_polled: acquired.listings.len(),
-        markets_priced: acquired.listings.iter().filter(|l| l.snapshot().is_some()).count(),
-        markets_failed: acquired.unreached.len(),
-        cache_hits: acquired.cache.fresh,
-        requests_sent: spent.requests,
-        throttled: spent.throttled,
-        elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
-        truncated_to_ly: enumeration.truncated.then_some(enumeration.complete_to_ly),
+    let coverage = coverage_of(&Measured {
+        survey: &survey,
+        selection: &selection,
+        acquired: &acquired,
+        enumeration: &enumeration,
+        spent: pacer.spent(),
         breaker_tripped: pacer.tripped().is_some(),
-    };
+        elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
+    });
     // Under `--json` the coverage block is inside the document instead; on
     // stderr it would be the same information twice.
     if !config.json {
@@ -174,6 +178,36 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         out.set_exit(crate::out::EXIT_FAILURE);
     }
     Ok(())
+}
+
+/// Everything the coverage block is assembled from.
+struct Measured<'a> {
+    survey: &'a Survey,
+    selection: &'a select::Selection,
+    acquired: &'a acquire::Acquired,
+    enumeration: &'a discover::Enumeration,
+    spent: crate::route::pacer::Spent,
+    breaker_tripped: bool,
+    elapsed_seconds: f64,
+}
+
+/// What the run reached, and what it did not.
+fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
+    RouteCoverage {
+        systems_total: m.survey.counts.systems_to_read,
+        systems_read: m.survey.counts.systems_to_read,
+        systems_failed: 0,
+        markets_found: m.selection.keep.len(),
+        markets_polled: m.acquired.listings.len(),
+        markets_priced: m.acquired.listings.iter().filter(|l| l.snapshot().is_some()).count(),
+        markets_failed: m.acquired.unreached.len(),
+        cache_hits: m.acquired.cache.fresh,
+        requests_sent: m.spent.requests,
+        throttled: m.spent.throttled,
+        elapsed_seconds: m.elapsed_seconds,
+        truncated_to_ly: m.enumeration.truncated.then_some(m.enumeration.complete_to_ly),
+        breaker_tripped: m.breaker_tripped,
+    }
 }
 
 /// Solve, and print what the search will actually claim.
