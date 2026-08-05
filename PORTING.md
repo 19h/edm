@@ -38,6 +38,27 @@ default path, and none is exercised by the harness.
   `--timeout` above `INT32_MAX/1000` prints `1 ms` where the original prints the
   raw value. C22's clamp itself is implemented.
 
+## Measured facts about the Companion API
+
+- **`/2.0/elite/market/list?marketID=N` answers for a market the commander is
+  not docked at.** Measured 2026-08-05 against four real markets — Prince
+  Terminus (Hyades Sector NI-X a16-0), Mourelle Gateway (G 65-9), Galileo (Sol)
+  and Jaques Station (Colonia). All four returned HTTP 200 with distinct
+  payloads, and each one's highest sell price matched Ardent's independent
+  crowd-sourced record for the same market **exactly**: 194,908 / 476,614 /
+  476,614 / 599,184. Four independent agreements is identity, not coincidence.
+
+  This is what the sweep has always assumed and nothing had ever checked. It is
+  also the premise the whole `edm route` feature rests on.
+
+  Two incidental findings from the same measurement. The payload has **no `id`
+  field** — its top-level keys are `allowsDumping`, `commodities`, `inventory` —
+  so a port cannot verify which market answered by reading the response; the
+  only check available is that the *content* differs per id, which is the
+  stronger test anyway. And every market returns the same 391-entry commodity
+  map, most rows priced but with zero stock and zero demand, so a commodity
+  count is not a proxy for how much a market actually trades.
+
 ## Measured deviations from the design
 
 Recorded when an assumption made while planning turned out to be wrong.
