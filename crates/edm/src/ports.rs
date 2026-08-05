@@ -29,11 +29,40 @@ pub trait Clock {
 pub trait Entropy {
     /// Six bytes, which the caller renders as twelve lowercase hex characters.
     fn nonce_bytes(&self) -> [u8; 6];
+
+    /// A `[0, 1)` sample for backoff jitter.
+    ///
+    /// Drawn from the same source as the nonce rather than from a new port, so
+    /// a run pinned for reproducibility stays pinned in both respects.
+    fn jitter_unit(&self) -> f64 {
+        let bytes = self.nonce_bytes();
+        let mut value = 0u64;
+        for byte in bytes {
+            value = (value << 8) | u64::from(byte);
+        }
+        // 48 bits over 2^48: uniform, and exactly representable in an f64.
+        value as f64 / f64::from(1u32 << 24) / f64::from(1u32 << 24)
+    }
 }
 
 /// The only filesystem write the program makes is `markets --dump`.
 pub trait Fs {
     fn write(&self, path: &Path, contents: &str) -> std::io::Result<()>;
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
+    fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    fn exists(&self, path: &Path) -> bool;
+}
+
+/// Waiting, behind a seam.
+///
+/// The pacing policy is pure arithmetic that says *when* the next request may
+/// go; this is the part that actually waits. Separating them is what lets a
+/// test assert the **sequence of delays** a scenario produces rather than
+/// sitting through them, which is both faster and a stronger statement than a
+/// wall-clock measurement.
+#[allow(async_fn_in_trait, reason = "single-threaded runtime; see HttpTransport")]
+pub trait Timer {
+    async fn sleep_ms(&self, millis: f64);
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +87,18 @@ impl Clock for SystemClock {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OsEntropy;
 
+/// Real sleeping.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RealTimer;
+
+impl Timer for RealTimer {
+    async fn sleep_ms(&self, millis: f64) {
+        if millis > 0.0 {
+            tokio::time::sleep(std::time::Duration::from_secs_f64(millis / 1000.0)).await;
+        }
+    }
+}
+
 impl Entropy for OsEntropy {
     fn nonce_bytes(&self) -> [u8; 6] {
         let mut bytes = [0u8; 6];
@@ -74,6 +115,18 @@ pub struct RealFs;
 impl Fs for RealFs {
     fn write(&self, path: &Path, contents: &str) -> std::io::Result<()> {
         std::fs::write(path, contents)
+    }
+
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(path)
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
     }
 }
 
@@ -128,14 +181,55 @@ impl Entropy for CountingEntropy {
     }
 }
 
-/// A filesystem that records rather than writes.
+/// An in-memory filesystem.
+///
+/// Read-write rather than write-only, because the cache's whole point is that a
+/// second run sees the first run's writes — a recorder that only remembers
+/// would make the resume path untestable.
 #[derive(Debug, Default)]
 pub struct RecordingFs(pub std::cell::RefCell<Vec<(std::path::PathBuf, String)>>);
+
+impl RecordingFs {
+    fn find(&self, path: &Path) -> Option<String> {
+        self.0.borrow().iter().rev().find(|(at, _)| at == path).map(|(_, body)| body.clone())
+    }
+}
 
 impl Fs for RecordingFs {
     fn write(&self, path: &Path, contents: &str) -> std::io::Result<()> {
         self.0.borrow_mut().push((path.to_path_buf(), contents.to_owned()));
         Ok(())
+    }
+
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
+        self.find(path).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, path.display().to_string())
+        })
+    }
+
+    fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        self.find(path).is_some()
+    }
+}
+
+/// A timer that records what it was asked to wait for and returns at once.
+#[derive(Debug, Default)]
+pub struct RecordingTimer(pub std::cell::RefCell<Vec<f64>>);
+
+impl RecordingTimer {
+    #[must_use]
+    pub fn delays(&self) -> Vec<f64> {
+        self.0.borrow().clone()
+    }
+}
+
+impl Timer for RecordingTimer {
+    async fn sleep_ms(&self, millis: f64) {
+        self.0.borrow_mut().push(millis);
     }
 }
 
