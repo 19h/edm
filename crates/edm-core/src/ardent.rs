@@ -13,6 +13,12 @@
 //! repoints the API instead.
 //!
 //! Only the pure half lives here. Fetching is the binary's job.
+//!
+//! The enumeration half — `nearby_url`, `system_markets_url` and their parsers
+//! — has no TypeScript counterpart at all: it exists for `edm route` \[C25\],
+//! and `xtask ardent-contract` therefore covers the four ported exports above
+//! and nothing below them. Its constants come from measurement against the live
+//! API rather than from Ardent's documentation, which does not state them.
 
 use crate::js::json::{JsObject, JsValue};
 use crate::js::{self, text};
@@ -226,6 +232,236 @@ pub fn normalise_name(name: &str) -> &str {
     text::js_trim(name)
 }
 
+// ---------------------------------------------------------------------------
+// Enumeration — no TypeScript counterpart; `edm route` only
+// ---------------------------------------------------------------------------
+
+/// The largest `maxDistance` Ardent honours.
+///
+/// A wider request is not refused and is not reported: the server clamps
+/// silently, so the answer describes a smaller ball than the one asked for and
+/// nothing in the response says which. Anything claiming completeness above
+/// this is claiming something the API never offered.
+pub const ARDENT_MAX_DISTANCE_LY: f64 = 500.0;
+
+/// The row cap on `/nearby`.
+///
+/// Measured 2026-08-05: `Sol?maxDistance=600` answers with exactly 1,000 rows
+/// reaching 46 Ly. The rows are sorted by ascending `distance`, which is what
+/// turns a full page from "some systems are missing" into the far stronger
+/// "every system out to the last row is present".
+pub const NEARBY_ROW_CAP: usize = 1000;
+
+/// How far a full page's completeness claim must be pulled in.
+///
+/// `distance` is `round(true distance)` in whole light years — measured over
+/// all 1,000 rows around Sol with zero mismatches. The server takes the 1,000
+/// smallest by that *integer* key, so every system whose true distance is below
+/// `d_max - 0.5` has a key of at most `d_max - 1` and cannot have been cut (it
+/// would have displaced a `d_max` row). Systems at exactly `d_max` may or may
+/// not have made it. Half a light year is therefore the exact amount of the
+/// last shell that the sort order does not vouch for — and it is why the
+/// completeness bound is computed from the *reported* integer rather than from
+/// the recomputed separation, whose maximum ran 0.44 Ly beyond it in the same
+/// sample and would have overclaimed by that much.
+pub const NEARBY_ROUNDING_SLACK_LY: f64 = 0.5;
+
+/// `/system/name/{s}/nearby?maxDistance=R` — every system Ardent knows inside
+/// the radius, nearest first, capped at [`NEARBY_ROW_CAP`] rows and clamped at
+/// [`ARDENT_MAX_DISTANCE_LY`].
+///
+/// The radius is encoded rather than interpolated because `js_number` renders
+/// large values in exponent form (`1e+21`), and a bare `+` in a query string
+/// means a space.
+#[must_use]
+pub fn nearby_url(base: &str, system_name: &str, max_distance: f64) -> String {
+    format!(
+        "{base}/system/name/{}/nearby?maxDistance={}",
+        encode_uri_component(system_name),
+        encode_uri_component(&js::js_number(max_distance)),
+    )
+}
+
+/// `/system/name/{s}/markets` — every station in one system with a commodity
+/// market. Uncapped, unpaginated, CDN-fronted and free, which is what makes it
+/// affordable to run once per system before spending anything on the Companion
+/// API.
+#[must_use]
+pub fn system_markets_url(base: &str, system_name: &str) -> String {
+    format!("{base}/system/name/{}/markets", encode_uri_component(system_name))
+}
+
+/// One row of a `/nearby` answer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NearbySystem {
+    pub name: String,
+    pub address: f64,
+    pub coordinates: Coordinates,
+    /// The `distance` column, exactly as Ardent reports it: whole light years,
+    /// rounded, and radial from the queried system.
+    ///
+    /// It is kept for one purpose only — it is the key the server sorts and
+    /// caps on, so it is the only quantity that can say how far a full page's
+    /// completeness reaches. It is never a geometric quantity: the separation
+    /// of two rows cannot be derived from two rounded radii at all, and even
+    /// this row's own distance is wrong by up to half a light year. Use
+    /// [`separation_ly`] for anything that measures. (`edm`'s enumeration
+    /// re-bases the field onto its own centre as an exact separation; see
+    /// `route::discover::Enumeration`.)
+    pub distance: f64,
+}
+
+/// A `/nearby` answer: the rows that parsed, and how many the server sent.
+///
+/// Both numbers are needed. The second is what decides whether the row cap
+/// bound, and a row this parser rejected must not be allowed to make a full
+/// page look like a short one — that would turn a truncated enumeration into a
+/// claim of completeness, which is the one failure the caller exists to avoid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NearbyPage {
+    pub systems: Vec<NearbySystem>,
+    pub rows: usize,
+}
+
+/// Parses a `/nearby` answer, keeping the count of rows the server actually
+/// sent.
+#[must_use]
+pub fn parse_nearby_page(value: &JsValue) -> NearbyPage {
+    let Some(rows) = value.as_array() else { return NearbyPage { systems: Vec::new(), rows: 0 } };
+    let systems = rows
+        .iter()
+        .filter_map(|row| {
+            let record = row.as_record()?;
+            Some(NearbySystem {
+                name: record.get("systemName")?.as_str()?.to_owned(),
+                address: finite(record, "systemAddress")?,
+                coordinates: Coordinates {
+                    x: finite(record, "systemX")?,
+                    y: finite(record, "systemY")?,
+                    z: finite(record, "systemZ")?,
+                },
+                distance: finite(record, "distance")?,
+            })
+        })
+        .collect();
+    NearbyPage { systems, rows: rows.len() }
+}
+
+/// Parses a `/nearby` answer. A row missing any field is skipped, not fatal.
+///
+/// Callers that reason about the row cap want [`parse_nearby_page`] instead.
+#[must_use]
+pub fn parse_nearby(value: &JsValue) -> Vec<NearbySystem> {
+    parse_nearby_page(value).systems
+}
+
+/// One station from a `/system/name/{s}/markets` answer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArdentStation {
+    pub market_id: f64,
+    pub station_name: String,
+    pub system_name: String,
+    /// Ardent's `stationType`. The only field here worth filtering on — see
+    /// [`is_starport`].
+    pub station_type: Option<String>,
+    /// `maxLandingPadSize`, and **advisory only**.
+    ///
+    /// Ardent reports 3 (Large) for 30 of the 46 on-foot settlements in Sol,
+    /// which cannot berth a large ship at all. Reading it as a pad filter would
+    /// admit hundreds of unlandable rows per region and spend a Companion API
+    /// request on each. Filter on [`station_type`](Self::station_type); use
+    /// this to break ties, or to warn.
+    pub max_landing_pad_size: Option<f64>,
+    /// Light seconds from the arrival star, for the supercruise term of the
+    /// travel model.
+    pub distance_to_arrival: Option<f64>,
+    /// Where the station's system sits.
+    ///
+    /// **Not present in the payload.** Measured 2026-08-05, a `/markets` row
+    /// carries thirteen keys and no coordinates whatsoever, so this parser
+    /// leaves it `NaN` and the caller fills it from the enumeration that
+    /// produced the system — which already holds them — with [`place`]. `NaN`
+    /// rather than the origin because the origin *is* Sol: an unfilled station
+    /// must fail every distance test rather than quietly pass the wrong one.
+    pub coordinates: Coordinates,
+}
+
+/// Assigns one system's coordinates to the stations parsed out of it.
+///
+/// See [`ArdentStation::coordinates`] for why this is a separate step and not
+/// something the parser can do.
+pub fn place(stations: &mut [ArdentStation], coordinates: Coordinates) {
+    for station in stations {
+        station.coordinates = coordinates;
+    }
+}
+
+/// Parses a `/system/name/{s}/markets` answer. A row missing an id or either
+/// name is skipped.
+#[must_use]
+pub fn parse_system_markets(value: &JsValue) -> Vec<ArdentStation> {
+    let Some(rows) = value.as_array() else { return Vec::new() };
+    rows.iter()
+        .filter_map(|row| {
+            let record = row.as_record()?;
+            Some(ArdentStation {
+                market_id: finite(record, "marketId")?,
+                station_name: record.get("stationName")?.as_str()?.to_owned(),
+                system_name: record.get("systemName")?.as_str()?.to_owned(),
+                station_type: record.get("stationType").and_then(JsValue::as_str).map(str::to_owned),
+                max_landing_pad_size: finite(record, "maxLandingPadSize"),
+                distance_to_arrival: finite(record, "distanceToArrival"),
+                coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
+            })
+        })
+        .collect()
+}
+
+/// The station types that can berth a large ship **and** carry a real commodity
+/// market.
+///
+/// Settlements and outposts can do neither, and they are most of what Ardent
+/// calls a station: 46 of Sol's 62 rows are on-foot settlements, and near
+/// Colonia 58% are fleet carriers. Filtering to these seven removes 87-93% of
+/// the Companion API spend for a region — but that is the smaller half of the
+/// argument. Excluding a berth a large ship cannot use is *correctness*; the
+/// saving is a consequence.
+pub const STARPORT_TYPES: [&str; 7] =
+    ["Coriolis", "Orbis", "Ocellus", "AsteroidBase", "CraterPort", "PlanetaryPort", "MegaShip"];
+
+/// Whether a station type is in [`STARPORT_TYPES`].
+///
+/// Compared case-insensitively: Ardent, EDDN and the Companion API each spell
+/// these consistently and differently from each other, and a filter that
+/// silently dropped every station because of a capital letter would look
+/// exactly like a sparse region.
+#[must_use]
+pub fn is_starport(station_type: Option<&str>) -> bool {
+    station_type
+        .is_some_and(|kind| STARPORT_TYPES.iter().any(|known| known.eq_ignore_ascii_case(kind)))
+}
+
+/// Whether a station is a fleet carrier — excluded by default, because its
+/// prices are one commander's whim and it may not be there tomorrow.
+#[must_use]
+pub fn is_carrier(station_type: Option<&str>) -> bool {
+    station_type.is_some_and(|kind| kind.eq_ignore_ascii_case("FleetCarrier"))
+}
+
+/// Straight-line separation in light years.
+///
+/// Every distance this program acts on is computed here, from coordinates.
+/// An API `distance` field is rounded to whole light years and radial from one
+/// reference point, so the separation between two rows cannot be recovered from
+/// them even in principle.
+#[must_use]
+pub fn separation_ly(from: &Coordinates, to: &Coordinates) -> f64 {
+    let dx = from.x - to.x;
+    let dy = from.y - to.y;
+    let dz = from.z - to.z;
+    dz.mul_add(dz, dx.mul_add(dx, dy * dy)).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +510,96 @@ mod tests {
             error,
             "\"ohm\" matches 2 stations across 2 systems: Ohm City (Colonia), Ohm Depot (Sol)"
         );
+    }
+
+    #[test]
+    fn enumeration_urls_encode_both_the_name_and_the_radius() {
+        assert_eq!(
+            nearby_url("http://a", "Hyades Sector NI-X a16-0", 12.5),
+            "http://a/system/name/Hyades%20Sector%20NI-X%20a16-0/nearby?maxDistance=12.5"
+        );
+        // `1e+21` in a query string would otherwise arrive as `1e 21`.
+        assert_eq!(
+            nearby_url("http://a", "Sol", 1e21),
+            "http://a/system/name/Sol/nearby?maxDistance=1e%2B21"
+        );
+        assert_eq!(
+            system_markets_url("http://a", "Jaques' Rest"),
+            "http://a/system/name/Jaques'%20Rest/markets"
+        );
+    }
+
+    /// The row count is the server's, not the parser's — otherwise a rejected
+    /// row turns a truncated page into a claim of completeness.
+    #[test]
+    fn a_rejected_row_still_counts_toward_the_page_size() {
+        let value = JsValue::parse(
+            r#"[{"systemName":"Sol","systemAddress":10477373803,"systemX":0,"systemY":0,"systemZ":0,"distance":0},
+                {"systemName":"Nowhere"},
+                {"systemName":"Broken","systemAddress":1,"systemX":null,"systemY":0,"systemZ":0,"distance":2}]"#,
+        )
+        .expect("valid JSON");
+        let page = parse_nearby_page(&value);
+        assert_eq!(page.rows, 3);
+        assert_eq!(page.systems.len(), 1);
+        assert_eq!(page.systems[0].name, "Sol");
+        assert_eq!(parse_nearby(&value).len(), 1);
+    }
+
+    #[test]
+    fn a_body_that_is_not_an_array_is_an_empty_page() {
+        let value = JsValue::parse(r#"{"error":"not found"}"#).expect("valid JSON");
+        assert_eq!(parse_nearby_page(&value), NearbyPage { systems: Vec::new(), rows: 0 });
+        assert!(parse_system_markets(&value).is_empty());
+    }
+
+    /// A verbatim `/system/name/Sol/markets` row, minus the fields nothing
+    /// reads. It carries no coordinates, and its pad size is a fiction.
+    #[test]
+    fn a_market_row_arrives_without_coordinates() {
+        let value = JsValue::parse(
+            r#"[{"systemAddress":10477373803,"systemName":"Sol","marketId":3802401536,
+                 "stationName":"Abimbola Metallurgic Reserve","stationType":"OnFootSettlement",
+                 "distanceToArrival":9142.916182,"maxLandingPadSize":3}]"#,
+        )
+        .expect("valid JSON");
+        let mut stations = parse_system_markets(&value);
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].market_id, 3_802_401_536.0);
+        assert_eq!(stations[0].max_landing_pad_size, Some(3.0));
+        assert!(stations[0].coordinates.x.is_nan());
+
+        let sol = Coordinates { x: 0.0, y: 0.0, z: 0.0 };
+        assert!(separation_ly(&sol, &stations[0].coordinates).is_nan());
+        place(&mut stations, sol);
+        assert_eq!(separation_ly(&sol, &stations[0].coordinates), 0.0);
+    }
+
+    /// Ardent says this settlement has a large pad. It does not have one, and
+    /// the type is what says so.
+    #[test]
+    fn the_station_filter_reads_the_type_and_not_the_pad() {
+        assert!(!is_starport(Some("OnFootSettlement")));
+        assert!(!is_starport(Some("CraterOutpost")));
+        assert!(!is_starport(Some("Outpost")));
+        assert!(!is_starport(None));
+        assert!(is_starport(Some("Orbis")));
+        assert!(is_starport(Some("coriolis")));
+        assert!(is_carrier(Some("FleetCarrier")));
+        assert!(!is_carrier(Some("MegaShip")));
+    }
+
+    /// Barnard's Star sits 5.9547 Ly from Sol and Ardent's column says 6. Two
+    /// such columns cannot be subtracted into anything.
+    #[test]
+    fn separation_is_recomputed_because_the_reported_column_is_rounded() {
+        let sol = Coordinates { x: 0.0, y: 0.0, z: 0.0 };
+        let barnards = Coordinates { x: -3.03125, y: 1.375, z: 4.9375 };
+        let separation = separation_ly(&sol, &barnards);
+        assert!((separation - 5.954_663).abs() < 1e-6, "{}", js::js_number(separation));
+        assert_eq!(js::js_round(separation), 6.0);
+
+        assert_eq!(separation_ly(&barnards, &sol), separation);
+        assert_eq!(separation_ly(&barnards, &barnards), 0.0);
     }
 }

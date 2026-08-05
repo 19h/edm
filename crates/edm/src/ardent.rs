@@ -113,6 +113,38 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
         })
     }
 
+    /// `/system/name/{s}/nearby?maxDistance=R` — the systems Ardent knows
+    /// inside a radius, nearest first \[C25\].
+    ///
+    /// Unlike the lookups above, a failure here is fatal to its caller and is
+    /// not swallowed: an outage that read as an empty answer would be
+    /// indistinguishable from a genuinely sparse region, and `edm route` would
+    /// go on to report complete coverage of nothing.
+    pub async fn nearby(
+        &self,
+        system_name: &str,
+        max_distance: f64,
+    ) -> Result<ardent::NearbyPage, String> {
+        let url = ardent::nearby_url(self.base, system_name, max_distance);
+        Ok(ardent::parse_nearby_page(&self.fetch_json(&url).await?))
+    }
+
+    /// `/system/name/{s}/markets` — every station in one system that trades
+    /// commodities, with the type, pad and arrival distance the pre-filter runs
+    /// on \[C25\].
+    ///
+    /// The rows carry no coordinates of their own, so they are placed at the
+    /// system's before they are returned.
+    pub async fn system_markets(
+        &self,
+        system: &ReferenceSystem,
+    ) -> Result<Vec<ardent::ArdentStation>, String> {
+        let url = ardent::system_markets_url(self.base, &system.name);
+        let mut stations = ardent::parse_system_markets(&self.fetch_json(&url).await?);
+        ardent::place(&mut stations, system.coordinates);
+        Ok(stations)
+    }
+
     /// The only route from a bare market id back to the names EDDN requires
     /// (ts:2974).
     ///
