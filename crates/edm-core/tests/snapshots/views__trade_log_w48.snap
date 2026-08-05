@@ -1,0 +1,26 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== TRADES  3 requests over 2 rounds — hold is full 
++---+-----------------+-----+-------+---------+
+| # | Commodity       | Qty |  Unit |   Total |
++===+=================+=====+=======+=========+
+| 1 | Gold            |  13 | 9,301 | 120,913 |
+| 1 | Basic Narcotics |   0 | 1,120 |       0 |
+| 2 | Hydrogen Fuel   |   8 |   110 |     880 |
++---+-----------------+-----+-------+---------+
+|   | TOTAL           |  21 |       | 121,793 |
++---+-----------------+-----+-------+---------+
+   columns hidden to fit 48 cols: Cargo, HTTP
+   credits now 12,345,678
+== INVENTORY  3 items ==========================
++-----------------+-----+-----------+---+
+| Commodity       | Qty |     Value | S |
++=================+=====+===========+===+
+| Gold            | 117 | 1,088,217 | . |
+| Basic Narcotics |   4 |     4,404 | S |
+| ?               |   - |         - | . |
++-----------------+-----+-----------+---+
+   columns hidden to fit 48 cols: Marked, Owner,
+   Origin, Position (x / y / z)

@@ -1,0 +1,13 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit_all(&parsed, width)"
+---
+== PAYLOAD =====================================
+{
+  "errors": [
+    {
+      "code": 401,
+      "message": "unauthorized"
+    }
+  ]
+}

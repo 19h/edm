@@ -1,0 +1,13 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== POINTS OF INTEREST  2 found by scan =========
++------------+----------------+----------+
+|  Market ID | Name           | Type     |
++============+================+==========+
+| 3223343616 | Jaques Station | Coriolis |
+|          - | Brady Terminal | outpost  |
++------------+----------------+----------+
+   columns hidden to fit 48 cols: Found at,
+   Faction, Economy

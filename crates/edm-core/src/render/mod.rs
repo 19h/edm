@@ -12,6 +12,7 @@
 
 pub mod columns;
 pub mod table;
+pub mod views;
 
 use crate::js::text::{self, Metric};
 

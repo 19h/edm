@@ -1,0 +1,15 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== TRADE PLAN  sell 13 x Gold ======================================================================
++-----------+------------------+---------+
+| Field     | Value            | From    |
++===========+==================+=========+
+| marketId  | 3223343616       | flag    |
+| commodity | Gold (128049202) | market  |
+| unitPrice | 9,301 cr         | market  |
+| qty       | 13               | flag    |
+| total     | 120,913 cr       | default |
++-----------+------------------+---------+
+   Gold: stock - | demand 812 | buy - | sell 9,301 | fence 9,280 | held 117
