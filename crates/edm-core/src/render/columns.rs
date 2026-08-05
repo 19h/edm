@@ -19,6 +19,18 @@ pub const FIELD_COLUMNS: &[Column] = &[
     Column::new("value", "Value").min_width(12),
 ];
 
+/// The same two-column shape as [`FIELD_COLUMNS`], with a wider label.
+///
+/// A separate constant rather than a widened `FIELD_COLUMNS` because that one
+/// is pinned to `market-request.ts:497` and every request and response table in
+/// the program is drawn with it. The route plan's labels are indented exclusion
+/// lines — `  - Odyssey settlements` is 23 characters — and eliding the very
+/// words that explain what was filtered out would defeat the table.
+pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
+    Column::new("field", "Field").min_width(8).max_width(30),
+    Column::new("value", "Value").min_width(12),
+];
+
 /// `COMMODITY_COLUMNS` (`market-request.ts:621`) — the market listing.
 ///
 /// Only `Commodity` declares a floor, so it is the only column that is ever
@@ -110,6 +122,7 @@ pub const MARKET_POINT_COLUMNS: &[Column] = &[
 /// a second, drifting copy of the list.
 pub const ALL: &[(&str, &[Column])] = &[
     ("FIELD", FIELD_COLUMNS),
+    ("ROUTE_FIELD", ROUTE_FIELD_COLUMNS),
     ("COMMODITY", COMMODITY_COLUMNS),
     ("INVENTORY", INVENTORY_COLUMNS),
     ("SWEEP", SWEEP_COLUMNS),

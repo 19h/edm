@@ -1,0 +1,21 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== ROUTE COVERAGE ==================================================================================
++----------------+----------------+
+| Field          | Value          |
++================+================+
+| systems read   | 116 of 118     |
+| markets polled | 151 of 157     |
+| markets priced | 149            |
+| systems failed | 2              |
+| markets failed | 6              |
+| from cache     | 22             |
+| requests sent  | 267            |
+| throttled      | 3 (429 or 503) |
+| elapsed        | 71s            |
++----------------+----------------+
+   every price below was read live from the Companion API during this run
+   6 markets in radius were not reached and are absent from the ranking, not ranked low
+   2 systems failed, so any market in them is unknown to this run

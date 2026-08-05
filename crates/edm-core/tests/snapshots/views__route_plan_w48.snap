@@ -1,0 +1,24 @@
+---
+source: crates/edm-core/tests/views.rs
+expression: "emit(blocks, width)"
+---
+== ROUTE PLAN ==================================
++-------------------------+--------------------+
+| Field                   | Value              |
++=========================+====================+
+| reference               | Sol                |
+| radius                  | 20 Ly (complete, ~ |
+| systems                 | 412 in radius, 11~ |
+| stations known          | 1,230 (Ardent)     |
+|   - Odyssey settlements | -771   (--settlem~ |
+|   - fleet carriers      | -194   (--include~ |
+|   - outposts (pad L)    | -86   (--pad M to~ |
+|   - beyond 2,000 Ls     | -22   (--max-star~ |
+| markets to poll         | 135                |
+| cached and still fresh  | 22                 |
+| CAPI requests           | 253  = 118 starsy~ |
+| estimated transfer      | 42-78 MB  (prior:~ |
+| pacing                  | 4 req/s            |
+| estimated wall clock    | 64s                |
+| ceiling                 | 253 of 2,000   (-~ |
++-------------------------+--------------------+

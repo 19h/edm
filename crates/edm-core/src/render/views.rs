@@ -724,3 +724,218 @@ pub fn points_of_interest<'a>(points: &'a [PointOfInterest<'_>]) -> Vec<Block<'a
         rows,
     }]
 }
+
+// ---------------------------------------------------------------------------
+// route
+// ---------------------------------------------------------------------------
+
+/// Everything the plan table states, gathered so the caller cannot supply the
+/// numbers in the wrong order.
+#[derive(Clone, Copy, Debug)]
+pub struct PlanView<'a> {
+    pub reference: &'a str,
+    /// What was asked for.
+    pub radius_ly: f64,
+    /// What the enumeration actually established. Equal to `radius_ly` when the
+    /// frontier closed; smaller when Ardent's row cap stopped it short.
+    pub complete_to_ly: f64,
+    pub ardent_requests: u32,
+    pub estimate: &'a crate::spend::Estimate,
+    pub rate_per_second: f64,
+    pub max_requests: f64,
+    pub prior: crate::spend::SizePrior,
+}
+
+/// The plan table: what a sweep will cost, before any of it is spent.
+///
+/// The exclusion lines are the important part and are not decoration. Near Sol
+/// the defaults remove 63% of what Ardent calls a station, and a user who sees
+/// only the surviving count has no way to tell a deliberate filter from a tool
+/// that quietly missed most of the region. Each line names the flag that would
+/// keep them.
+#[must_use]
+pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
+    use crate::js::format_integer as int;
+    use crate::spend;
+
+    let &PlanView {
+        reference,
+        radius_ly,
+        complete_to_ly,
+        ardent_requests,
+        estimate,
+        rate_per_second,
+        max_requests,
+        prior,
+    } = view;
+
+    let coverage = if complete_to_ly >= radius_ly {
+        format!("{} Ly (complete, {} Ardent {})", js_number(radius_ly), int(f64::from(ardent_requests)),
+                if ardent_requests == 1 { "query" } else { "queries" })
+    } else {
+        // Say what was actually established rather than what was asked for.
+        format!(
+            "{} Ly asked, complete to {} Ly ({} Ardent queries)",
+            js_number(radius_ly),
+            js_number(complete_to_ly),
+            int(f64::from(ardent_requests))
+        )
+    };
+
+    let mut rows: Vec<Row<'static>> = vec![
+        field_row("reference", reference.to_owned()),
+        field_row("radius", coverage),
+        field_row(
+            "systems",
+            format!(
+                "{} in radius, {} worth reading",
+                int(estimate.systems as f64),
+                int(estimate.systems_to_read as f64)
+            ),
+        ),
+        field_row("stations known", format!("{} (Ardent)", int(estimate.stations_known as f64))),
+    ];
+
+    for exclusion in &estimate.exclusions {
+        // Built directly rather than through `field_row`, whose label borrows.
+        rows.push(Row::Data(vec![
+            Cow::Owned(format!("  - {}", exclusion.label)),
+            Cow::Owned(format!("-{}   ({} to keep)", int(exclusion.removed as f64), exclusion.keep_with)),
+        ]));
+    }
+
+    rows.push(field_row("markets to poll", int(estimate.markets_to_poll as f64)));
+    if estimate.cached_fresh > 0 {
+        rows.push(field_row("cached and still fresh", int(estimate.cached_fresh as f64)));
+    }
+    rows.push(field_row(
+        "CAPI requests",
+        format!(
+            "{}  = {} starsystem + {} market",
+            int(estimate.requests),
+            int(estimate.systems_to_read as f64),
+            int(estimate.markets_to_poll as f64)
+        ),
+    ));
+    rows.push(field_row(
+        "estimated transfer",
+        format!(
+            "{}  (prior: {} KB/system, {} KB/market)",
+            spend::transfer_range(estimate),
+            int(prior.system_bytes / 1024.0),
+            int(prior.market_bytes / 1024.0)
+        ),
+    ));
+    rows.push(field_row("pacing", format!("{} req/s", js_number(rate_per_second))));
+    rows.push(field_row("estimated wall clock", spend::duration_estimate(estimate.seconds)));
+    rows.push(field_row(
+        "ceiling",
+        format!("{} of {}   (--max-requests to raise)", int(estimate.requests), int(max_requests)),
+    ));
+
+    vec![Block::Table {
+        title: "ROUTE PLAN".to_owned(),
+        columns: columns::ROUTE_FIELD_COLUMNS,
+        rows,
+    }]
+}
+
+/// What the sweep actually reached, stated so that a market missing because it
+/// failed is never mistaken for one missing because it was unprofitable.
+#[must_use]
+pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
+    use crate::js::format_integer as int;
+
+    let mut rows = vec![
+        field_row("systems read", format!("{} of {}", int(coverage.systems_read as f64), int(coverage.systems_total as f64))),
+        field_row("markets polled", format!("{} of {}", int(coverage.markets_polled as f64), int(coverage.markets_found as f64))),
+        field_row("markets priced", int(coverage.markets_priced as f64)),
+    ];
+    if coverage.systems_failed > 0 {
+        rows.push(field_row("systems failed", int(coverage.systems_failed as f64)));
+    }
+    if coverage.markets_failed > 0 {
+        rows.push(field_row("markets failed", int(coverage.markets_failed as f64)));
+    }
+    if coverage.cache_hits > 0 {
+        rows.push(field_row("from cache", int(coverage.cache_hits as f64)));
+    }
+    rows.push(field_row("requests sent", int(coverage.requests_sent as f64)));
+    if coverage.throttled > 0 {
+        rows.push(field_row("throttled", format!("{} (429 or 503)", int(coverage.throttled as f64))));
+    }
+    rows.push(field_row("elapsed", crate::spend::duration_estimate(coverage.elapsed_seconds)));
+
+    let mut blocks =
+        vec![Block::Table {
+            title: "ROUTE COVERAGE".to_owned(),
+            columns: columns::ROUTE_FIELD_COLUMNS,
+            rows,
+        }];
+    for note in coverage.notes() {
+        blocks.push(Block::Note(note));
+    }
+    blocks
+}
+
+/// What a sweep reached, and what it did not.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RouteCoverage {
+    pub systems_total: usize,
+    pub systems_read: usize,
+    pub systems_failed: usize,
+    pub markets_found: usize,
+    pub markets_polled: usize,
+    pub markets_priced: usize,
+    pub markets_failed: usize,
+    pub cache_hits: usize,
+    pub requests_sent: usize,
+    pub throttled: usize,
+    pub elapsed_seconds: f64,
+    /// Set when the enumeration could not close the frontier.
+    pub truncated_to_ly: Option<f64>,
+    pub breaker_tripped: bool,
+}
+
+impl RouteCoverage {
+    /// The sentences that must appear when they are true.
+    ///
+    /// Each one exists because its absence would let a partial answer read as a
+    /// complete one.
+    #[must_use]
+    pub fn notes(&self) -> Vec<String> {
+        use crate::js::format_integer as int;
+        let mut notes = Vec::new();
+
+        if self.markets_priced > 0 {
+            notes.push(
+                "every price below was read live from the Companion API during this run".to_owned(),
+            );
+        }
+        if self.markets_failed > 0 {
+            notes.push(format!(
+                "{} markets in radius were not reached and are absent from the ranking, not ranked low",
+                int(self.markets_failed as f64)
+            ));
+        }
+        if self.systems_failed > 0 {
+            notes.push(format!(
+                "{} systems failed, so any market in them is unknown to this run",
+                int(self.systems_failed as f64)
+            ));
+        }
+        if let Some(limit) = self.truncated_to_ly {
+            notes.push(format!(
+                "enumeration is complete only to {} Ly; beyond that this run does not know what exists",
+                js_number(limit)
+            ));
+        }
+        if self.breaker_tripped {
+            notes.push(
+                "the run stopped early after too many failures, so the region was not fully swept"
+                    .to_owned(),
+            );
+        }
+        notes
+    }
+}

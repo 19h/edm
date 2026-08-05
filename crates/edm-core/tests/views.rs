@@ -615,3 +615,161 @@ fn r18_the_summary_probes_for_keys_not_for_values() {
         "readBoolean is `=== true || === 1`, so null is no"
     );
 }
+
+// ---------------------------------------------------------------------------
+// route
+// ---------------------------------------------------------------------------
+
+fn sample_estimate() -> edm_core::spend::Estimate {
+    use edm_core::spend::{Counts, Estimate, Exclusion, SizePrior};
+    Estimate::build(
+        Counts {
+            systems: 412,
+            systems_to_read: 118,
+            stations_known: 1_230,
+            markets_to_poll: 157,
+            cached_fresh: 22,
+        },
+        vec![
+            Exclusion { label: "Odyssey settlements", removed: 771, keep_with: "--settlements" },
+            Exclusion { label: "fleet carriers", removed: 194, keep_with: "--include-carriers" },
+            Exclusion { label: "outposts (pad L)", removed: 86, keep_with: "--pad M" },
+            Exclusion { label: "beyond 2,000 Ls", removed: 22, keep_with: "--max-star-distance" },
+        ],
+        4.0,
+        &SizePrior::default(),
+    )
+}
+
+fn plan_view(estimate: &edm_core::spend::Estimate) -> views::PlanView<'_> {
+    views::PlanView {
+        reference: "Sol",
+        radius_ly: 20.0,
+        complete_to_ly: 20.0,
+        ardent_requests: 1,
+        estimate,
+        rate_per_second: 4.0,
+        max_requests: edm_core::spend::DEFAULT_MAX_REQUESTS,
+        prior: edm_core::spend::SizePrior::default(),
+    }
+}
+
+fn route_plan_blocks(estimate: &edm_core::spend::Estimate) -> Vec<Block<'static>> {
+    views::route_plan(&plan_view(estimate))
+}
+
+#[test]
+fn route_plan_snapshots() {
+    let estimate = sample_estimate();
+    snapshot_at_widths("route_plan", &route_plan_blocks(&estimate));
+}
+
+/// The plan must show what each filter removed, not just what survived.
+///
+/// Near Sol the defaults drop 63% of everything Ardent calls a station. A user
+/// shown only "157 markets" cannot tell a deliberate filter from a tool that
+/// quietly missed most of the region, so every exclusion appears on its own
+/// line naming the flag that would keep it.
+#[test]
+fn the_plan_names_every_exclusion_and_how_to_undo_it() {
+    let estimate = sample_estimate();
+    // Raw cells rather than rendered text: at 48 columns the frame elides the
+    // very words under test, and the claim here is about content, not fitting.
+    let text = cells(&route_plan_blocks(&estimate)).concat().join("\n");
+    for (label, flag) in [
+        ("Odyssey settlements", "--settlements"),
+        ("fleet carriers", "--include-carriers"),
+        ("outposts (pad L)", "--pad M"),
+    ] {
+        assert!(text.contains(label), "missing exclusion {label}\n{text}");
+        assert!(text.contains(flag), "missing the flag that keeps {label}\n{text}");
+    }
+    assert!(text.contains("-771"), "the settlement count itself\n{text}");
+}
+
+/// The request count is split by kind and adds up, because the two kinds have
+/// very different sizes and a single total hides which one dominates.
+#[test]
+fn the_plan_shows_the_request_split() {
+    let estimate = sample_estimate();
+    let text = cells(&route_plan_blocks(&estimate)).concat().join("\n");
+    // 135 markets, not the 157 found: the 22 still-fresh cached ones cost
+    // nothing, and a plan that priced them would overstate what it will spend.
+    assert!(text.contains("253  = 118 starsystem + 135 market"), "{text}");
+}
+
+/// An enumeration that could not close its frontier says so in the radius row
+/// itself, where the number it qualifies is.
+#[test]
+fn an_incomplete_enumeration_is_stated_next_to_the_radius() {
+    let estimate = sample_estimate();
+    let blocks = views::route_plan(&views::PlanView {
+        reference: "Shinrarta Dezhra",
+        radius_ly: 60.0,
+        complete_to_ly: 41.0,
+        ardent_requests: 7,
+        ..plan_view(&estimate)
+    });
+    let text = cells(&blocks).concat().join("\n");
+    assert!(text.contains("60 Ly asked, complete to 41 Ly"), "{text}");
+    assert!(!text.contains("complete,"), "must not also claim completeness\n{text}");
+}
+
+fn sample_coverage() -> views::RouteCoverage {
+    views::RouteCoverage {
+        systems_total: 118,
+        systems_read: 116,
+        systems_failed: 2,
+        markets_found: 157,
+        markets_polled: 151,
+        markets_priced: 149,
+        markets_failed: 6,
+        cache_hits: 22,
+        requests_sent: 267,
+        throttled: 3,
+        elapsed_seconds: 71.0,
+        truncated_to_ly: None,
+        breaker_tripped: false,
+    }
+}
+
+#[test]
+fn route_coverage_snapshots() {
+    snapshot_at_widths("route_coverage", &views::route_coverage(&sample_coverage()));
+}
+
+/// The coverage note that matters most: a market that could not be read is
+/// absent from the ranking, and absence must never read as "unprofitable".
+#[test]
+fn unreached_markets_are_named_as_unreached() {
+    let notes = sample_coverage().notes();
+    let joined = notes.join("\n");
+    assert!(joined.contains("6 markets in radius were not reached"), "{joined}");
+    assert!(joined.contains("not ranked low"), "{joined}");
+    assert!(joined.contains("2 systems failed"), "{joined}");
+}
+
+/// A clean sweep says only the one thing that is true of it.
+#[test]
+fn a_complete_sweep_carries_no_warnings() {
+    let coverage = views::RouteCoverage {
+        systems_total: 4,
+        systems_read: 4,
+        markets_found: 9,
+        markets_polled: 9,
+        markets_priced: 9,
+        requests_sent: 13,
+        elapsed_seconds: 4.0,
+        ..views::RouteCoverage::default()
+    };
+    let notes = coverage.notes();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("read live from the Companion API"), "{notes:?}");
+}
+
+/// A sweep that found nothing says nothing, rather than claiming live prices it
+/// never read.
+#[test]
+fn an_empty_region_makes_no_claim_about_prices() {
+    assert!(views::RouteCoverage::default().notes().is_empty());
+}
