@@ -15,6 +15,19 @@ const GENERATORS: [&str; 3] = ["bless-js.ts", "bless-id64.ts", "bless-ardent.ts"
 /// Where the goldens record which engine was asked and found to have no answer.
 const GOLDEN_ENGINE: &str = "bun-version.txt";
 
+/// Arguments that stop Bun loading `.env` from the working directory.
+///
+/// A blessing run works in the repository root, where a developer's `.env` may
+/// hold live credentials. Fixtures generated with those in scope would be wrong
+/// in a way nothing downstream could detect. The `no-dotenv-leakage` gate keeps
+/// every `bun` spawn here honest; see `parity.rs`, which is where it was found.
+fn no_dotenv(root: &Path) -> [std::ffi::OsString; 2] {
+    [
+        std::ffi::OsString::from("--env-file"),
+        root.join("xtask").join("oracle").join("empty.env").into_os_string(),
+    ]
+}
+
 pub(crate) fn run(force: bool) -> Result<()> {
     let root = crate::repo_root()?;
     let fixtures = root.join("crates").join("edm-core").join("tests").join("fixtures");
@@ -40,6 +53,7 @@ pub(crate) fn run(force: bool) -> Result<()> {
         let script = root.join("xtask").join("oracle").join(generator);
         println!("  {generator}");
         let status = Command::new("bun")
+            .args(no_dotenv(&root))
             .arg(&script)
             .arg(&fixtures)
             .current_dir(&root)
@@ -119,6 +133,7 @@ pub(crate) fn ardent_contract() -> Result<()> {
     std::fs::create_dir_all(&scratch)?;
 
     let status = Command::new("bun")
+        .args(no_dotenv(&root))
         .arg(root.join("xtask").join("oracle").join("bless-ardent.ts"))
         .arg(&scratch)
         .current_dir(&root)

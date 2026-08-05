@@ -63,6 +63,19 @@ default path, and none is exercised by the harness.
 
 Recorded when an assumption made while planning turned out to be wrong.
 
+- **The parity harness's `env_clear()` did not clear the environment.** Bun
+  loads `.env` from its working directory before the script runs, and the
+  harness runs both sides in the repository root. The moment a `.env` existed
+  there for the step-0 live check, two scenarios began failing: the Bun side
+  picked up a `MARKET_ID` the Rust side never saw, so `market --no-json` sent a
+  request on one side and reported a missing market id on the other. The
+  harness was inventing a divergence rather than finding one — and a live
+  `AUTH_TOKEN` reaching a side of a differential test is the worse half of the
+  same hole. Measured directly: `--env-file` replaces Bun's default set
+  outright, so naming an empty file loads nothing. Every `bun` invocation in
+  `xtask` now passes `--env-file xtask/oracle/empty.env`, and the
+  `no-dotenv-leakage` gate fails the build if one does not.
+
 - **C13 was too weak.** The plan proposed an ASCII-only collation model with
   non-ASCII falling back to scalar order. Measurement killed it: `ß` expands to
   `ss`, `þ` sorts after `z`, `ø` is a secondary variant of `o`, `æ` groups with

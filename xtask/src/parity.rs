@@ -316,6 +316,16 @@ fn ask_the_oracle(
     }
     let mut command = Command::new(bun);
     command
+        // `env_clear` below scrubs the *shell*. It does not scrub the disk:
+        // Bun loads `.env` from its working directory before the script runs,
+        // and this harness runs in the repository root. A developer's `.env`
+        // holding a live `MARKET_ID` therefore reached the Bun side and not the
+        // Rust side, which is a divergence the harness invents rather than
+        // finds — and a live `AUTH_TOKEN` reaching a side of a *differential*
+        // test is worse than a false failure. Measured: `--env-file` replaces
+        // the default set outright, so naming an empty file loads nothing.
+        .arg("--env-file")
+        .arg(root.join("xtask").join("oracle").join("empty.env"))
         .arg("--preload")
         .arg(root.join("xtask").join("oracle").join("preload.ts"))
         .arg(root.join("market-request.ts"));

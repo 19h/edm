@@ -18,6 +18,7 @@ pub(crate) fn run() -> Result<()> {
         ("no-signal-handling", no_signal_handling),
         ("no-committed-credentials", no_committed_credentials),
         ("parity-isolation", parity_isolation),
+        ("no-dotenv-leakage", no_dotenv_leakage),
     ] {
         match check(&root) {
             Ok(()) => println!("  pass  {name}"),
@@ -36,6 +37,58 @@ pub(crate) fn run() -> Result<()> {
         println!("{failure}");
     }
     bail!("{} gates failed", failures.len())
+}
+
+/// Every `bun` the harness spawns must be told to ignore `.env`.
+///
+/// Bun loads `.env` from its working directory before the script runs, and both
+/// the parity harness and the fixture blessers run in the repository root. A
+/// developer's `.env` there — this project's own step-0 check needs one — then
+/// reaches the Bun side of a differential comparison and not the Rust side, so
+/// the harness reports a divergence it created. Worse, the values in that file
+/// are live credentials.
+///
+/// `--env-file` replaces the default set outright, so naming an empty file
+/// loads nothing. This gate is a grep because the property is syntactic: a
+/// `bun` spawned without it is the bug, and no run-time assertion can see the
+/// spawn that was never guarded.
+fn no_dotenv_leakage(root: &Path) -> Result<()> {
+    let dir = root.join("xtask").join("src");
+    let mut unguarded = Vec::new();
+
+    for entry in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)?;
+        for (number, line) in text.lines().enumerate() {
+            // `bun --version` reads no script and so loads no environment.
+            if line.contains("Command::new(\"bun\")") || line.contains("Command::new(bun)") {
+                let window: String = text
+                    .lines()
+                    .skip(number)
+                    .take(12)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !window.contains("--env-file")
+                    && !window.contains("no_dotenv")
+                    && !window.contains("--version")
+                {
+                    unguarded.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+
+    if unguarded.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "these spawn bun without `--env-file`, so a `.env` in the repository root \
+         would reach it:\n  {}",
+        unguarded.join("\n  ")
+    )
 }
 
 /// `edm-core` computes; it does not do.
