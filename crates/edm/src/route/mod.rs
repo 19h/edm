@@ -5,6 +5,7 @@
 //! Ardent, pricing the plan, gating the spend, and running the paced two-stage
 //! sweep that fills the market table the optimiser is handed.
 
+pub mod cache;
 pub mod pacer;
 pub mod plan;
 pub mod pool;
