@@ -405,3 +405,175 @@ mod tests {
         assert_eq!(duration(3_725_000), "62m 5s");
     }
 }
+
+/// Ready-to-run `edm trade` invocations for every route in the ranking.
+///
+/// The ranking names stations; the trade command wants a **market id**, and
+/// nothing else in the output carries one. Without this the answer stops one
+/// step short of being usable: you know where to go and what to carry, and then
+/// have to go and look up two numbers by hand.
+///
+/// The commodity goes on the wire as the Companion API's own identifier rather
+/// than the spaced form the table shows, because [`domain::find_commodity`]
+/// strips whitespace and lowercases before matching and takes an **exact** hit
+/// over a partial one — so `Tantalum` can only ever resolve to Tantalum, while
+/// a partial like `gold` is ambiguous against `LowTemperatureDiamond`-style
+/// names in a way that depends on what the market happens to stock.
+///
+/// `--fill --cargo N` for a buy when the hold size is known, because that is
+/// robust to stock having moved since the sweep; an exact `--qty` for a sell,
+/// because you sell what you are actually carrying.
+#[must_use]
+pub fn trade_commands(
+    routes: &[Route],
+    markets: &[Market],
+    commodities: &Commodities,
+    cargo: Option<i64>,
+) -> Vec<Block<'static>> {
+    if routes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut blocks = vec![Block::Heading("TRADE COMMANDS".to_owned())];
+    blocks.push(Block::Note(
+        "run each where it says; --top controls how many routes are listed here".to_owned(),
+    ));
+
+    for (index, route) in routes.iter().enumerate() {
+        blocks.push(Block::Raw(format!(
+            "\n{:>3}  {}",
+            js::format_integer((index + 1) as f64),
+            stops(route, markets),
+        )));
+
+        for leg in &route.legs {
+            let item = commodities.name(leg.choice.commodity).unwrap_or("?");
+            let units = plain(leg.choice.units.0);
+
+            let buy = match cargo {
+                Some(hold) => format!("--type buy --item {item} --fill --cargo {}", plain(hold)),
+                None => format!("--type buy --item {item} --qty {units}"),
+            };
+            blocks.push(Block::Raw(format!(
+                "       at {:<28} edm trade --market-id {} {buy}",
+                station(markets, leg.from),
+                id(markets, leg.from),
+            )));
+            blocks.push(Block::Raw(format!(
+                "       at {:<28} edm trade --market-id {} --type sell --item {item} --qty {units}",
+                station(markets, leg.to),
+                id(markets, leg.to),
+            )));
+        }
+    }
+    blocks
+}
+
+/// A station's market id, as the trade command wants it.
+///
+/// Through `js_number`, **never** `format_integer`: every other number in this
+/// module is grouped for reading, and a grouped market id is
+/// `--market-id 128,666,762`, which is not a market id. Anything that goes into
+/// a command line here is plain decimal for the same reason.
+fn id(markets: &[Market], index: u32) -> String {
+    markets
+        .get(index as usize)
+        .map_or_else(|| "?".to_owned(), |market| js::js_number(market.market_id as f64))
+}
+
+/// A quantity as a command line wants it: plain decimal, no grouping.
+fn plain(value: i64) -> String {
+    js::js_number(value as f64)
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    fn rendered() -> String {
+        let route = crate::fixture::proved_round_trip();
+        let markets = crate::fixture::round_trip_markets();
+        let commodities = crate::fixture::round_trip_commodities();
+        let blocks = trade_commands(&[route], &markets, &commodities, Some(1232));
+        blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Raw(text) | Block::Note(text) | Block::Heading(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The whole point: the ranking names stations, the trade command wants a
+    /// market id, and nothing else in the output carries one.
+    #[test]
+    fn every_leg_gets_a_market_id_and_a_command() {
+        let text = rendered();
+        assert!(text.contains("--market-id 1 "), "{text}");
+        assert!(text.contains("--market-id 2 "), "{text}");
+        assert!(text.contains("--type buy"), "{text}");
+        assert!(text.contains("--type sell"), "{text}");
+    }
+
+    /// A grouped market id is not a market id. This is the one formatting
+    /// mistake in this block that produces a command which silently addresses
+    /// the wrong market — or, more likely, fails to parse.
+    #[test]
+    fn nothing_on_a_command_line_is_thousands_separated() {
+        let markets = vec![{
+            let mut market = crate::fixture::round_trip_markets().remove(0);
+            market.market_id = 4_306_502_403;
+            market
+        }];
+        let route = crate::fixture::proved_round_trip();
+        let text = trade_commands(&[route], &markets, &crate::fixture::round_trip_commodities(), Some(1232))
+            .iter()
+            .filter_map(|block| match block {
+                Block::Raw(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("--market-id 4306502403"), "{text}");
+        for line in text.lines().filter(|line| line.contains("edm trade")) {
+            let command = &line[line.find("edm trade").expect("a command")..];
+            assert!(!command.contains(','), "grouped number in a command: {command}");
+        }
+    }
+
+    /// `--cargo` reaches the buy, because that is the workflow this exists for:
+    /// fill the hold, fly, sell it.
+    #[test]
+    fn a_known_hold_size_becomes_fill_and_cargo() {
+        assert!(rendered().contains("--fill --cargo 1232"));
+    }
+
+    /// And without one, the buy is sized to exactly what the route assumed,
+    /// rather than silently filling a hold whose size nobody stated.
+    #[test]
+    fn an_unknown_hold_size_buys_the_units_the_route_ranked() {
+        let route = crate::fixture::proved_round_trip();
+        let units = route.legs[0].choice.units.0;
+        let markets = crate::fixture::round_trip_markets();
+        let blocks =
+            trade_commands(&[route], &markets, &crate::fixture::round_trip_commodities(), None);
+        let text = blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Raw(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains(&format!("--type buy --item gold --qty {units}")), "{text}");
+        assert!(!text.contains("--fill"), "{text}");
+    }
+
+    /// Empty in, empty out — no heading for a ranking that has no routes.
+    #[test]
+    fn no_routes_means_no_block_at_all() {
+        assert!(trade_commands(&[], &[], &Commodities::new(), None).is_empty());
+    }
+}

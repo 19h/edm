@@ -56,3 +56,11 @@ enumerating systems within 10 Ly of Sol...
    permits, allegiance and landing-pad availability are not modelled
    times come from a calibrated model, not from your ship
    legs below --min-profit were excluded; the result is optimal for what remained
+== TRADE COMMANDS ==================================================================================
+   run each where it says; --top controls how many routes are listed here
+
+  1  Galileo > Titan City
+       at Galileo                      edm trade --market-id 128016384 --type buy --item Gold --qty 1232
+       at Titan City                   edm trade --market-id 128016576 --type sell --item Gold --qty 1232
+       at Titan City                   edm trade --market-id 128016576 --type buy --item Silver --qty 1232
+       at Galileo                      edm trade --market-id 128016384 --type sell --item Silver --qty 1232

@@ -395,6 +395,14 @@ fn rank(
     }
 
     out.emit(&view::ranking(kind, routes, &markets, &commodities));
+    // The ranking names stations; `edm trade` wants a market id. Without this
+    // the answer stops one step short of being usable.
+    out.emit(&view::trade_commands(
+        routes,
+        &markets,
+        &commodities,
+        config.cargo.map(|tons| tons as i64),
+    ));
 
     if config.detail {
         for route in routes {
