@@ -17,9 +17,10 @@ fn fixture(name: &str) -> String {
 }
 
 fn rows(body: &str) -> impl Iterator<Item = (usize, Vec<&str>)> {
-    body.lines().enumerate().filter_map(|(i, line)| {
-        (!line.is_empty() && !line.starts_with('#')).then(|| (i + 1, line.split('\t').collect()))
-    })
+    body.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.is_empty() && !line.starts_with('#'))
+        .map(|(i, line)| (i + 1, line.split('\t').collect()))
 }
 
 #[derive(Deserialize)]
@@ -93,13 +94,11 @@ fn decode_matches_the_original() {
             render_fixture(&serde_json::from_str::<Parts>(expected).expect("parts JSON"))
         };
 
-        if actual != expected {
-            if mismatches.len() < 10 {
-                mismatches.push(format!(
-                    "  line {line}: address {}\n    ts:   {expected}\n    rust: {actual}",
-                    cols[0]
-                ));
-            }
+        if actual != expected && mismatches.len() < 10 {
+            mismatches.push(format!(
+                "  line {line}: address {}\n    ts:   {expected}\n    rust: {actual}",
+                cols[0]
+            ));
         }
         checked += 1;
     }

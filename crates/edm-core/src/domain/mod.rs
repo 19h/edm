@@ -2,6 +2,7 @@
 
 pub mod id64;
 pub mod read;
+pub mod starsystem;
 
 use crate::js::json::{JsObject, JsValue};
 use crate::js::{self, text};
