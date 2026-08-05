@@ -289,13 +289,58 @@ impl Breaker {
         if state.consecutive_throttles >= self.consecutive_throttle_limit {
             return BreakerState::Tripped(TripReason::ConsecutiveThrottles);
         }
-        if state.outcomes.len() >= self.min_samples {
+        // Clamped to the window, which can only ever hold `window` samples.
+        // A `min_samples` above it would mean the condition is never met and
+        // the breaker never trips — a configuration that silently disables the
+        // one safeguard standing between a wide sweep and a thousand doomed
+        // requests. Degrading to "trip as soon as the window is full" is the
+        // failure direction that keeps the safeguard alive.
+        if state.outcomes.len() >= self.min_samples.min(self.window) {
             let rate = state.failures as f64 / state.outcomes.len() as f64;
             if rate >= self.threshold {
                 return BreakerState::Tripped(TripReason::FailureRate);
             }
         }
         BreakerState::Closed
+    }
+}
+
+#[cfg(test)]
+mod breaker_tests {
+    use super::*;
+
+    /// A `min_samples` above the window would otherwise disable the breaker
+    /// outright: the deque never grows past `window`, so the comparison never
+    /// holds and no failure rate, however total, ever trips it.
+    #[test]
+    fn a_min_samples_above_the_window_still_trips() {
+        let breaker = Breaker { window: 4, threshold: 0.5, min_samples: 20, ..Breaker::default() };
+        let mut window = BreakerWindow::default();
+
+        let mut tripped = None;
+        for _ in 0..10 {
+            if let BreakerState::Tripped(reason) = breaker.observe(&mut window, false, false) {
+                tripped = Some(reason);
+                break;
+            }
+        }
+
+        assert_eq!(tripped, Some(TripReason::FailureRate));
+    }
+
+    /// And the ordinary case is unchanged: below `min_samples` a run of bad
+    /// luck is not yet evidence.
+    #[test]
+    fn a_short_run_of_failures_is_not_yet_evidence() {
+        let breaker = Breaker::default();
+        let mut window = BreakerWindow::default();
+        for _ in 0..(Breaker::default().min_samples - 1) {
+            assert_eq!(breaker.observe(&mut window, false, false), BreakerState::Closed);
+        }
+        assert!(matches!(
+            breaker.observe(&mut window, false, false),
+            BreakerState::Tripped(TripReason::FailureRate)
+        ));
     }
 }
 

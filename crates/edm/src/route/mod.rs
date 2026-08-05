@@ -7,3 +7,4 @@
 
 pub mod pacer;
 pub mod plan;
+pub mod pool;

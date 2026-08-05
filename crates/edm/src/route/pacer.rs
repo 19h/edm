@@ -196,6 +196,12 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
         None
     }
 
+    /// The pacing clock, for callers that need to stamp a job's first attempt.
+    #[must_use]
+    pub fn now_ms(&self) -> f64 {
+        self.clock.now_ms()
+    }
+
     #[must_use]
     pub fn spent(&self) -> Spent {
         self.inner.borrow().spent
