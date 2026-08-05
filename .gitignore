@@ -6,3 +6,8 @@
 .cache/
 *.pending-snap
 /.claude/
+
+# Live Companion API credentials. Never tracked.
+.env
+.env.*
+!.env.example
