@@ -50,6 +50,10 @@ Recorded when an assumption made while planning turned out to be wrong.
   a `RangeError: Invalid count value`; `COLUMNS` of four hundred digits yields
   `Infinity` and a *different* `RangeError`. Both happen at module init, outside
   `main`'s try/catch. The single clamp covers both.
+- **R47's message, measured:** a poisoned switch throws
+  `value.toLowerCase is not a function. (In 'value.toLowerCase()', 'value.toLowerCase' is undefined)`
+  under Bun 1.2.3, and exits **1**. Recorded in `cli_errors.tsv` and asserted
+  against `cli::POISON_TYPE_ERROR`.
 - **C5's Bun string, measured:** `TextDecoder("utf-8", {fatal: true})` under Bun
   1.2.3 raises `TypeError: Invalid byte sequence`.
 - **C4's error text, now fixed:** `Cannot allocate {n} bytes for the decompressed
