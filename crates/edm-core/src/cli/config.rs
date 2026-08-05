@@ -884,3 +884,200 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
         credits: cli.optional_number(Flag::Credits)?,
     })
 }
+
+// ---------------------------------------------------------------------------
+// route
+//
+// A new command, so nothing here is transcribed and nothing is bound by the
+// parity register. What it does inherit is the discipline: reads happen in a
+// stated order, every default is named, and a filter records whether it prunes
+// before the Companion API is touched or only at ranking time. That last
+// distinction is the request count, which is the whole cost of the feature.
+// ---------------------------------------------------------------------------
+
+/// Which shapes of route to search for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// A single laden hop. Has no repeatable rate: flying it again means
+    /// deadheading back empty.
+    OneWay,
+    /// `A -> B -> A`, a different commodity each way.
+    RoundTrip,
+    /// The best repeatable cycle of any length. Exactly solvable.
+    Loop,
+    /// The best repeatable cycle of at most this many stops.
+    BoundedLoop(usize),
+}
+
+impl Shape {
+    /// `--shape one-way|round-trip|loop|loop:N`.
+    pub fn parse(raw: &str) -> Result<Self, CliError> {
+        let raw = crate::js::text::js_trim(raw);
+        if let Some(bound) = raw.strip_prefix("loop:") {
+            let stops = crate::js::parse_unsigned_integer("--shape loop:N", bound)
+                .map_err(CliError::from)?;
+            if stops < 2.0 {
+                return Err("--shape loop:N needs at least 2 stops".to_owned().into());
+            }
+            return Ok(Self::BoundedLoop(stops as usize));
+        }
+        match raw {
+            "one-way" | "oneway" => Ok(Self::OneWay),
+            "round-trip" | "roundtrip" => Ok(Self::RoundTrip),
+            "loop" => Ok(Self::Loop),
+            other => Err(format!(
+                "--shape must be one-way, round-trip, loop or loop:N, not \"{other}\""
+            )
+            .into()),
+        }
+    }
+}
+
+/// The largest ship that can berth. Advisory only against Ardent's own field,
+/// which is measurably unreliable; the station-type filter is what actually
+/// decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Pad {
+    Small,
+    Medium,
+    Large,
+}
+
+impl Pad {
+    pub fn parse(raw: &str) -> Result<Self, CliError> {
+        match crate::js::text::js_trim(raw).to_lowercase().as_str() {
+            "s" | "small" | "1" => Ok(Self::Small),
+            "m" | "medium" | "2" => Ok(Self::Medium),
+            "l" | "large" | "3" => Ok(Self::Large),
+            other => Err(format!("--pad must be S, M or L, not \"{other}\"").into()),
+        }
+    }
+}
+
+/// Everything `route` was asked for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RouteConfig {
+    /// The system or station to search around.
+    pub reference: String,
+    pub radius_ly: f64,
+
+    // Pruned before the Companion API is touched.
+    pub pad: Pad,
+    pub station_types: Option<Vec<String>>,
+    pub include_carriers: bool,
+    pub include_settlements: bool,
+    pub max_star_distance_ls: Option<f64>,
+
+    // Applied at ranking time only.
+    pub cargo: Option<f64>,
+    pub credits: Option<f64>,
+    pub jump_range_ly: f64,
+    pub shape: Shape,
+    pub top: usize,
+    pub min_profit: f64,
+    pub min_supply: f64,
+    pub min_demand: f64,
+
+    // Spending.
+    pub rate_per_second: f64,
+    pub max_requests: f64,
+    pub confirmed: bool,
+    pub max_age_minutes: f64,
+    pub cache: bool,
+    pub refresh: bool,
+    pub cache_dir: Option<String>,
+    pub ardent_queries: u32,
+    pub fast_estimate: bool,
+
+    pub dry_run: bool,
+    pub json: bool,
+    pub detail: bool,
+}
+
+/// Defaults, in one place so the plan table and the documentation cannot drift
+/// apart from the behaviour.
+pub const DEFAULT_RADIUS_LY: f64 = 30.0;
+pub const DEFAULT_JUMP_RANGE_LY: f64 = 30.0;
+pub const DEFAULT_MAX_STAR_DISTANCE_LS: f64 = 2_000.0;
+pub const DEFAULT_TOP: f64 = 20.0;
+pub const DEFAULT_MIN_PROFIT: f64 = 1_000.0;
+pub const DEFAULT_MAX_AGE_MINUTES: f64 = 30.0;
+pub const DEFAULT_RPS: f64 = 4.0;
+pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
+
+/// Builds the configuration for `route`.
+///
+/// The reference is read first and is required, because every other flag is
+/// meaningless without somewhere to search around — and because a run that is
+/// going to fail should fail before it has printed anything.
+pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
+    let positional = cli.args().positionals.join(" ");
+    let positional = crate::js::text::js_trim(&positional);
+    let reference = match cli.optional_value(Flag::System, None) {
+        Some(system) => system.to_owned(),
+        None if !positional.is_empty() => positional.to_owned(),
+        None => {
+            return Err("route needs a system or station name to search around"
+                .to_owned()
+                .into());
+        }
+    };
+
+    let radius_ly = cli.optional_decimal(Flag::Radius)?.unwrap_or(DEFAULT_RADIUS_LY);
+    let shape = match cli.optional_value(Flag::Shape, None) {
+        Some(raw) => Shape::parse(raw)?,
+        None => Shape::RoundTrip,
+    };
+    let pad = match cli.optional_value(Flag::Pad, None) {
+        Some(raw) => Pad::parse(raw)?,
+        None => Pad::Large,
+    };
+
+    Ok(RouteConfig {
+        reference,
+        radius_ly,
+        pad,
+        station_types: cli.optional_value(Flag::StationTypes, None).map(|raw| {
+            raw.split(',')
+                .map(|kind| crate::js::text::js_trim(kind).to_owned())
+                .filter(|kind| !kind.is_empty())
+                .collect()
+        }),
+        // Carriers jump without warning and price idiosyncratically, so a route
+        // through one can evaporate between planning and flying. They are also
+        // over a third of the priced markets in range, so excluding them is
+        // most of the request budget too.
+        include_carriers: cli.switch_value(Flag::Carriers, false)?,
+        // Odyssey settlements are 63% of what Ardent calls a station near Sol
+        // and cannot berth a large ship at all, so excluding them is not a cost
+        // saving, it is correctness.
+        include_settlements: cli.switch_value(Flag::Settlements, false)?,
+        max_star_distance_ls: Some(
+            cli.optional_decimal(Flag::MaxStarDistance)?.unwrap_or(DEFAULT_MAX_STAR_DISTANCE_LS),
+        ),
+        cargo: cli.optional_number(Flag::Cargo)?,
+        credits: cli.optional_number(Flag::Credits)?,
+        jump_range_ly: cli.optional_decimal(Flag::Jump)?.unwrap_or(DEFAULT_JUMP_RANGE_LY),
+        shape,
+        top: cli.optional_number(Flag::Top)?.unwrap_or(DEFAULT_TOP) as usize,
+        min_profit: cli.optional_number(Flag::MinProfit)?.unwrap_or(DEFAULT_MIN_PROFIT),
+        min_supply: cli.optional_number(Flag::MinSupply)?.unwrap_or(1.0),
+        min_demand: cli.optional_number(Flag::MinDemand)?.unwrap_or(1.0),
+        rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
+        max_requests: cli
+            .optional_number(Flag::MaxRequests)?
+            .unwrap_or(crate::spend::DEFAULT_MAX_REQUESTS),
+        confirmed: cli.switch_value(Flag::Yes, false)?,
+        max_age_minutes: cli.optional_decimal(Flag::MaxAge)?.unwrap_or(DEFAULT_MAX_AGE_MINUTES),
+        cache: cli.switch_value(Flag::Cache, true)?,
+        refresh: cli.switch_value(Flag::Refresh, false)?,
+        cache_dir: cli.optional_value(Flag::CacheDir, None).map(str::to_owned),
+        ardent_queries: cli
+            .optional_number(Flag::ArdentQueries)?
+            .unwrap_or(DEFAULT_ARDENT_QUERIES) as u32,
+        fast_estimate: cli.switch_value(Flag::FastEstimate, false)?,
+        dry_run: cli.switch_value(Flag::DryRun, false)?,
+        json: cli.switch_value(Flag::Json, false)?,
+        detail: cli.switch_value(Flag::Detail, false)?,
+    })
+}

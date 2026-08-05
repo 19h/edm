@@ -23,4 +23,5 @@ pub mod domain;
 pub mod js;
 pub mod pace;
 pub mod render;
+pub mod spend;
 pub mod wire;

@@ -16,7 +16,7 @@ use edm_core::cli::config::{
     self, BatchConfig, CachedTimestamp, LookupMode, MarketTarget, MarketsConfig, PlanSource,
     ResolvedTrade, SessionConfig, StampDefaults, SweepSettings, TradeDispatch, TradeInputs,
 };
-use edm_core::cli::{Cli, EnvSnapshot, parse};
+use edm_core::cli::{Cli, CliError, EnvSnapshot, Table, parse, parse_with};
 use edm_core::domain::trade::Kind;
 use edm_core::domain::{MarketSnapshot, parse_market_snapshot};
 use edm_core::js::json::JsValue;
@@ -1292,4 +1292,94 @@ fn every_batch_guard_precedes_the_market_id() {
             "{argv:?} should report its guard, not the market id"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// route
+// ---------------------------------------------------------------------------
+
+fn route(argv: &[&str]) -> Result<config::RouteConfig, CliError> {
+    let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+    let parsed = parse_with(&owned, Table::Extended).expect("parses");
+    let env = EnvSnapshot::empty();
+    config::route_config(&Cli::new(&parsed, &env))
+}
+
+#[test]
+fn route_needs_somewhere_to_search_around() {
+    // Failing before anything is printed is the point: every other flag is
+    // meaningless without a reference.
+    let error = route(&["route", "--radius", "30"]).unwrap_err();
+    assert_eq!(error.message(), "route needs a system or station name to search around");
+
+    assert_eq!(route(&["route", "Sol"]).unwrap().reference, "Sol");
+    assert_eq!(route(&["route", "--system", "Sol"]).unwrap().reference, "Sol");
+    // A quoted multi-word name arrives as several positionals.
+    assert_eq!(route(&["route", "Hyades", "Sector", "NI-X"]).unwrap().reference, "Hyades Sector NI-X");
+}
+
+/// The defaults are the whole safety story: they are what keep a nearby sweep
+/// inside the ceiling, and they are load-bearing rather than cosmetic.
+#[test]
+fn the_defaults_exclude_what_cannot_be_traded_at() {
+    let config = route(&["route", "Sol"]).unwrap();
+    assert_eq!(config.radius_ly, 30.0);
+    assert_eq!(config.pad, config::Pad::Large);
+    assert!(!config.include_carriers, "carriers jump between planning and flying");
+    assert!(!config.include_settlements, "a settlement cannot berth a large ship at all");
+    assert_eq!(config.max_star_distance_ls, Some(2_000.0));
+    assert_eq!(config.shape, config::Shape::RoundTrip);
+    assert!(config.cache, "--no-cache comes from the parser's own negation");
+}
+
+#[test]
+fn shapes_parse_including_the_bounded_loop() {
+    use config::Shape;
+    assert_eq!(route(&["route", "Sol", "--shape", "one-way"]).unwrap().shape, Shape::OneWay);
+    assert_eq!(route(&["route", "Sol", "--shape", "roundtrip"]).unwrap().shape, Shape::RoundTrip);
+    assert_eq!(route(&["route", "Sol", "--shape", "loop"]).unwrap().shape, Shape::Loop);
+    assert_eq!(route(&["route", "Sol", "--shape", "loop:4"]).unwrap().shape, Shape::BoundedLoop(4));
+
+    // A one-stop loop is not a loop.
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "loop:1"]).unwrap_err().message(),
+        "--shape loop:N needs at least 2 stops"
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "spiral"]).unwrap_err().message(),
+        "--shape must be one-way, round-trip, loop or loop:N, not \"spiral\""
+    );
+}
+
+#[test]
+fn pads_parse_by_letter_word_or_number() {
+    use config::Pad;
+    for (raw, expected) in
+        [("L", Pad::Large), ("large", Pad::Large), ("3", Pad::Large), ("m", Pad::Medium), ("S", Pad::Small)]
+    {
+        assert_eq!(route(&["route", "Sol", "--pad", raw]).unwrap().pad, expected, "{raw}");
+    }
+    assert_eq!(
+        route(&["route", "Sol", "--pad", "XL"]).unwrap_err().message(),
+        "--pad must be S, M or L, not \"xl\""
+    );
+}
+
+/// `--no-cache` is not a flag: it is the parser's `--no-` negation of `--cache`,
+/// which is why the flag is named for the positive.
+#[test]
+fn cache_is_negated_by_the_parser_not_by_a_second_flag() {
+    assert!(route(&["route", "Sol"]).unwrap().cache);
+    assert!(!route(&["route", "Sol", "--no-cache"]).unwrap().cache);
+    assert!(route(&["route", "Sol", "--cache"]).unwrap().cache);
+}
+
+/// Route-only names must stay invisible to every other command, or the base
+/// grammar has been widened and the parity contract broken \[C26\].
+#[test]
+fn route_flags_do_not_leak_into_other_commands() {
+    let argv: Vec<String> =
+        ["market", "Colonia", "--radius", "30"].iter().map(|s| (*s).to_owned()).collect();
+    let error = parse(&argv).unwrap_err();
+    assert_eq!(error.to_string(), "Unknown option --radius");
 }
