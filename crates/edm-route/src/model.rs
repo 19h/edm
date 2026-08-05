@@ -151,6 +151,10 @@ pub struct RawCommodity {
     pub demand: i64,
     /// Demand bracket, 0–3.
     pub demand_bracket: i64,
+    /// The Companion API's `categoryname` — `Metals`, `Minerals`, `Foods`,
+    /// `Salvage`, and a dozen more. Carried so a search can be restricted to
+    /// the kinds of cargo a commander is willing to haul.
+    pub category: String,
     /// Whether this market's own `legality` field marks the commodity illegal
     /// **here**.
     ///
@@ -169,6 +173,8 @@ pub struct RawCommodity {
 /// Why a row was not ingested, or was ingested under protest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IngestCounts {
+    /// Rows whose `categoryname` was not among those asked for.
+    pub wrong_category: u32,
     /// Rows the market itself marks illegal at that market. See
     /// [`RawCommodity::illegal`].
     pub illegal_here: u32,
@@ -201,7 +207,7 @@ impl Market {
         identity: MarketIdentity,
         rows: &[RawCommodity],
         commodities: &mut Commodities,
-        floors: RowFloors,
+        floors: &RowFloors,
         counts: &mut IngestCounts,
     ) -> Self {
         let mut supply = Vec::new();
@@ -217,6 +223,13 @@ impl Market {
             // counted rather than priced.
             if row.illegal && !floors.allow_illegal {
                 counts.illegal_here += 1;
+                continue;
+            }
+
+            if !floors.categories.is_empty()
+                && !floors.categories.iter().any(|wanted| wanted.eq_ignore_ascii_case(&row.category))
+            {
+                counts.wrong_category += 1;
                 continue;
             }
 
@@ -295,13 +308,22 @@ pub struct MarketIdentity {
 }
 
 /// Row floors applied at ingest.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// No `Copy`: `categories` owns its strings. Passed by reference everywhere,
+// which is what a filter list wants anyway.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowFloors {
     /// Stock below this is not worth a station visit.
     pub min_stock: Tons,
     /// Published demand below this is not worth a station visit. Not applied to
     /// unpublished demand, which has no quantity to compare.
     pub min_demand: Tons,
+    /// Which `categoryname`s may be ranked, lowercased. Empty means all of
+    /// them.
+    ///
+    /// Applied at ingest rather than at ranking time because a category nobody
+    /// will haul is noise in every inner loop, and dropping it once is cheaper
+    /// than skipping it in three.
+    pub categories: Vec<String>,
     /// Whether to rank a commodity at a market that calls it illegal.
     ///
     /// Off by default, because such a trade cannot be completed at the counter:
@@ -313,7 +335,12 @@ pub struct RowFloors {
 
 impl Default for RowFloors {
     fn default() -> Self {
-        Self { min_stock: Tons(1), min_demand: Tons(1), allow_illegal: false }
+        Self {
+            min_stock: Tons(1),
+            min_demand: Tons(1),
+            categories: Vec::new(),
+            allow_illegal: false,
+        }
     }
 }
 
@@ -435,6 +462,7 @@ mod tests {
             stock_bracket: if stock > 0 { 2 } else { 0 },
             demand,
             demand_bracket: bracket,
+            category: String::new(),
             illegal: false,
         }
     }
@@ -448,7 +476,7 @@ mod tests {
             identity(),
             &rows,
             &mut commodities,
-            RowFloors::default(),
+            &RowFloors::default(),
             &mut counts,
         );
         assert_eq!(market.demand.len(), 1);
@@ -466,7 +494,7 @@ mod tests {
             identity(),
             &rows,
             &mut commodities,
-            RowFloors::default(),
+            &RowFloors::default(),
             &mut counts,
         );
         assert!(market.demand.is_empty());
@@ -482,7 +510,7 @@ mod tests {
             identity(),
             &rows,
             &mut commodities,
-            RowFloors::default(),
+            &RowFloors::default(),
             &mut counts,
         );
         assert_eq!(counts.bid_not_below_ask, 1);
@@ -495,9 +523,9 @@ mod tests {
         let mut commodities = Commodities::new();
         let mut counts = IngestCounts::default();
         let rows = [row("gold", 0, 59_759, 0, 0, 2), row("silver", 0, 4_000, 0, 5, 1)];
-        let floors = RowFloors { min_stock: Tons(1), min_demand: Tons(100), allow_illegal: false };
+        let floors = RowFloors { min_stock: Tons(1), min_demand: Tons(100), ..RowFloors::default() };
         let market =
-            Market::from_rows(identity(), &rows, &mut commodities, floors, &mut counts);
+            Market::from_rows(identity(), &rows, &mut commodities, &floors, &mut counts);
         assert_eq!(market.demand.len(), 1);
         assert_eq!(market.demand[0].qty, DemandQty::Unpublished);
     }
@@ -527,11 +555,12 @@ mod legality_tests {
             stock_bracket: 0,
             demand: 68_433,
             demand_bracket: 3,
+            category: String::new(),
             illegal: true,
         }
     }
 
-    fn ingest(rows: &[RawCommodity], floors: RowFloors) -> (Market, IngestCounts) {
+    fn ingest(rows: &[RawCommodity], floors: &RowFloors) -> (Market, IngestCounts) {
         let mut commodities = Commodities::new();
         let mut counts = IngestCounts::default();
         let market = Market::from_rows(
@@ -554,7 +583,7 @@ mod legality_tests {
     #[test]
     fn a_market_that_calls_a_commodity_illegal_is_not_a_place_to_sell_it() {
         let (market, counts) =
-            ingest(&[slaves_at_a_market_that_forbids_them()], RowFloors::default());
+            ingest(&[slaves_at_a_market_that_forbids_them()], &RowFloors::default());
 
         assert!(market.demand.is_empty(), "68,433 tons of demand that cannot be sold into");
         assert_eq!(counts.illegal_here, 1, "and it is counted, not silently gone");
@@ -566,7 +595,7 @@ mod legality_tests {
     #[test]
     fn the_same_commodity_is_tradable_where_it_is_legal() {
         let legal = RawCommodity { illegal: false, ..slaves_at_a_market_that_forbids_them() };
-        let (market, counts) = ingest(&[legal], RowFloors::default());
+        let (market, counts) = ingest(&[legal], &RowFloors::default());
 
         assert_eq!(market.demand.len(), 1, "legal here, so it ranks");
         assert_eq!(counts.illegal_here, 0);
@@ -577,7 +606,7 @@ mod legality_tests {
     #[test]
     fn include_illegal_opts_back_in() {
         let floors = RowFloors { allow_illegal: true, ..RowFloors::default() };
-        let (market, _) = ingest(&[slaves_at_a_market_that_forbids_them()], floors);
+        let (market, _) = ingest(&[slaves_at_a_market_that_forbids_them()], &floors);
 
         assert_eq!(market.demand.len(), 1);
     }

@@ -53,6 +53,9 @@ pub const ROUTE_COLUMNS: &[Column] = &[
     Column::new("rank", "#").right(),
     Column::new("route", "Route").min_width(24),
     Column::new("cargo", "Cargo").min_width(14),
+    // Total distance flown per lap. A round trip's is the out-and-back, which
+    // is what you actually fly; `--detail` and `--json` carry it per leg.
+    Column::new("distance", "Ly").right().priority(1),
     Column::new("profit", "Profit").right().priority(3),
     Column::new("rate", "Cr/h").right(),
     // No `Cr/h lap 1` column. It is the same quantity measured over the

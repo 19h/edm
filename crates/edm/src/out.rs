@@ -58,6 +58,17 @@ pub struct Out {
     /// `--json`: suppresses the tables, though not — faithfully — every
     /// diagnostic. R76.
     json: bool,
+    /// Whether stdout is **one document** and nothing else may go there.
+    ///
+    /// R76's leak — a diagnostic landing in the middle of a `--json` stream —
+    /// is faithful to the original and is reproduced for the four ported
+    /// commands. `route` has no oracle to be faithful to, and a document a
+    /// consumer cannot parse is not an output format \[C28\]. Set by `route
+    /// --json`, it diverts every ordinary write to stderr, including the ones
+    /// that come from emitters shared with the ported commands — which is where
+    /// the leak actually came from: a single 410 error payload, and at region
+    /// scale there is always one.
+    documentary: Cell<bool>,
 }
 
 impl Out {
@@ -74,6 +85,21 @@ impl Out {
             width,
             metric,
             json,
+            documentary: Cell::new(false),
+        }
+    }
+
+    /// Declare that stdout carries one document and nothing else \[C28\].
+    pub fn stdout_is_a_document(&self) {
+        self.documentary.set(true);
+    }
+
+    /// Write the document itself. The one thing that reaches stdout in that
+    /// mode, and the reason the mode exists.
+    pub fn document(&self, text: &str) {
+        if let Ok(mut sink) = self.stdout.try_borrow_mut() {
+            sink.push(text);
+            sink.push("\n");
         }
     }
 
@@ -185,6 +211,10 @@ impl Out {
     }
 
     fn write(&self, text: &str) {
+        if self.documentary.get() {
+            self.diagnostic(text);
+            return;
+        }
         if let Ok(mut sink) = self.stdout.try_borrow_mut() {
             sink.push(text);
         }
@@ -202,8 +232,10 @@ impl Out {
             width,
             metric,
             json,
+            documentary: Cell::new(false),
         }
     }
+
 
     /// Everything written so far, stdout and stderr interleaved in write order.
     #[must_use]

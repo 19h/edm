@@ -82,6 +82,10 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     timer: &T,
 ) -> CmdResult {
     let out = app.out;
+    // Everything else this run writes goes to stderr from here on \[C28\].
+    if config.json {
+        out.stdout_is_a_document();
+    }
     let ardent = ArdentClient::new(app.http, &app.overrides.ardent_base);
 
     // Nothing below this point may run on a name that was never resolved: an
@@ -469,7 +473,7 @@ fn rank(
     // and at five thousand markets those payloads are ~2.3 GiB that would
     // otherwise stay resident through the graph build.
     let (markets, commodities, crossing) =
-        ingest::markets(acquired.listings, stations, ingest::floors(config));
+        ingest::markets(acquired.listings, stations, &ingest::floors(config));
     // Not under `--json`: a diagnostic in the middle of the stream is exactly
     // what R76 does to the ported commands, and C28 says route's document is
     // one well-formed document or nothing.
@@ -515,7 +519,7 @@ fn rank(
             &commodities,
             coverage_json(coverage, &crossing),
         );
-        out.line(&document.stringify(2));
+        out.document(&document.stringify(2));
         return;
     }
 

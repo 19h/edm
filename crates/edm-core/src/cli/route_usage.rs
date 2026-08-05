@@ -12,6 +12,7 @@ use crate::spend;
 
 /// The route command's help text.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "it is one string; splitting it hides the layout")]
 pub fn route_usage() -> String {
     let n = |value: f64| js::format_integer(value);
     format!(
@@ -25,7 +26,12 @@ the most profitable routes in that data. The loop search is exact: it returns
 the best repeatable route there is, not the best one it happened to find.
 
 Search
-  --radius <ly>            default {radius}, ceiling {max_radius}
+  --radius <ly>            default {radius}, ceiling {max_radius} (Ardent's own clamp).
+                           It bounds how far each *market* is from the
+                           reference, not how long a leg may be: two markets
+                           each within 40 Ly can be 80 Ly apart. A wide radius
+                           buys more markets, and --max-requests is what refuses
+                           when that is too many
   --shape <s>              one-way | round-trip | loop | loop:N   default round-trip
                            `loop` is the best repeatable cycle of any length, and
                            is solved exactly; `loop:N` bounds it to N stops
@@ -47,6 +53,10 @@ Which markets (all of these prune before anything is sent)
   --settlements            Odyssey settlements are excluded by default; they
                            cannot berth a large ship at all
   --min-supply <n>         default 1        --min-demand <n>   default 1
+  --category <a,b,c>       only these commodity categories. Metals, Minerals,
+                           Foods, Chemicals, Machinery, Medicines, Technology,
+                           Textiles, Consumer Items, Industrial Materials,
+                           Salvage, Weapons, Waste, Narcotics, Slaves
   --include-illegal        rank commodities a market marks illegal *there*.
                            Off by default: such a trade is refused at the
                            counter (HTTP 401) and the black-market path needs a
@@ -144,7 +154,7 @@ mod tests {
     fn the_help_advertises_the_real_defaults() {
         let text = route_usage();
         for expected in [
-            "--radius <ly>            default 30, ceiling 100",
+            "--radius <ly>            default 30, ceiling 500",
             "default round-trip",
             "--max-requests <n>       ceiling, default 2,000",
             "required above 250 requests",

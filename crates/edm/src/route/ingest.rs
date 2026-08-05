@@ -51,7 +51,7 @@ pub struct Crossing {
 pub fn markets(
     listings: Vec<Listing>,
     stations: &[ArdentStation],
-    floors: RowFloors,
+    floors: &RowFloors,
 ) -> (Vec<Market>, Commodities, Crossing) {
     let mut commodities = Commodities::new();
     let mut crossing = Crossing::default();
@@ -127,6 +127,7 @@ fn raw_commodity(row: &Commodity<'_>, crossing: &mut Crossing) -> Option<RawComm
         stock_bracket,
         demand,
         demand_bracket,
+        category: row.category.to_owned(),
         // From *this* market's `legality` field, which is why it is read per
         // row rather than looked up per commodity.
         illegal: row.illegal,
@@ -156,6 +157,7 @@ pub fn floors(config: &edm_core::cli::config::RouteConfig) -> RowFloors {
     RowFloors {
         min_stock: Tons(exact(config.min_supply).unwrap_or(1)),
         min_demand: Tons(exact(config.min_demand).unwrap_or(1)),
+        categories: config.categories.clone(),
         allow_illegal: config.include_illegal,
     }
 }

@@ -83,6 +83,8 @@ pub enum Flag {
     /// same market. A value flag, so it lives before `DryRun` — `takes_value`
     /// is a discriminant compare against it.
     EddnMaxAge,
+    /// `--category <a,b,c>`: only these `categoryname`s are ranked.
+    Category,
 
     // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -143,7 +145,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 82] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -198,6 +200,7 @@ impl Flag {
         Self::ArdentQueries,
         Self::CacheDir,
         Self::EddnMaxAge,
+        Self::Category,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -285,6 +288,7 @@ impl Flag {
             "ardentqueries" => Self::ArdentQueries,
             "cachedir" => Self::CacheDir,
             "eddnmaxage" => Self::EddnMaxAge,
+            "category" | "categories" => Self::Category,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -354,6 +358,7 @@ impl Flag {
             Self::ArdentQueries => "--ardent-queries",
             Self::CacheDir => "--cache-dir",
             Self::EddnMaxAge => "--eddn-max-age",
+            Self::Category => "--category",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

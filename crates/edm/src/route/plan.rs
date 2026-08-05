@@ -211,13 +211,14 @@ mod tests {
     /// a minute — before being told the ceiling is 100.
     #[test]
     fn a_radius_past_the_ceiling_is_refused_before_any_work() {
-        let over = config(&["route", "Sol", "--radius", "200"]);
+        let over = config(&["route", "Sol", "--radius", "600"]);
         assert_eq!(preflight(&over), Some(Refusal::RadiusTooWide));
 
         // And nothing at or under it is pre-refused, whatever else is wrong
         // with the command — those answers need the region.
         for argv in [
-            vec!["route", "Sol", "--radius", "100"],
+            vec!["route", "Sol", "--radius", "500"],
+            vec!["route", "Sol", "--radius", "200"],
             vec!["route", "Sol"],
             vec!["route", "Sol", "--max-requests", "1"],
         ] {
@@ -229,9 +230,9 @@ mod tests {
     /// the numbers would describe a sweep that is not going to happen.
     #[test]
     fn a_radius_past_the_ceiling_is_refused_before_the_table() {
-        let (decision, text) = run(&["route", "Sol", "--radius", "500"], &survey(2, 3));
+        let (decision, text) = run(&["route", "Sol", "--radius", "600"], &survey(2, 3));
         assert_eq!(decision, Decision::Refused(Refusal::RadiusTooWide));
-        assert!(text.contains("exceeds the 100 Ly ceiling"), "{text}");
+        assert!(text.contains("exceeds the 500 Ly ceiling"), "{text}");
         assert!(!text.contains("ROUTE PLAN"), "no table for a typo\n{text}");
     }
 

@@ -39,6 +39,7 @@ fn ring() -> Vec<Market> {
                 stock_bracket: 3,
                 demand: 0,
                 demand_bracket: 0,
+                category: String::new(),
                 illegal: false,
             }];
             rows.extend((0..N).filter(|c| *c != i).map(|c| RawCommodity {
@@ -49,6 +50,7 @@ fn ring() -> Vec<Market> {
                 stock_bracket: 0,
                 demand: 500,
                 demand_bracket: 3,
+                category: String::new(),
                 illegal: false,
             }));
             Market::from_rows(
@@ -62,7 +64,7 @@ fn ring() -> Vec<Market> {
                 },
                 &rows,
                 &mut commodities,
-                RowFloors::default(),
+                &RowFloors::default(),
                 &mut counts,
             )
         })

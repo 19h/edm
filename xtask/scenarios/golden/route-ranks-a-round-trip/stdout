@@ -32,11 +32,11 @@ enumerating systems within 10 Ly of Sol...
 +----------------+--------------+
    every price below was read live from the Companion API during this run
 == BEST ROUND TRIPS ================================================================================
-+---+--------------------------+----------------+--------------+--------+----------------+
-| # | Route                    | Cargo          |         Cr/h |    Lap | Claim          |
-+===+==========================+================+==============+========+================+
-| 1 | Galileo > Titan City     | Gold > Silver  | 43,273,489/h | 4m 33s | proved optimal |
-+---+--------------------------+----------------+--------------+--------+----------------+
++---+----------------------------+----------------+-----+--------------+--------+----------------+
+| # | Route                      | Cargo          |  Ly |         Cr/h |    Lap | Claim          |
++===+============================+================+=====+==============+========+================+
+| 1 | Galileo (Sol) > Titan City | Gold > Silver  | 0.0 | 43,273,489/h | 4m 33s | proved optimal |
++---+----------------------------+----------------+-----+--------------+--------+----------------+
    columns hidden to fit 100 cols: Profit
    prices were read at one instant and are already ageing; another commander may have traded them
    since
@@ -47,7 +47,7 @@ enumerating systems within 10 Ly of Sol...
 == TRADE COMMANDS ==================================================================================
    run each where it says; --top controls how many routes are listed here
 
-  1  Galileo > Titan City
+  1  Galileo (Sol) > Titan City
        at Galileo                      edm trade --market-id 128016384 --type buy --item Gold --fill --cargo 784
        at Titan City                   edm trade --market-id 128016576 --type sell --item Gold --qty 784
        at Titan City                   edm trade --market-id 128016576 --type buy --item Silver --fill --cargo 784

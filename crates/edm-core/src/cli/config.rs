@@ -980,6 +980,9 @@ pub struct RouteConfig {
     /// `--include-illegal`. See [`edm_route`'s `RowFloors::allow_illegal`]: a
     /// market that calls a commodity illegal refuses the trade at the counter.
     pub include_illegal: bool,
+    /// `--category`: only these `categoryname`s are ranked, lowercased. Empty
+    /// means every category.
+    pub categories: Vec<String>,
     /// `--eddn` / `--eddn-test`: relay every market this run polls live.
     pub eddn: bool,
     /// `--eddn-max-age`, in minutes: how long a market stays suppressed after
@@ -1156,6 +1159,11 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         detail: cli.switch_value(Flag::Detail, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
         include_illegal: cli.switch_value(Flag::IncludeIllegal, false)?,
+        categories: cli
+            .optional_value(Flag::Category, None)
+            .map(split_items)
+            .transpose()?
+            .unwrap_or_default(),
         eddn: wants_eddn(cli)?,
         eddn_max_age_minutes: cli
             .optional_decimal(Flag::EddnMaxAge)?

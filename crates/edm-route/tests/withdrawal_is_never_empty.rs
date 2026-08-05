@@ -45,6 +45,7 @@ fn ring() -> Vec<Market> {
                     stock_bracket: 3,
                     demand: 0,
                     demand_bracket: 0,
+                    category: String::new(),
                     illegal: false,
                 },
                 RawCommodity {
@@ -55,6 +56,7 @@ fn ring() -> Vec<Market> {
                     stock_bracket: 0,
                     demand: 500,
                     demand_bracket: 3,
+                    category: String::new(),
                     illegal: false,
                 },
             ];
@@ -69,7 +71,7 @@ fn ring() -> Vec<Market> {
                 },
                 &rows,
                 &mut commodities,
-                RowFloors::default(),
+                &RowFloors::default(),
                 &mut counts,
             )
         })

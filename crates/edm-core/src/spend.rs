@@ -24,8 +24,20 @@ use crate::js;
 pub const CONFIRM_THRESHOLD: f64 = 250.0;
 /// Requests above which nothing is sent at all, absent `--max-requests`.
 pub const DEFAULT_MAX_REQUESTS: f64 = 2_000.0;
-/// The widest radius accepted, whatever the request count says.
-pub const MAX_RADIUS_LY: f64 = 100.0;
+/// The widest radius accepted.
+///
+/// **Ardent's own clamp**, and therefore the only number here that is true
+/// rather than chosen: ask for more and the server silently narrows the answer,
+/// so a completeness claim past it could not be honest.
+///
+/// It used to be 100, picked as a proxy for "this will be too big". That proxy
+/// was redundant — `--max-requests` measures the size directly and refuses on
+/// it — and it was wrong about what a wide radius costs, because `--radius`
+/// bounds how far each *market* sits from the reference, not how long a route's
+/// legs may be. Two markets each within 40 Ly can be 80 Ly apart, so a long-leg
+/// route never needed a wide radius. What a wide radius buys is *more markets*,
+/// which is exactly what the request ceiling is for.
+pub const MAX_RADIUS_LY: f64 = ARDENT_MAX_RADIUS_LY;
 /// Ardent's own clamp, which it applies silently.
 pub const ARDENT_MAX_RADIUS_LY: f64 = 500.0;
 /// Ardent's `/nearby` row cap.
@@ -285,11 +297,17 @@ mod tests {
         // Not "40,000 requests" — the radius is the mistake and the message
         // says so.
         assert_eq!(
-            verdict(&estimate, 500.0, 1e9, true),
+            verdict(&estimate, 5_000.0, 1e9, true),
             Verdict::Refused(Refusal::RadiusTooWide)
         );
-        let message = refusal_message(&Refusal::RadiusTooWide, &estimate, 500.0, 1e9);
-        assert!(message.contains("--radius 500"), "{message}");
+        // And the ceiling itself is accepted: it is Ardent's clamp, not a
+        // judgement about size, and `--max-requests` is what refuses a sweep
+        // for being too big.
+        assert_eq!(verdict(&estimate, MAX_RADIUS_LY, 1e9, true), Verdict::Proceed);
+        let message = refusal_message(&Refusal::RadiusTooWide, &estimate, 5_000.0, 1e9);
+        // Ungrouped: the message quotes back what was typed, so it can be edited
+        // and re-run rather than retyped.
+        assert!(message.contains("--radius 5000"), "{message}");
         assert!(message.contains("Nothing has been sent"), "{message}");
     }
 

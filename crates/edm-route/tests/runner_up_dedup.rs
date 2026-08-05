@@ -53,6 +53,7 @@ fn market(id: i64) -> Market {
                 stock_bracket: 3,
                 demand: 5_000,
                 demand_bracket: 3,
+                category: String::new(),
                 illegal: false,
             }
         })
@@ -71,7 +72,7 @@ fn market(id: i64) -> Market {
         },
         &rows,
         &mut commodities,
-        RowFloors::default(),
+        &RowFloors::default(),
         &mut counts,
     )
 }

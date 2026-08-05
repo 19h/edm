@@ -138,7 +138,7 @@ pub async fn enumerate<H: HttpTransport>(
     let mut anchors = 0u32;
     let mut balls =
         vec![Covered { centre: centre.coordinates, radius_ly: covered_to(&page, reach) }];
-    absorb(&mut systems, &mut seen, centre.coordinates, page);
+    absorb(&mut systems, &mut seen, centre.coordinates, radius_ly, page);
 
     let (complete_to_ly, truncated) = loop {
         let Some(frontier) = frontier(&systems, radius_ly, &balls) else {
@@ -169,7 +169,7 @@ pub async fn enumerate<H: HttpTransport>(
         requests += 1;
         anchors += 1;
         balls.push(Covered { centre: anchor.coordinates, radius_ly: covered_to(&page, reach) });
-        absorb(&mut systems, &mut seen, centre.coordinates, page);
+        absorb(&mut systems, &mut seen, centre.coordinates, radius_ly, page);
     };
 
     // An anchored query is a ball around the anchor, so it returns systems the
@@ -247,11 +247,25 @@ fn absorb(
     systems: &mut Vec<NearbySystem>,
     seen: &mut HashSet<u64>,
     centre: Coordinates,
+    radius_ly: f64,
     page: NearbyPage,
 ) {
     for mut system in page.systems {
-        if seen.insert(address_key(system.address)) {
-            system.distance = separation_ly(&centre, &system.coordinates);
+        if !seen.insert(address_key(system.address)) {
+            continue;
+        }
+        system.distance = separation_ly(&centre, &system.coordinates);
+        // **Outside the ball is not in the answer.** An anchored query is a
+        // ball around the *anchor*, so at radius 100 it returns systems up to
+        // 100 Ly beyond it — twice the requested radius from the centre. Those
+        // rows were kept, counted in the plan as "N in radius", and then had a
+        // market list read for each of them: at radius 100 around Sol that is
+        // thousands of free-but-not-instant Ardent requests spent on systems no
+        // route could ever use, and a systems count that was simply untrue.
+        //
+        // `seen` still remembers them, so a later anchor does not re-absorb the
+        // same row, and `frontier` already refused to anchor on one.
+        if system.distance <= radius_ly {
             systems.push(system);
         }
     }

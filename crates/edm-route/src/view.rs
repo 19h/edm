@@ -58,6 +58,7 @@ pub fn ranking(
                 js::format_integer((index + 1) as f64).into(),
                 stops(route, markets).into(),
                 cargo(route, commodities).into(),
+                js::to_fixed_1(route.legs.iter().map(|leg| leg.distance_ly).sum()).into(),
                 money(route.profit.0).into(),
                 // A single hop has no steady state — repeating it means flying
                 // back empty — so it has only a first-lap rate. Printing a dash
@@ -164,7 +165,7 @@ pub fn progress(event: Event) -> String {
 }
 
 
-/// The stations in flying order, **station names only**.
+/// The stations in flying order, **with their systems**.
 ///
 /// A cycle's last destination is its first origin, so it is not repeated: a
 /// round trip reads `A > B` and a four-stop loop `A > B > C > D`, both of which
@@ -176,21 +177,44 @@ pub fn progress(event: Event) -> String {
 /// produced twenty rows that all read `Isherwood Works` and never said where to
 /// fly, the one fact a single hop consists of.
 ///
-/// The system is deliberately absent. `Isherwood Works (FF Andromedae)` is
-/// forty-six characters for one stop, and at region scale the systems are
-/// procedural names like `Piscium Sector JH-V b2-4` that no reader recognises
-/// and that pushed the destination off the end of the cell. `--detail` and
-/// `--json` carry them.
+/// The system is here because you cannot plot a course to a station name. It
+/// was dropped once to buy width for the `Cargo` column and that was the wrong
+/// trade: a procedural name like `Piscium Sector JH-V b2-4` is unrecognisable
+/// but it is also the only thing the galaxy map accepts. The cell squeezes
+/// instead.
+///
+/// A stop in the same system as the one before it does not repeat the system —
+/// `Daedalus (Sol) > Galileo` — because at that point the system is not new
+/// information and the width is better spent on the next station.
 fn stops(route: &Route, markets: &[Market]) -> String {
     // Every leg's *origin*, which for a cycle is exactly the set of stops with
     // the closing repeat left off.
-    let mut names: Vec<String> = route.legs.iter().map(|leg| station(markets, leg.from)).collect();
+    let mut indices: Vec<u32> = route.legs.iter().map(|leg| leg.from).collect();
     if !route.kind.is_cycle()
         && let Some(last) = route.legs.last()
     {
-        names.push(station(markets, last.to));
+        indices.push(last.to);
     }
-    names.join(" > ")
+
+    let mut out = String::new();
+    let mut previous: Option<&str> = None;
+    for (position, index) in indices.iter().enumerate() {
+        if position > 0 {
+            out.push_str(" > ");
+        }
+        let Some(market) = markets.get(*index as usize) else {
+            out.push_str("(unknown)");
+            continue;
+        };
+        out.push_str(&market.station);
+        if previous != Some(market.system.as_str()) {
+            out.push_str(" (");
+            out.push_str(&market.system);
+            out.push(')');
+        }
+        previous = Some(market.system.as_str());
+    }
+    out
 }
 
 /// What is carried, in the same order as the stops.
@@ -219,17 +243,21 @@ fn cargo(route: &Route, commodities: &Commodities) -> String {
 /// Only ASCII case is examined, which is all these identifiers contain, and a
 /// name that is already spaced is returned unchanged.
 fn readable(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
     let mut out = String::with_capacity(name.len() + 4);
-    let mut previous = '\0';
-    for current in name.chars() {
-        if current.is_ascii_uppercase()
-            && previous.is_ascii_lowercase()
-            && !out.ends_with(' ')
-        {
+    for (index, current) in chars.iter().enumerate() {
+        let previous = if index == 0 { '\0' } else { chars[index - 1] };
+        // `agronomicTreatment` -> a word boundary after a lowercase run, and
+        // `CMMComposite` -> one after an acronym, which is the case the first
+        // rule alone misses. The game writes both with the space.
+        let after_word = current.is_ascii_uppercase() && previous.is_ascii_lowercase();
+        let after_acronym = current.is_ascii_uppercase()
+            && previous.is_ascii_uppercase()
+            && chars.get(index + 1).is_some_and(char::is_ascii_lowercase);
+        if (after_word || after_acronym) && !out.ends_with(' ') {
             out.push(' ');
         }
-        out.push(current);
-        previous = current;
+        out.push(*current);
     }
     out
 }
@@ -425,7 +453,7 @@ mod tests {
 
         // The closing stop is not repeated: a cycle returns to its origin by
         // definition, and printing it spent the width twice on one name.
-        assert_eq!(stops(&route, &markets), "Station 1 > Station 2");
+        assert_eq!(stops(&route, &markets), "Station 1 (System 1) > Station 2 (System 2)");
         // Two legs, two commodities, in flying order — and necessarily
         // different, because a station's buy price exceeds its sell price.
         let carried = cargo(&route, &commodities);
@@ -444,7 +472,9 @@ mod tests {
         assert_eq!(readable("LowTemperatureDiamond"), "Low Temperature Diamond");
         // Already spaced, and single letters, are left alone.
         assert_eq!(readable("Agronomic Treatment"), "Agronomic Treatment");
-        assert_eq!(readable("CMMComposite"), "CMMComposite");
+        // An acronym followed by a word, which the game writes with the space.
+        assert_eq!(readable("CMMComposite"), "CMM Composite");
+        assert_eq!(readable("HNShockMount"), "HN Shock Mount");
         assert_eq!(readable(""), "");
     }
 
@@ -672,15 +702,29 @@ mod open_route_tests {
             crate::fixture::choice(0, 1_000),
         );
         assert!(!hop.kind.is_cycle());
-        assert_eq!(stops(&hop, &markets), "Station 1 > Station 2");
+        assert_eq!(stops(&hop, &markets), "Station 1 (System 1) > Station 2 (System 2)");
     }
 
     /// And a cycle still does not repeat the stop it returns to.
+    /// Two stations in one system name it once. At that point the system is
+    /// not new information and the width is better spent on the next station.
+    #[test]
+    fn a_second_stop_in_the_same_system_does_not_repeat_it() {
+        let mut markets = crate::fixture::round_trip_markets();
+        markets[1].system = markets[0].system.clone();
+        let route = crate::fixture::proved_round_trip();
+
+        assert_eq!(stops(&route, &markets), "Station 1 (System 1) > Station 2");
+    }
+
     #[test]
     fn a_cycle_does_not_repeat_its_origin() {
         let route = crate::fixture::proved_round_trip();
         assert!(route.kind.is_cycle());
-        assert_eq!(stops(&route, &crate::fixture::round_trip_markets()), "Station 1 > Station 2");
+        assert_eq!(
+            stops(&route, &crate::fixture::round_trip_markets()),
+            "Station 1 (System 1) > Station 2 (System 2)"
+        );
     }
 
     /// A single hop's rate cell shows the first-lap rate, which is the only one
