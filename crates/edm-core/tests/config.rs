@@ -1395,3 +1395,37 @@ fn route_reuses_the_concurrency_flag_and_its_clamp() {
     assert_eq!(route(&["route", "Sol", "--concurrency", "0"]).unwrap().workers, 1);
     assert_eq!(route(&["route", "Sol", "--concurrency", "99"]).unwrap().workers, 16);
 }
+
+/// `-v` is a flag under the extended table and a positional everywhere else.
+///
+/// The ported grammar knows exactly one single-dash token, `-h`; every other
+/// `-x` becomes a positional so that `--qty -5` can take a negative value
+/// (R44). Adding a second one to the base table would change what
+/// `edm market -v` means.
+#[test]
+fn dash_v_is_verbose_for_route_and_nothing_elsewhere() {
+    assert!(route(&["route", "Sol", "-v"]).unwrap().verbose);
+    assert!(!route(&["route", "Sol"]).unwrap().verbose);
+    assert!(route(&["route", "Sol", "--verbose"]).unwrap().verbose);
+
+    // The base table leaves it a positional, exactly as the TypeScript does.
+    let base = parse_with(&["market".to_owned(), "-v".to_owned()], Table::Base).expect("parses");
+    assert_eq!(base.positionals, vec!["-v".to_owned()]);
+}
+
+/// The bug this pair of fixes exists for: `route Sol -v` searched Ardent for a
+/// system called "Sol -v" and reported that it had never heard of it, because
+/// route joins its positionals into the reference and an unrecognised
+/// single-dash token is a positional. No Elite system name begins with a
+/// hyphen, so a stray one is a mistyped flag and is named as one.
+#[test]
+fn a_stray_dash_token_is_an_unknown_option_not_part_of_a_name() {
+    let error = route(&["route", "Sol", "-x"]).unwrap_err();
+    assert_eq!(error.message(), "Unknown option -x");
+
+    let error = route(&["route", "Sol", "-vv"]).unwrap_err();
+    assert_eq!(error.message(), "Unknown option -vv");
+
+    // And a name with spaces still works, which is why they are joined at all.
+    assert_eq!(route(&["route", "Alpha", "Centauri"]).unwrap().reference, "Alpha Centauri");
+}

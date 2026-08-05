@@ -121,6 +121,15 @@ pub fn parse_with(argv: &[String], table: Table) -> Result<Args, ArgError> {
             slots[Flag::Help.index()] = Some(Value::Bool(true));
             continue;
         }
+        // `-v`, and only under the extended table. The ported grammar knows
+        // exactly one single-dash token, `-h`; every other `-x` is a positional
+        // so that `--qty -5` can take a negative value \[R44\]. Adding a second
+        // one to the base table would change what `edm market -v` means, which
+        // is currently "search for a system called -v".
+        if token == "-v" && table == Table::Extended {
+            slots[Flag::Verbose.index()] = Some(Value::Bool(true));
+            continue;
+        }
 
         let Some(body) = token.strip_prefix("--") else {
             // Assigning an empty token leaves `command === ""` true, so the

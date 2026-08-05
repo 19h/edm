@@ -1043,6 +1043,18 @@ pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 /// meaningless without somewhere to search around — and because a run that is
 /// going to fail should fail before it has printed anything.
 pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
+    // A positional beginning with `-` is a mistyped flag, not part of a name.
+    //
+    // The ported grammar recognises only `--name` and `-h`, so any other
+    // single-dash token becomes a positional \[R44\] — and `route` joins its
+    // positionals into the reference, because a system name has spaces in it.
+    // The two together turned `route Sol -v` into a search for a system called
+    // "Sol -v" and reported that Ardent had never heard of it. No Elite system
+    // name begins with a hyphen, so refusing them costs nothing and the message
+    // names the token rather than blaming the name.
+    if let Some(stray) = cli.args().positionals.iter().find(|token| token.starts_with('-')) {
+        return Err(format!("Unknown option {stray}").into());
+    }
     let positional = cli.args().positionals.join(" ");
     let positional = crate::js::text::js_trim(&positional);
     let reference = match cli.optional_value(Flag::System, None) {
