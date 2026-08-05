@@ -14,10 +14,10 @@ so renumbering them is a breaking change to the test suite.
 |---|---|---|
 | 1 | `edm_core::js` | done — 7 oracle fixtures green against bun 1.2.3 |
 | 2 | `edm_core::js::json` | done — key order and round-trip green over 614 documents |
-| 3 | `edm_core::wire` | |
-| 4 | `edm_core::render` | |
-| 5 | `edm_core::cli` | |
-| 6 | `edm_core::domain` | |
+| 3 | `edm_core::wire` | done — 18 LZ4 vectors + 4 RFC 8439 vectors, Bun-golden |
+| 4 | `edm_core::render` | done — 90 Bun-blessed snapshots |
+| 5 | `edm_core::cli` | done |
+| 6 | `edm_core::domain` | read/id64/starsystem/eddn/trade/ardent done; batch loop pending |
 | 7-10 | `edm` I/O layer | |
 | 11-12 | sweep and commands | |
 | 13 | `cargo xtask parity` | |
@@ -35,6 +35,28 @@ Recorded when an assumption made while planning turned out to be wrong.
   `icu-collation` cargo feature is therefore unnecessary and does not exist.
 - **`EDM_WIDTH=display` is a runtime `Metric`, not a cargo feature.** Cheaper to
   test and it keeps one binary.
+- **The `fit_commodity_48` expectation in the plan was wrong.** It named surviving
+  widths of `[30, 6, 6]`; the answer is `[18, 10, 10]`, confirmed against Bun.
+  `[30, 6, 6]` is unreachable at any content, because `frameWidth` is
+  `sum(w) + 3n + 1` — three columns at 30/6/6 frame to 52, not 48, and
+  `Commodity` still has 18 units of slack for the loop to squeeze. The slip was
+  counting one separator per column instead of three.
+- **`renderTable` can return a frame wider than the terminal.** When nothing is
+  shrinkable (R27's slack rule leaves a column with no `minWidth` unable to
+  shrink) and nothing is droppable, the loop breaks and the table overflows.
+  R27 describes the loop but not this failure mode. Reached in practice by
+  `INVENTORY_COLUMNS`, whose `Qty`/`Value`/`S` declare no floors.
+- **C11 is narrower than the bug.** `COLUMNS` of twenty digits yields `1e20` and
+  a `RangeError: Invalid count value`; `COLUMNS` of four hundred digits yields
+  `Infinity` and a *different* `RangeError`. Both happen at module init, outside
+  `main`'s try/catch. The single clamp covers both.
+- **C5's Bun string, measured:** `TextDecoder("utf-8", {fatal: true})` under Bun
+  1.2.3 raises `TypeError: Invalid byte sequence`.
+- **C4's error text, now fixed:** `Cannot allocate {n} bytes for the decompressed
+  response`, with the cap at 256 MiB.
+- **R59 is incomplete.** `decodeOpaqueBody` also `.trim()`s its input (ts:2820),
+  sharing `decryptResponse`'s `js_trim` prefix including U+FEFF. R59 lists three
+  deviations and omits this one.
 
 # Parity register
 
