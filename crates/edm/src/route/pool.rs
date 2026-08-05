@@ -20,6 +20,7 @@
 use std::cell::{Cell, RefCell};
 
 use edm_core::pace::GiveUpReason;
+use edm_core::render::views::PaceEvent;
 
 use crate::out::Out;
 use crate::ports::{Clock, Entropy, Timer};
@@ -60,6 +61,12 @@ pub struct Outcome {
     pub ok: bool,
     /// Markets this system turned out to hold. Queued immediately.
     pub follow_on: Vec<Job>,
+    /// Rows worth trading, for the progress line.
+    ///
+    /// Not the commodity count: **every Companion API market returns the same
+    /// 391-entry map**, most of it priced but idle, so that number is identical
+    /// for every market in the galaxy and tells a reader nothing.
+    pub tradable: Option<usize>,
 }
 
 /// What a whole run produced.
@@ -73,13 +80,39 @@ pub struct Tally {
     pub abandoned: usize,
 }
 
+/// One line per job as it lands: the job, what it produced, how many attempts
+/// it took, and how many jobs are now done.
+pub type Report<'a> = &'a dyn Fn(&Job, &Outcome, u32, usize);
+
+/// One line per pacing decision.
+pub type Trace<'a> = &'a dyn Fn(&PaceEvent<'_>);
+
 /// Everything the pool needs that it cannot decide for itself.
-#[derive(Debug)]
 pub struct Pool<'a, C, T, E> {
     pub pacer: &'a Pacer<'a, C, T, E>,
     pub out: &'a Out,
     pub workers: usize,
     pub quiet: bool,
+    /// Say what is happening while it happens.
+    ///
+    /// Called from *inside* the worker, immediately after the attempt it
+    /// describes, so the lines arrive in completion order as the sweep
+    /// progresses. Collecting them and printing afterwards would turn a
+    /// five-minute progress report into a five-minute silence followed by a
+    /// wall of text — which is the same as no progress report at all.
+    pub report: Option<Report<'a>>,
+    /// `--verbose`: the pacing decisions behind those lines.
+    pub trace: Option<Trace<'a>>,
+}
+
+impl<C, T, E> std::fmt::Debug for Pool<'_, C, T, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pool")
+            .field("workers", &self.workers)
+            .field("quiet", &self.quiet)
+            .field("verbose", &self.trace.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// A job that has been given up on, with the reason.
@@ -103,6 +136,10 @@ struct Ticket {
 
 /// Run the pool until the queue drains or the breaker trips.
 ///
+/// One function, because the retirement invariant that makes closing the
+/// channel sound spans the whole loop and splitting it would hide the thing
+/// most worth reading.
+///
 /// `attempt` is called once per try. It receives the job and must not itself
 /// pace or retry — both are this function's business, and doing either inside
 /// the closure would put two independent limiters on the same wire.
@@ -116,6 +153,7 @@ struct Ticket {
 /// The return is the tally plus every job that was given up on. Those are the
 /// markets the coverage table must name: absent from the ranking because they
 /// were never read, not because they ranked low.
+#[expect(clippy::too_many_lines, reason = "the retirement invariant spans the loop")]
 pub async fn run<C, T, E, F, Fut>(
     pool: &Pool<'_, C, T, E>,
     seed: Vec<Job>,
@@ -160,7 +198,11 @@ where
                 // The breaker is checked on the way *in*, not on the way out:
                 // a tripped run must stop issuing requests, and every job still
                 // in the queue is then abandoned rather than tried.
-                if pool.pacer.tripped().is_some() {
+                if let Some(reason) = pool.pacer.tripped() {
+                    if let (Some(trace), 0) = (pool.trace, tally.borrow().abandoned) {
+                        // Once, on the first job to find the breaker open.
+                        trace(&PaceEvent::BreakerTripped { reason: &format!("{reason:?}") });
+                    }
                     tally.borrow_mut().abandoned += 1;
                     retire(outstanding, tx);
                     continue;
@@ -184,14 +226,35 @@ where
                     pool.pacer.observe_failure();
                 }
 
+                if outcome.ok || is_throttle(outcome.status) {
+                    // Reported before the retry decision, so a throttle is
+                    // visible the moment it lands rather than after the wait.
+                    if let (Some(trace), true) = (pool.trace, is_throttle(outcome.status)) {
+                        trace(&PaceEvent::Throttled {
+                            status: outcome.status.unwrap_or(429),
+                            retry_after: outcome.retry_after.as_deref(),
+                            new_rate: pool.pacer.rate(),
+                        });
+                    }
+                }
+
                 if !outcome.ok {
                     let transient = crate::sweep::is_transient_status(outcome.status);
+                    let before = pool.pacer.spent().waited_ms;
                     let give_up = pool
                         .pacer
                         .retry_after_failure(transient, ticket.attempts, ticket.first_attempt_ms)
                         .await;
                     match give_up {
                         None => {
+                            if let Some(trace) = pool.trace {
+                                trace(&PaceEvent::Retrying {
+                                    station: ticket.job.label(),
+                                    attempt: ticket.attempts,
+                                    delay_ms: pool.pacer.spent().waited_ms - before,
+                                    status: outcome.status,
+                                });
+                            }
                             // Back of the queue, not the front: a market that
                             // just failed is the least likely to succeed if
                             // tried again immediately, and going to the back
@@ -200,6 +263,16 @@ where
                             continue;
                         }
                         Some(reason) => {
+                            if let Some(trace) = pool.trace {
+                                trace(&PaceEvent::GaveUp {
+                                    station: ticket.job.label(),
+                                    attempts: ticket.attempts,
+                                    reason: &format!("{reason:?}"),
+                                });
+                            }
+                            if let Some(report) = pool.report {
+                                report(&ticket.job, &outcome, ticket.attempts, completed.get());
+                            }
                             count_failure(tally, &ticket.job);
                             abandoned.borrow_mut().push(Abandoned {
                                 job: ticket.job,
@@ -217,7 +290,9 @@ where
                 // counter never dips through zero between a system landing and
                 // its markets being queued — which would close the channel with
                 // work still to do.
-                for next in outcome.follow_on {
+                let Outcome { follow_on, status, retry_after, ok, tradable } = outcome;
+                let outcome = Outcome { status, retry_after, ok, tradable, follow_on: Vec::new() };
+                for next in follow_on {
                     outstanding.set(outstanding.get() + 1);
                     let _ = tx.try_send(Ticket {
                         job: next,
@@ -228,6 +303,9 @@ where
 
                 count_success(tally, &ticket.job);
                 completed.set(completed.get() + 1);
+                if let Some(report) = pool.report {
+                    report(&ticket.job, &outcome, ticket.attempts, completed.get());
+                }
                 retire(outstanding, tx);
             }
         }
@@ -327,7 +405,7 @@ mod tests {
     fn follow_on_work_keeps_the_queue_open() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true, report: None, trace: None };
         let seen = RefCell::new(Vec::<String>::new());
 
         let (tally, abandoned) = block_on(run(&pool, systems(&["Sol"]), |job| {
@@ -362,7 +440,7 @@ mod tests {
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 2, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 2, quiet: true, report: None, trace: None };
         let tries = Cell::new(0usize);
 
         let (tally, abandoned) = block_on(run(
@@ -388,7 +466,7 @@ mod tests {
     fn a_non_transient_failure_is_not_retried() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true, report: None, trace: None };
         let tries = Cell::new(0usize);
 
         let (_, abandoned) = block_on(run(&pool, systems(&["Nowhere"]), |_| {
@@ -408,7 +486,7 @@ mod tests {
         let pacing =
             Pacing { bucket: Bucket { rate: 2.0, burst: 1.0, min_rate: 0.5 }, ..Pacing::default() };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 8, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 8, quiet: true, report: None, trace: None };
 
         block_on(run(&pool, systems(&["A", "B", "C", "D"]), |_| async {
             Outcome { status: Some(200), ok: true, ..Outcome::default() }
@@ -434,7 +512,7 @@ mod tests {
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true, report: None, trace: None };
         let tries = Cell::new(0usize);
 
         let jobs: Vec<Job> = (0..40).map(|n| market(f64::from(n), "X", "Y")).collect();
@@ -454,7 +532,7 @@ mod tests {
     fn an_empty_seed_sends_nothing() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true };
+        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true, report: None, trace: None };
 
         let (tally, abandoned) = block_on(run(&pool, Vec::new(), |_| async {
             unreachable!("nothing to do")

@@ -1009,6 +1009,18 @@ pub struct RouteConfig {
     pub dry_run: bool,
     pub json: bool,
     pub detail: bool,
+    /// `--verbose`: pacing decisions, retries and cache outcomes as they happen.
+    ///
+    /// Separate from the per-market progress lines, which are on by default. A
+    /// sweep that is merely slow and a sweep that is being throttled look
+    /// identical from the outside, and this is what tells them apart.
+    pub verbose: bool,
+    /// Suppress the per-market progress lines.
+    ///
+    /// Set by `--json`, where they would corrupt the document, and by
+    /// `--quiet`. Not a flag of its own beyond that: a sweep that prints
+    /// nothing for five minutes is the default nobody wants.
+    pub quiet: bool,
 }
 
 /// Defaults, in one place so the plan table and the documentation cannot drift
@@ -1107,5 +1119,7 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         json: cli.switch_value(Flag::Json, false)?,
         detail: cli.switch_value(Flag::Detail, false)?,
+        verbose: cli.switch_value(Flag::Verbose, false)?,
+        quiet: cli.switch_value(Flag::Json, false)?,
     })
 }

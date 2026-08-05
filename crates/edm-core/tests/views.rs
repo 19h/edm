@@ -846,3 +846,128 @@ fn the_default_plan_does_not_mention_starsystem_reads() {
     assert!(!text.contains("starsystem"), "{text}");
     assert!(!text.contains("worth reading"), "{text}");
 }
+
+// ---------------------------------------------------------------------------
+// progress
+// ---------------------------------------------------------------------------
+
+fn line(overrides: impl Fn(&mut views::SweepLine<'_>)) -> String {
+    let mut line = views::SweepLine {
+        completed: 3,
+        total: 22,
+        station: "Galileo",
+        system: "Sol",
+        status: Some(200),
+        tradable: Some(110),
+        from_cache: false,
+        attempts: 1,
+    };
+    overrides(&mut line);
+    views::sweep_line(&line)
+}
+
+/// The count that means something. Every Companion API market returns the same
+/// 391-entry commodity map, most of it priced but idle, so a commodity count is
+/// identical for every market in the galaxy; what varies is how many rows have
+/// stock or demand behind them.
+#[test]
+fn a_progress_line_counts_tradable_rows_not_commodities() {
+    assert_eq!(line(|_| {}), "[3/22] Galileo (Sol)  HTTP 200  110 tradable");
+}
+
+/// A cached market makes no request, so it has no status. Printing `HTTP 200`
+/// for a file read would put a number on the wire that never went over it.
+#[test]
+fn a_cached_market_reports_no_status() {
+    let text = line(|l| {
+        l.from_cache = true;
+        l.status = None;
+        l.attempts = 0;
+    });
+    assert_eq!(text, "[3/22] Galileo (Sol)  cached  110 tradable");
+    assert!(!text.contains("HTTP"));
+}
+
+/// A market that answered without a usable listing is named as such, not given
+/// a zero — zero rows and no listing are different facts.
+#[test]
+fn a_market_with_no_listing_says_so_rather_than_zero() {
+    let text = line(|l| {
+        l.tradable = None;
+        l.status = Some(500);
+    });
+    assert_eq!(text, "[3/22] Galileo (Sol)  HTTP 500  no listing");
+}
+
+#[test]
+fn a_retried_market_says_how_many_attempts_it_took() {
+    assert!(line(|l| l.attempts = 3).ends_with("after 3 attempts"));
+    assert!(!line(|l| l.attempts = 1).contains("attempts"), "not for the first");
+}
+
+/// The pacing lines exist because a slow sweep and a throttled one look the
+/// same from outside. Each must name what happened *and* what it changed.
+#[test]
+fn every_pacing_line_names_what_changed() {
+    let throttled = views::pace_line(&views::PaceEvent::Throttled {
+        status: 429,
+        retry_after: Some("30"),
+        new_rate: 2.0,
+    });
+    assert_eq!(
+        throttled,
+        "  pace  HTTP 429 (Retry-After: 30); rate now 2 req/s for every worker"
+    );
+    // "for every worker" is the load-bearing half: a per-job backoff would
+    // leave the other fifteen hammering a server that just said stop.
+    assert!(throttled.contains("every worker"));
+
+    assert_eq!(
+        views::pace_line(&views::PaceEvent::Throttled {
+            status: 429,
+            retry_after: None,
+            new_rate: 2.0,
+        }),
+        "  pace  HTTP 429 (no Retry-After); rate now 2 req/s for every worker"
+    );
+
+    assert_eq!(
+        views::pace_line(&views::PaceEvent::Retrying {
+            station: "Titan City",
+            attempt: 1,
+            delay_ms: 1_000.0,
+            status: Some(503),
+        }),
+        "  pace  Titan City HTTP 503 — attempt 2 in 1,000 ms"
+    );
+
+    assert_eq!(
+        views::pace_line(&views::PaceEvent::GaveUp {
+            station: "Sisyphus Dock",
+            attempts: 8,
+            reason: "AttemptCap",
+        }),
+        "  pace  Sisyphus Dock given up after 8 attempts (AttemptCap)"
+    );
+
+    assert_eq!(
+        views::pace_line(&views::PaceEvent::Recovered { new_rate: 4.0 }),
+        "  pace  rate recovered to 4 req/s"
+    );
+    assert_eq!(
+        views::pace_line(&views::PaceEvent::BreakerTripped { reason: "FailureRate" }),
+        "  pace  stopping early: FailureRate"
+    );
+}
+
+/// A transport failure has no status at all, and must not be rendered as one.
+#[test]
+fn a_retry_with_no_status_prints_a_dash() {
+    let text = views::pace_line(&views::PaceEvent::Retrying {
+        station: "Nowhere",
+        attempt: 2,
+        delay_ms: 500.0,
+        status: None,
+    });
+    assert!(text.contains("HTTP -"), "{text}");
+}

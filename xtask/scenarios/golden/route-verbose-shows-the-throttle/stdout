@@ -19,22 +19,34 @@ enumerating systems within 10 Ly of Sol...
 | ceiling                 | 2 of 2,000   (--max-requests to raise)         |
 +-------------------------+------------------------------------------------+
 [1/2] Galileo (Sol)  HTTP 200  2 tradable
-[2/2] Titan City (Sol)  HTTP 200  2 tradable
-== ROUTE COVERAGE ==================================================================================
+== RESPONSE  HTTP 429 Too Many Requests ============================================================
 +----------------+--------------+
 | Field          | Value        |
 +================+==============+
-| markets polled | 2 of 2       |
-| markets priced | 2            |
-| requests sent  | 2            |
-| elapsed        | <ELAPSED>    |
+| HEADERS                       |
 +----------------+--------------+
+| content-length | 0            |
+| retry-after    | 1            |
++----------------+--------------+
+  pace  HTTP 429 (Retry-After: 1); rate now 4 req/s for every worker
+  pace  Titan City HTTP 429 — attempt 2 in 1,000 ms
+[2/2] Titan City (Sol)  HTTP 200  2 tradable  after 2 attempts
+== ROUTE COVERAGE ==================================================================================
++----------------+----------------+
+| Field          | Value          |
++================+================+
+| markets polled | 2 of 2         |
+| markets priced | 2              |
+| requests sent  | 3              |
+| throttled      | 1 (429 or 503) |
+| elapsed        | <ELAPSED>      |
++----------------+----------------+
    every price below was read live from the Companion API during this run
 == BEST ROUND TRIPS ================================================================================
 +---+-----------------------+--------------+--------------+--------------+--------+----------------+
 | # | Stops                 |       Profit |         Cr/h |   Cr/h lap 1 |    Lap | Claim          |
 +===+=======================+==============+==============+==============+========+================+
-| 1 | Galileo (Sol) -> Tit~ | 3,292,800 cr | 43,273,489/h | 28,848,992/h | 4m 33s | proved optimal |
+| 1 | Galileo (Sol) -> Tit~ | 5,174,400 cr | 68,001,197/h | 45,334,131/h | 4m 33s | proved optimal |
 +---+-----------------------+--------------+--------------+--------------+--------+----------------+
    prices were read at one instant and are already ageing; another commander may have traded them
    since
@@ -42,11 +54,3 @@ enumerating systems within 10 Ly of Sol...
    permits, allegiance and landing-pad availability are not modelled
    times come from a calibrated model, not from your ship
    legs below --min-profit were excluded; the result is optimal for what remained
-== LEGS  from Galileo (Sol) ========================================================================
-+------------------+------------+------+----------+-----------+--------------+------------+--------+
-| To               | Commodity  | Tons |      Buy |      Sell |       Profit | Limited by |   Time |
-+==================+============+======+==========+===========+==============+============+========+
-| Titan City (Sol) | Gold       |  784 | 9,000 cr | 11,500 cr | 1,960,000 cr | hold full  | 2m 16s |
-| Galileo (Sol)    | Silver     |  784 | 4,500 cr |  6,200 cr | 1,332,800 cr | hold full  | 2m 16s |
-+------------------+------------+------+----------+-----------+--------------+------------+--------+
-   columns hidden to fit 100 cols: Distance

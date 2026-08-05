@@ -53,8 +53,15 @@ Spending
   --dry-run                print the plan and stop
 
 Output
-  --json                   one document, for piping
+  One line per market as it lands, unless --json. The sweep is minutes long on a
+  wide radius, and silence is indistinguishable from a stall.
+  --json                   one document, for piping; silences the progress lines
   --detail                 expand every leg of every route
+  --verbose, -v            say what the pacer is doing too: throttles, retries
+                           and the delay each one waited, rate changes, and the
+                           reason a run stopped early. A sweep that is merely
+                           slow and one that is being rate limited look the same
+                           from outside; this is what tells them apart
 
 Examples
   edm route Sol

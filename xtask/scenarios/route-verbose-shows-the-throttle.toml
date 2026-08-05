@@ -1,0 +1,69 @@
+# route-verbose-shows-the-throttle
+why = "A sweep that is merely slow and a sweep that is being rate limited look identical from outside: both are just quiet. --verbose is what tells them apart, so the wording is under test. A 429 carrying Retry-After halves the rate *for every worker* and holds them all off — the failure the original has, where a 429 is requeued immediately with no delay and no header read, at concurrency 16."
+argv = ["route", "Sol", "--radius", "10", "--rps", "8", "--no-cache", "--concurrency", "1", "--verbose"]
+oracle = "none"
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/nearby"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-nearby-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Alpha%20Centauri/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Barnard's%20Star/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+# One market answers; the other never does, and is retired rather than retried
+# forever. The single worker keeps the two apart.
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-source.json"
+
+# A 429 with a Retry-After, then the market answers. --verbose is what makes
+# the hold-off visible; without it the run is simply two seconds slower and
+# nothing says why.
+[[route.reply]]
+status = 429
+headers = [["Retry-After", "1"]]
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-sink.json"

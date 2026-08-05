@@ -112,6 +112,8 @@ pub enum Flag {
     Cache,
     Refresh,
     FastEstimate,
+    /// `--verbose`: say what the sweep is doing while it does it.
+    Verbose,
     /// `--verify-systems`: read each system's Companion API `starsystem`
     /// payload rather than trusting Ardent's market list.
     ///
@@ -135,7 +137,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 78] = [
+    pub const ALL: [Self; 79] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -213,6 +215,7 @@ impl Flag {
         Self::Cache,
         Self::Refresh,
         Self::FastEstimate,
+        Self::Verbose,
         Self::VerifySystems,
     ];
 
@@ -278,6 +281,7 @@ impl Flag {
             "cache" => Self::Cache,
             "refresh" => Self::Refresh,
             "fastestimate" => Self::FastEstimate,
+            "verbose" | "v" => Self::Verbose,
             "verifysystems" => Self::VerifySystems,
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
@@ -344,6 +348,7 @@ impl Flag {
             Self::Cache => "--cache",
             Self::Refresh => "--refresh",
             Self::FastEstimate => "--fast-estimate",
+            Self::Verbose => "--verbose",
             Self::VerifySystems => "--verify-systems",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the

@@ -38,6 +38,11 @@ use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
 
 /// Run the command.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear sequence, and the order is the safeguard: everything free \
+              and shown before anything is spent. Splitting it hides that."
+)]
 pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
@@ -49,9 +54,20 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // Nothing below this point may run on a name that was never resolved: an
     // enumeration centred on the wrong system is a complete, confident answer
     // about the wrong region.
+    let note = |text: String| {
+        if !config.quiet {
+            out.line(&text);
+        }
+    };
+    note(format!("resolving \"{}\" through Ardent...", config.reference));
     let centre = resolve(&ardent, &config.reference).await?;
 
     let budget = if config.ardent_queries == 0 { DEFAULT_ANCHOR_BUDGET } else { config.ardent_queries };
+    note(format!(
+        "enumerating systems within {} Ly of {}...",
+        edm_core::js::js_number(config.radius_ly),
+        centre.name
+    ));
     let enumeration = discover::enumerate(&ardent, &centre, config.radius_ly, budget)
         .await
         .map_err(|error| format!("enumerating systems around {}: {error}", centre.name))?;
@@ -59,6 +75,10 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // One free `/markets` per system, then the filter. Both happen before the
     // plan is priced, so the plan's market count is measured rather than
     // extrapolated — `--fast-estimate` is the flag that trades this away.
+    note(format!(
+        "{} systems; reading their market lists...",
+        edm_core::js::format_integer(enumeration.systems.len() as f64)
+    ));
     let (stations, systems_with_markets) = if config.fast_estimate {
         (Vec::new(), enumeration.systems.len())
     } else {
@@ -128,6 +148,34 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         unit: app.overrides.jitter.unwrap_or(f64::NAN),
     };
     let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
+    // Built before `Cx` so the closures can borrow what they name. The report
+    // needs the station list to say which system a market is in, because a
+    // market id is not something anyone recognises.
+    let total = prepared.cached.len() + prepared.to_poll.len();
+    let stations = &selection.keep;
+    let report = |job: &crate::route::pool::Job,
+                  outcome: &crate::route::pool::Outcome,
+                  attempts: u32,
+                  completed: usize| {
+        let system = stations
+            .iter()
+            .find(|s| matches!(job, crate::route::pool::Job::Market { market_id, .. } if *market_id == s.market_id))
+            .map_or("", |s| s.system_name.as_str());
+        out.line(&views::sweep_line(&views::SweepLine {
+            completed,
+            total,
+            station: job.label(),
+            system,
+            status: outcome.status,
+            tradable: outcome.tradable,
+            // Attempt zero is the cache pass: it made no request, so it has no
+            // status to print and must not claim one.
+            from_cache: attempts == 0,
+            attempts,
+        }));
+    };
+    let trace = |event: &views::PaceEvent<'_>| out.line(&views::pace_line(event));
+
     let sweep_cx = acquire::Cx {
         http: app.http,
         clock: &app.ports.clock,
@@ -148,6 +196,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         quiet: config.json,
         verify_systems: config.verify_systems,
         language: &query.language,
+        report: (!config.quiet).then_some(&report as crate::route::pool::Report<'_>),
+        trace: (config.verbose && !config.quiet).then_some(&trace as crate::route::pool::Trace<'_>),
+        total,
     };
     // Only the systems that still hold a candidate market are worth an
     // authoritative read; the rest were emptied by the filter and a 500 KB

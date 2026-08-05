@@ -995,3 +995,116 @@ impl RouteCoverage {
         notes
     }
 }
+
+/// One market, as the sweep finishes it.
+///
+/// Shaped after the ported sweep's `[k/N] Name (id)  HTTP s  outcome`
+/// (`market-request.ts:1540`, R83) rather than invented, because a commander
+/// who has watched `edm market Colonia` should not have to learn a second
+/// format — but it is not that function and is not held to it: the id is
+/// dropped in favour of the system, which is what locates a station in a
+/// region sweep, and the outcome says how many rows are worth trading rather
+/// than how many rows there are.
+///
+/// **Every Companion API market returns the same 391-entry commodity map**,
+/// most of it priced but idle, so a raw commodity count is the same number for
+/// every market in the galaxy and tells the reader nothing. Measured
+/// 2026-08-05.
+#[derive(Clone, Copy, Debug)]
+pub struct SweepLine<'a> {
+    pub completed: usize,
+    pub total: usize,
+    pub station: &'a str,
+    pub system: &'a str,
+    pub status: Option<u16>,
+    /// Rows this market actually sells or buys, after the quantity floors.
+    pub tradable: Option<usize>,
+    pub from_cache: bool,
+    pub attempts: u32,
+}
+
+#[must_use]
+pub fn sweep_line(line: &SweepLine<'_>) -> String {
+    use std::fmt::Write as _;
+    let mut out = format!(
+        "[{}/{}] {} ({})",
+        js::format_integer(line.completed as f64),
+        js::format_integer(line.total as f64),
+        line.station,
+        line.system,
+    );
+    if line.from_cache {
+        // No status, because no request was made. Saying `HTTP 200` for a file
+        // read would put a number on the wire that never went over it.
+        out.push_str("  cached");
+    } else {
+        let _ = write!(
+            out,
+            "  HTTP {}",
+            line.status.map_or_else(|| "-".to_owned(), |code| js::format_integer(f64::from(code)))
+        );
+    }
+    match line.tradable {
+        Some(rows) => {
+            let _ = write!(out, "  {} tradable", js::format_integer(rows as f64));
+        }
+        None => out.push_str("  no listing"),
+    }
+    if line.attempts > 1 {
+        let _ = write!(out, "  after {} attempts", js::format_integer(f64::from(line.attempts)));
+    }
+    out
+}
+
+/// A pacing decision, under `--verbose`.
+///
+/// These exist because a sweep that is merely slow and a sweep that is being
+/// throttled look identical from the outside: both are just quiet. Each line
+/// names what happened and what it changed, so a reader can tell one from the
+/// other without a packet capture.
+#[derive(Clone, Copy, Debug)]
+pub enum PaceEvent<'a> {
+    /// The server asked us to slow down.
+    Throttled { status: u16, retry_after: Option<&'a str>, new_rate: f64 },
+    /// A failed job is going back into the queue.
+    Retrying { station: &'a str, attempt: u32, delay_ms: f64, status: Option<u16> },
+    /// A job has been given up on.
+    GaveUp { station: &'a str, attempts: u32, reason: &'a str },
+    /// The rate recovered after a run of clean responses.
+    Recovered { new_rate: f64 },
+    /// The run is stopping early.
+    BreakerTripped { reason: &'a str },
+}
+
+#[must_use]
+pub fn pace_line(event: &PaceEvent<'_>) -> String {
+    match *event {
+        PaceEvent::Throttled { status, retry_after, new_rate } => {
+            let held = retry_after.map_or_else(
+                || "no Retry-After".to_owned(),
+                |value| format!("Retry-After: {value}"),
+            );
+            format!(
+                "  pace  HTTP {} ({held}); rate now {} req/s for every worker",
+                js::format_integer(f64::from(status)),
+                js_number(new_rate),
+            )
+        }
+        PaceEvent::Retrying { station, attempt, delay_ms, status } => format!(
+            "  pace  {station} HTTP {} — attempt {} in {} ms",
+            status.map_or_else(|| "-".to_owned(), |code| js::format_integer(f64::from(code))),
+            js::format_integer(f64::from(attempt) + 1.0),
+            js::format_integer(js::js_round(delay_ms)),
+        ),
+        PaceEvent::GaveUp { station, attempts, reason } => format!(
+            "  pace  {station} given up after {} attempts ({reason})",
+            js::format_integer(f64::from(attempts)),
+        ),
+        PaceEvent::Recovered { new_rate } => {
+            format!("  pace  rate recovered to {} req/s", js_number(new_rate))
+        }
+        PaceEvent::BreakerTripped { reason } => {
+            format!("  pace  stopping early: {reason}")
+        }
+    }
+}

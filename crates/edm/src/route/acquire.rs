@@ -83,6 +83,12 @@ pub struct Cx<'a, H, C, E, F> {
     pub cache: &'a Cache,
     pub workers: usize,
     pub quiet: bool,
+    /// One line per market as it lands. `None` under `--json`.
+    pub report: Option<pool::Report<'a>>,
+    /// `--verbose`: the pacing decisions behind them.
+    pub trace: Option<pool::Trace<'a>>,
+    /// How many jobs the report's `k/N` counts up to.
+    pub total: usize,
     /// `--verify-systems`: read each system's `starsystem` payload and take
     /// *its* market list, instead of Ardent's.
     ///
@@ -173,6 +179,27 @@ where
 {
     let Prepared { cached: mut listings, mut to_poll, hits } = prepared;
 
+    // The cached ones first, and *said* first: a run that resolves entirely
+    // from disk should still show its work, or it looks like it did nothing.
+    if let Some(report) = cx.report {
+        for (index, listing) in listings.iter().enumerate() {
+            report(
+                &Job::Market {
+                    market_id: listing.market_id,
+                    station: listing.station_name.clone(),
+                    system: listing.system_name.clone(),
+                },
+                &Outcome {
+                    ok: true,
+                    tradable: Some(tradable_rows(&listing.document)),
+                    ..Outcome::default()
+                },
+                0,
+                index + 1,
+            );
+        }
+    }
+
     if cx.verify_systems {
         // Discovery comes from the Companion API itself, so nothing is known
         // about which markets exist until the system reads land — and the cache
@@ -186,7 +213,14 @@ where
             to_poll.push(Job::System { name: name.clone(), address: *address });
         }
         let fresh = RefCell::new(Vec::<Listing>::new());
-        let pool = Pool { pacer, out: cx.out, workers: cx.workers, quiet: cx.quiet };
+        let pool = Pool {
+            pacer,
+            out: cx.out,
+            workers: cx.workers,
+            quiet: cx.quiet,
+            report: cx.report,
+            trace: cx.trace,
+        };
         let (tally, unreached) = pool::run(&pool, to_poll, |job| {
             let fresh = &fresh;
             async move {
@@ -205,7 +239,14 @@ where
     }
 
     let fresh = RefCell::new(Vec::<Listing>::new());
-    let pool = Pool { pacer, out: cx.out, workers: cx.workers, quiet: cx.quiet };
+    let pool = Pool {
+        pacer,
+        out: cx.out,
+        workers: cx.workers,
+        quiet: cx.quiet,
+        report: cx.report,
+        trace: cx.trace,
+    };
     let (tally, unreached) = pool::run(&pool, to_poll, |job| {
         let fresh = &fresh;
         async move {
@@ -278,7 +319,7 @@ where
             system: name.to_owned(),
         })
         .collect();
-    Outcome { status: Some(exchange.status), retry_after, ok: true, follow_on }
+    Outcome { status: Some(exchange.status), retry_after, ok: true, tradable: None, follow_on }
 }
 
 /// One market poll.
@@ -345,6 +386,7 @@ where
         // route through it as unprofitable rather than as unread.
         return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
     };
+    let tradable = Some(tradable_rows(&document));
 
     let now = cx.clock.now_ms();
     cx.cache.put(cx.fs, market_id, &document, now);
@@ -357,5 +399,24 @@ where
         from_cache: false,
     });
 
-    Outcome { status: Some(exchange.status), retry_after, ok: true, follow_on: Vec::new() }
+    Outcome { status: Some(exchange.status), retry_after, ok: true, tradable, follow_on: Vec::new() }
+}
+
+/// Rows this market will actually sell or buy.
+///
+/// Every Companion API market returns the same 391-entry commodity map — most
+/// of it priced but with zero stock and zero demand — so a commodity count is
+/// the same number everywhere and says nothing about whether a station is worth
+/// visiting. Measured across four real markets, 2026-08-05.
+fn tradable_rows(document: &JsValue) -> usize {
+    edm_core::domain::parse_market_snapshot(document).map_or(0, |snapshot| {
+        snapshot
+            .commodities
+            .iter()
+            .filter(|row| {
+                (row.stock > 0.0 && row.buy_price > 0.0)
+                    || (row.demand > 0.0 && row.sell_price > 0.0)
+            })
+            .count()
+    })
 }

@@ -1,3 +1,6 @@
+resolving "Sol" through Ardent...
+enumerating systems within 10 Ly of Sol...
+3 systems; reading their market lists...
 == ROUTE PLAN ======================================================================================
 +-------------------------+----------------------------------------------+
 | Field                   | Value                                        |
@@ -16,6 +19,8 @@
 | estimated wall clock    | 0s                                           |
 | ceiling                 | 0 of 2,000   (--max-requests to raise)       |
 +-------------------------+----------------------------------------------+
+[1/2] Galileo (Sol)  cached  2 tradable
+[2/2] Titan City (Sol)  cached  2 tradable
 == ROUTE COVERAGE ==================================================================================
 +----------------+--------------+
 | Field          | Value        |
