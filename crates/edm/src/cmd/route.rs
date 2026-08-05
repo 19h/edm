@@ -160,9 +160,13 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         truncated_to_ly: enumeration.truncated.then_some(enumeration.complete_to_ly),
         breaker_tripped: pacer.tripped().is_some(),
     };
-    out.emit(&views::route_coverage(&coverage));
+    // Under `--json` the coverage block is inside the document instead; on
+    // stderr it would be the same information twice.
+    if !config.json {
+        out.aside(&views::route_coverage(&coverage));
+    }
 
-    rank(out, config, &acquired, &selection.keep);
+    rank(out, config, &acquired, &selection.keep, &coverage);
 
     // A market in radius that was never read is not a market that ranked
     // badly, and the exit code says so.
@@ -178,12 +182,14 @@ fn rank(
     config: &RouteConfig,
     acquired: &acquire::Acquired,
     stations: &[ardent::ArdentStation],
+    coverage: &RouteCoverage,
 ) {
     let (markets, commodities, crossing) =
         ingest::markets(&acquired.listings, stations, ingest::floors(config));
-    if crossing.non_integral > 0 {
-        // Never silently rounded: a fractional price is the wire reporting
-        // something this program has no model for.
+    // Not under `--json`: a diagnostic in the middle of the stream is exactly
+    // what R76 does to the ported commands, and C28 says route's document is
+    // one well-formed document or nothing.
+    if crossing.non_integral > 0 && !config.json {
         out.line(&format!(
             "{} commodity rows carried a non-integral price or quantity and were skipped",
             edm_core::js::format_integer(f64::from(crossing.non_integral))
@@ -199,6 +205,21 @@ fn rank(
         Shape::RoundTrip => (RouteKind::RoundTrip, &solution.round_trip),
         Shape::Loop | Shape::BoundedLoop(_) => (RouteKind::Loop { stops: 0 }, &solution.loops),
     };
+
+    if config.json {
+        // One document. Every shape is included whatever `--shape` asked for:
+        // a consumer that pipes this can pick, and a field that is present or
+        // absent depending on a flag is the harder thing to consume.
+        let document = edm_route::json::document(
+            &solution,
+            &markets,
+            &commodities,
+            coverage_json(coverage, &crossing),
+        );
+        out.line(&document.stringify(2));
+        return;
+    }
+
     out.emit(&view::ranking(kind, routes, &markets));
 
     if config.detail {
@@ -206,6 +227,40 @@ fn rank(
             out.emit(&view::legs(route, &markets, &commodities));
         }
     }
+}
+
+/// The coverage block, as JSON.
+///
+/// Carried inside the document rather than printed beside it, because what a
+/// sweep failed to reach is part of the answer: a consumer that reads `loops`
+/// without reading `coverage.marketsFailed` has drawn a conclusion from a
+/// region it did not see all of.
+fn coverage_json(
+    coverage: &RouteCoverage,
+    crossing: &ingest::Crossing,
+) -> edm_core::js::json::JsValue {
+    use edm_core::js::json::{JsObject, JsValue};
+    let n = |value: usize| JsValue::Num(value as f64);
+    JsValue::Obj(JsObject::from_document_order(vec![
+        ("systemsRead".into(), n(coverage.systems_read)),
+        ("systemsTotal".into(), n(coverage.systems_total)),
+        ("systemsFailed".into(), n(coverage.systems_failed)),
+        ("marketsFound".into(), n(coverage.markets_found)),
+        ("marketsPolled".into(), n(coverage.markets_polled)),
+        ("marketsPriced".into(), n(coverage.markets_priced)),
+        ("marketsFailed".into(), n(coverage.markets_failed)),
+        ("cacheHits".into(), n(coverage.cache_hits)),
+        ("requestsSent".into(), n(coverage.requests_sent)),
+        ("throttled".into(), n(coverage.throttled)),
+        ("elapsedSeconds".into(), JsValue::Num(coverage.elapsed_seconds)),
+        (
+            "completeToLy".into(),
+            coverage.truncated_to_ly.map_or(JsValue::Null, JsValue::Num),
+        ),
+        ("breakerTripped".into(), JsValue::Bool(coverage.breaker_tripped)),
+        ("rowsSkippedNonIntegral".into(), JsValue::Num(f64::from(crossing.non_integral))),
+        ("notes".into(), JsValue::Arr(coverage.notes().into_iter().map(|note| JsValue::Str(note.into())).collect())),
+    ]))
 }
 
 /// The travel model, with every constant a flag.

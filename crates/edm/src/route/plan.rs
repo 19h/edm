@@ -82,7 +82,9 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
         return Decision::Refused(refusal);
     }
 
-    out.emit(&views::route_plan(&PlanView {
+    // `aside`, not `emit`: under `--json` stdout is one document and the plan
+    // belongs on stderr \[C28\].
+    out.aside(&views::route_plan(&PlanView {
         reference: &config.reference,
         radius_ly: config.radius_ly,
         complete_to_ly: survey.complete_to_ly,

@@ -1,0 +1,243 @@
+{
+  "coverage": {
+    "systemsRead": 0,
+    "systemsTotal": 0,
+    "systemsFailed": 0,
+    "marketsFound": 2,
+    "marketsPolled": 2,
+    "marketsPriced": 2,
+    "marketsFailed": 0,
+    "cacheHits": 0,
+    "requestsSent": 2,
+    "throttled": 0,
+    "elapsedSeconds":<ELAPSED>,
+    "completeToLy": null,
+    "breakerTripped": false,
+    "rowsSkippedNonIntegral": 0,
+    "notes": [
+      "every price below was read live from the Companion API during this run"
+    ]
+  },
+  "single": [
+    {
+      "kind": "singleHop",
+      "profit": 1960000,
+      "cycleMillis": 136967,
+      "firstLapMillis": 273934,
+      "rate": {
+        "creditsPerHour": null,
+        "firstLapCreditsPerHour": 25758029,
+        "guarantee": {
+          "kind": "provedOptimal"
+        },
+        "caveats": [
+          "staleListing",
+          "jumpGraphUnmodelled",
+          "singleHopNotRepeatable",
+          "accessUnmodelled",
+          "timeModelAssumed",
+          "edgesBelowFloorDropped"
+        ]
+      },
+      "legs": [
+        {
+          "from": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "commodity": "Gold",
+          "units": 784,
+          "buyPrice": 9000,
+          "sellPrice": 11500,
+          "profit": 1960000,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        }
+      ]
+    },
+    {
+      "kind": "singleHop",
+      "profit": 1332800,
+      "cycleMillis": 136967,
+      "firstLapMillis": 273934,
+      "rate": {
+        "creditsPerHour": null,
+        "firstLapCreditsPerHour": 17515459,
+        "guarantee": {
+          "kind": "provedOptimal"
+        },
+        "caveats": [
+          "staleListing",
+          "jumpGraphUnmodelled",
+          "singleHopNotRepeatable",
+          "accessUnmodelled",
+          "timeModelAssumed",
+          "edgesBelowFloorDropped"
+        ]
+      },
+      "legs": [
+        {
+          "from": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "commodity": "Silver",
+          "units": 784,
+          "buyPrice": 4500,
+          "sellPrice": 6200,
+          "profit": 1332800,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        }
+      ]
+    }
+  ],
+  "roundTrip": [
+    {
+      "kind": "roundTrip",
+      "profit": 3292800,
+      "cycleMillis": 273934,
+      "firstLapMillis": 410901,
+      "rate": {
+        "creditsPerHour": 43273489,
+        "firstLapCreditsPerHour": 28848992,
+        "guarantee": {
+          "kind": "provedOptimal"
+        },
+        "caveats": [
+          "staleListing",
+          "jumpGraphUnmodelled",
+          "accessUnmodelled",
+          "timeModelAssumed",
+          "edgesBelowFloorDropped"
+        ]
+      },
+      "legs": [
+        {
+          "from": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "commodity": "Gold",
+          "units": 784,
+          "buyPrice": 9000,
+          "sellPrice": 11500,
+          "profit": 1960000,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        },
+        {
+          "from": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "commodity": "Silver",
+          "units": 784,
+          "buyPrice": 4500,
+          "sellPrice": 6200,
+          "profit": 1332800,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        }
+      ]
+    }
+  ],
+  "loops": [
+    {
+      "kind": "roundTrip",
+      "profit": 3292800,
+      "cycleMillis": 273934,
+      "firstLapMillis": 410901,
+      "rate": {
+        "creditsPerHour": 43273489,
+        "firstLapCreditsPerHour": 28848992,
+        "guarantee": {
+          "kind": "provedOptimal"
+        },
+        "caveats": [
+          "staleListing",
+          "jumpGraphUnmodelled",
+          "accessUnmodelled",
+          "timeModelAssumed",
+          "edgesBelowFloorDropped"
+        ]
+      },
+      "legs": [
+        {
+          "from": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "commodity": "Gold",
+          "units": 784,
+          "buyPrice": 9000,
+          "sellPrice": 11500,
+          "profit": 1960000,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        },
+        {
+          "from": {
+            "marketId": 128016576,
+            "station": "Titan City",
+            "system": "Sol"
+          },
+          "to": {
+            "marketId": 128016384,
+            "station": "Galileo",
+            "system": "Sol"
+          },
+          "commodity": "Silver",
+          "units": 784,
+          "buyPrice": 4500,
+          "sellPrice": 6200,
+          "profit": 1332800,
+          "limitedBy": "cargo",
+          "distanceLy": 0,
+          "millis": 136967,
+          "demandAssumed": false
+        }
+      ]
+    }
+  ]
+}

@@ -76,3 +76,18 @@ pub(crate) fn choice(commodity: u32, profit: i64) -> LegChoice {
         demand_assumed: false,
     }
 }
+
+/// A two-market round trip with a proved-optimal claim, for the report and
+/// serialisation tests.
+///
+/// Built through the real solver rather than hand-assembled, so a change to
+/// what `solve` claims shows up here rather than being papered over by a
+/// literal.
+pub(crate) fn proved_round_trip() -> crate::report::Route {
+    let markets = [
+        market(1, 0.0, &[(0, 9_000, 5_000)], &[(1, 6_200, 9_000)]),
+        market(2, 8.0, &[(1, 4_500, 6_000)], &[(0, 11_500, 7_000)]),
+    ];
+    let solution = crate::solve(&markets, TimeModel::default(), &ship(), &limits());
+    solution.round_trip.into_iter().next().expect("these two markets trade both ways")
+}

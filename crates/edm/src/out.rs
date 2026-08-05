@@ -107,6 +107,24 @@ impl Out {
         self.write(&owned);
     }
 
+    /// Blocks that are *about* the run rather than its answer.
+    ///
+    /// Under `--json` they go to stderr, because stdout is then one document
+    /// and a table in the middle of it corrupts the stream \[C28\]. Without
+    /// `--json` they are ordinary output. Note this is deliberately **not** how
+    /// the ported commands behave: R76's leaked diagnostics are faithful to the
+    /// original and are reproduced, and this method is used only by `route`,
+    /// which has no oracle to be faithful to.
+    pub fn aside(&self, blocks: &[Block<'_>]) {
+        let mut text = String::new();
+        write_blocks(&mut text, blocks, self.width, self.metric);
+        if self.json {
+            self.diagnostic(&text);
+        } else {
+            self.write(&text);
+        }
+    }
+
     /// A streamed progress line, clamped to the terminal width. R33.
     pub fn progress(&self, text: &str) {
         self.emit(&[Block::Line(text.to_owned())]);

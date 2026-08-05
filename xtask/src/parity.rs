@@ -518,6 +518,13 @@ fn normalise_elapsed(bytes: &[u8]) -> Vec<u8> {
         if index > 0 {
             // `split_inclusive` keeps the terminator, so nothing is re-added.
         }
+        if let Some((head, value, tail)) = elapsed_seconds_field(line) {
+            out.push_str(head);
+            out.push_str("<ELAPSED>");
+            out.push_str(tail);
+            let _ = value;
+            continue;
+        }
         match elapsed_cell(line) {
             Some((head, value, tail)) => {
                 out.push_str(head);
@@ -532,6 +539,22 @@ fn normalise_elapsed(bytes: &[u8]) -> Vec<u8> {
         }
     }
     out.into_bytes()
+}
+
+/// `  "elapsedSeconds": 0.128,` split into the parts around its value.
+///
+/// The JSON half of the same problem the table has: a wall-clock measurement
+/// of the run cannot be a golden. The key and the trailing comma still diff.
+fn elapsed_seconds_field(line: &str) -> Option<(&str, &str, &str)> {
+    const KEY: &str = "\"elapsedSeconds\":";
+    let at = line.find(KEY)? + KEY.len();
+    let rest = &line[at..];
+    let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
+    let value = rest[..end].trim_ascii();
+    if value.is_empty() || !value.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
+        return None;
+    }
+    Some((&line[..at], &line[at..at + end], &line[at + end..]))
 }
 
 /// `| elapsed        | 4s           |` split into the parts around its value.

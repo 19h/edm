@@ -53,6 +53,7 @@ pub mod distinct;
 #[cfg(test)]
 mod fixture;
 pub mod graph;
+pub mod json;
 pub mod model;
 pub mod num;
 pub mod ratio;
