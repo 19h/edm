@@ -1,0 +1,121 @@
+---
+source: crates/edm/tests/trade.rs
+expression: run.stdout
+---
+{
+  "request": {
+    "method": "PUT",
+    "endpoint": "https://api.orerve.net/2.0/elite/market/trade",
+    "url": "https://api.orerve.net/2.0/elite/market/trade?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",
+    "headers": {
+      "encrypted": "1",
+      "fdev-retry": "0/2",
+      "fdev-season": "4",
+      "fdev-semver": "4.4.0.3",
+      "nonce": "000000000001",
+      "request-time": "12345000",
+      "user-agent": "EDGame/11.0/Win64"
+    },
+    "envelope": {
+      "cmdrId": "F1234567",
+      "marketId": "4306502403",
+      "transactionType": "buy",
+      "commodityId": 128049204,
+      "blackMarket": 0,
+      "stolen": 0,
+      "unitPrice": 9000,
+      "qty": 5,
+      "finalQty": 15,
+      "fTime": 1700000000,
+      "machineId": "machine-1",
+      "machineToken": "80 chars (hidden)",
+      "authToken": "2024 chars (hidden)"
+    },
+    "plaintextLength": 2299,
+    "nonce": "000000000001",
+    "frontierTime": 1700000000,
+    "requestTime": 12345000
+  },
+  "plan": {
+    "marketId": "4306502403",
+    "transactionType": "buy",
+    "commodityId": 128049204,
+    "commodityName": "Gold",
+    "blackMarket": false,
+    "stolen": false,
+    "unitPrice": 9000,
+    "qty": 5,
+    "finalQty": 15
+  },
+  "status": 200,
+  "payload": {
+    "id": 4306502403,
+    "credits": 1000000,
+    "debt": 0,
+    "allowsDumping": true,
+    "commodities": {
+      "128049204": {
+        "id": 128049204,
+        "name": "Gold",
+        "categoryname": "Metals",
+        "stock": 120,
+        "stockBracket": 2,
+        "buyPrice": 9000,
+        "sellPrice": 8900,
+        "fencePrice": 0,
+        "demand": 0,
+        "demandBracket": 0,
+        "meanPrice": 9500,
+        "consumer": 0,
+        "producer": 1,
+        "rare": 0,
+        "legality": ""
+      },
+      "128049205": {
+        "id": 128049205,
+        "name": "Silver",
+        "categoryname": "Metals",
+        "stock": 40,
+        "stockBracket": 1,
+        "buyPrice": 4600,
+        "sellPrice": 4550,
+        "fencePrice": 0,
+        "demand": 0,
+        "demandBracket": 0,
+        "meanPrice": 4800,
+        "consumer": 0,
+        "producer": 1,
+        "rare": 0,
+        "legality": ""
+      },
+      "128049669": {
+        "id": 128049669,
+        "name": "Biowaste",
+        "categoryname": "Waste",
+        "stock": 0,
+        "stockBracket": 0,
+        "buyPrice": 0,
+        "sellPrice": 60,
+        "fencePrice": 0,
+        "demand": 900,
+        "demandBracket": 3,
+        "meanPrice": 65,
+        "consumer": 1,
+        "producer": 0,
+        "rare": 0,
+        "legality": ""
+      }
+    },
+    "inventory": [
+      {
+        "commodity": "Gold",
+        "qty": 15,
+        "value": 90000,
+        "stolen": false,
+        "marked": 0,
+        "owner": 0,
+        "origin": 0
+      }
+    ]
+  }
+}

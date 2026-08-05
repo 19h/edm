@@ -1,0 +1,35 @@
+---
+source: crates/edm/tests/market_sweep.rs
+expression: run.stdout
+---
+   resolving "Colonia" through Ardent...
+   reading /2.0/elite/starsystem for Colonia to find its markets...
+== SWEEP ===========================================================================================
++-------------------+-----------------------------------+
+| Field             | Value                             |
++===================+===================================+
+| system            | Colonia (3238296097059)           |
+| markets           | 5 of 7                            |
+| workers           | 1 pulling from one queue          |
+| timeout           | 10s per attempt, up to 1 requeues |
+| eddn              | off                               |
+| carriers skipped  | 1                                 |
+| no-market skipped | 1                                 |
++-------------------+-----------------------------------+
+[1/5] Jaques Station (3229009408)  HTTP 200  3 commodities
+[requeue 1/1] Ohm City (3229009409): HTTP 500
+[2/5] Kinsey Orbital (3229009410)  HTTP 404  HTTP 404
+[3/5] Colonia Hub (3229009411)  HTTP 200  HTTP 200
+[4/5] Centauri Depot (3229009412)  HTTP 200  3 commodities
+[5/5] Ohm City (3229009409)  HTTP 200  3 commodities  after 2 attempts
+== SWEEP RESULTS  Colonia — 5 markets ==============================================================
++------------+----------------+------+------+-----+-----+------+-----+
+|  Market ID | Name           | HTTP | Comm | Sup | Dem | EDDN | Try |
++============+================+======+======+=====+=====+======+=====+
+| 3229009408 | Jaques Station |  200 |    3 |   2 |   1 | -    |   1 |
+| 3229009409 | Ohm City       |  200 |    3 |   2 |   1 | -    |   2 |
+| 3229009410 | Kinsey Orbital |  404 |    - |   - |   - | -    |   1 |
+| 3229009411 | Colonia Hub    |  200 |    - |   - |   - | -    |   1 |
+| 3229009412 | Centauri Depot |  200 |    3 |   2 |   1 | -    |   1 |
++------------+----------------+------+------+-----+-----+------+-----+
+   2 markets returned no usable data
