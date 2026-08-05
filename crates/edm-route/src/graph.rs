@@ -1,14 +1,26 @@
 //! The trade graph: nodes are markets, an edge is the best laden hop between
 //! two of them, and the whole thing is built commodity-major.
 //!
-//! **Never pair-major.** Most market pairs share no tradeable commodity at all,
-//! so pairing markets first and asking what they can trade costs `n² · |C|`
-//! and spends nearly all of it discovering emptiness. Pivoting on the commodity
-//! costs `Σ_c |suppliers_c| · |buyers_c|`, which on real data is smaller by
-//! orders of magnitude — and every Companion API market returns the same
-//! 391-entry commodity map with most rows priced but holding nothing and
-//! wanting nothing, so the difference between the two shapes is the difference
-//! between a build that finishes and one that does not.
+//! **Never pair-major.** Pairing markets first and asking what they can trade
+//! costs `n² · |C|` and spends nearly all of it discovering emptiness. Pivoting
+//! on the commodity costs `Σ_c |suppliers_c| · |buyers_c|` instead, and every
+//! Companion API market returns the same 391-entry commodity map with most rows
+//! priced but holding nothing and wanting nothing — so the pivot is what makes
+//! the constant factor bearable. Measured 2026-08-06 over the 22 real market
+//! payloads the first live run cached: `Σ_c |sup| · |buy|` is 7,038 against a
+//! pair-major 180,642, a factor of 25.
+//!
+//! **The result is nevertheless a dense graph, and an earlier version of this
+//! comment claimed otherwise.** "Most market pairs share no tradeable commodity"
+//! is false for Companion API data. Over those 22 markets, **410 of the 462
+//! ordered pairs — 89% — have a profitable trade between them**; over a cached
+//! 5,049-market sweep it is **95%**. So the compressed sparse row layout below
+//! is a memory layout and not a sparsity claim, the strongly connected
+//! component decomposition yields one component holding all but the few
+//! stations that trade with nobody, and the build is quadratic in the market
+//! count with no help from the data: **24,292,232 legs and 127 seconds at
+//! 5,049 markets**, with a transient peak of 4.1 GiB. That is why it reports
+//! progress.
 //!
 //! Three admissible break bounds come from `edtrade/src/solve/singlehop.ts`,
 //! and one subtlety it documents must survive the port: **`stock` is excluded
@@ -22,7 +34,17 @@ use std::collections::HashMap;
 use crate::model::{CommodityId, Demand, Limits, Market, ShipConfig, Supply};
 use crate::num::{Credits, Millis, Tons};
 use crate::time::Geometry;
+use crate::watch::{Event, Watch};
 use crate::weight::{LegChoice, affordable, leg_weight};
+
+/// How many supply rows the build gets through between progress reports.
+///
+/// The pools are wildly uneven — one commodity's pool can be most of the build
+/// — so reporting only at pool boundaries would leave the longest stretch of a
+/// wide sweep silent, which is the thing being fixed. 4,096 rows is a report
+/// every few tens of milliseconds at 5,000 markets and never more than one per
+/// pool at fixture sizes.
+const ROWS_PER_REPORT: usize = 4_096;
 
 /// A market's supply row, tagged with the node that holds it.
 #[derive(Clone, Copy, Debug)]
@@ -152,12 +174,20 @@ struct EdgeRecord {
 
 impl TradeGraph {
     /// Builds the graph, commodity-major.
+    ///
+    /// The build has no deadline, only a voice. It is the one phase whose cost
+    /// the plan already prices — it is quadratic in a market count the user was
+    /// shown and agreed to before a request was sent — and abandoning it half
+    /// way leaves a graph missing exactly the legs the bounds ranked highest,
+    /// which is a wrong answer rather than a partial one. So it says where it
+    /// has got to and finishes.
     #[must_use]
     pub fn build(
         pools: &Pools,
         geometry: &Geometry<'_>,
         ship: &ShipConfig,
         limits: &Limits,
+        watch: Watch<'_>,
     ) -> Self {
         let markets = geometry.markets;
         let mut stats =
@@ -178,7 +208,12 @@ impl TradeGraph {
             stats.pairs_total += pool.suppliers.len() as u64 * pool.buyers.len() as u64;
         }
 
+        let total = ordered.len();
+        let say = |done: usize, edges: usize| watch.report(Event::Building { done, total, edges });
+
+        let mut rows_since_report = 0usize;
         for (seen, &(pool, bound)) in ordered.iter().enumerate() {
+            say(seen, records.len());
             if bound <= limits.min_profit {
                 // Bound 0. The pools are in descending bound order, so no later
                 // one can clear the floor either.
@@ -189,6 +224,11 @@ impl TradeGraph {
             let best_sell = best_buyer.row.sell_price;
 
             for supplier in &pool.suppliers {
+                rows_since_report += 1;
+                if rows_since_report >= ROWS_PER_REPORT {
+                    rows_since_report = 0;
+                    say(seen, records.len());
+                }
                 let buyable = min_tons(ship.cargo, affordable(ship.credits, supplier.row.buy_price));
                 // Bound 1. Both factors are non-increasing in the supply sort,
                 // so this is a `break`. `stock` is deliberately absent: it is
@@ -261,6 +301,9 @@ impl TradeGraph {
         }
 
         stats.edges = records.len() as u32;
+        // The closing report, so a watcher sees the phase end rather than a
+        // count that stopped moving.
+        say(total, records.len());
         Self::from_records(markets.len(), records, stats)
     }
 
@@ -351,6 +394,22 @@ impl TradeGraph {
     #[must_use]
     pub fn millis(&self, edge: usize) -> Millis {
         self.edge_millis[edge]
+    }
+
+    /// Every edge's profit, in edge order.
+    ///
+    /// Exists so a component can address these rather than copy them. At
+    /// 24 million legs each array is 185 MiB, which is not a rounding error on
+    /// a machine already holding 1.6 GiB of graph.
+    #[must_use]
+    pub fn weights(&self) -> &[Credits] {
+        &self.edge_weight
+    }
+
+    /// Every edge's wall-clock, in edge order. See [`TradeGraph::weights`].
+    #[must_use]
+    pub fn times(&self) -> &[Millis] {
+        &self.edge_millis
     }
 
     /// The trade an edge performs.
@@ -495,13 +554,19 @@ fn edge_key(from: u32, to: u32) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pools, TradeGraph};
+    use super::{Event, Pools, TradeGraph, Watch};
     use crate::fixture::{geometry, limits, market, ship};
     use crate::model::{CommodityId, Limits};
     use crate::num::{Credits, Tons};
 
     fn build(markets: &[crate::model::Market], limits: &Limits) -> TradeGraph {
-        TradeGraph::build(&Pools::from_markets(markets), &geometry(markets), &ship(), limits)
+        TradeGraph::build(
+            &Pools::from_markets(markets),
+            &geometry(markets),
+            &ship(),
+            limits,
+            Watch::unlimited(),
+        )
     }
 
     #[test]
@@ -573,5 +638,33 @@ mod tests {
         let graph = build(&markets, &limits());
         assert!(graph.stats.pairs_visited * 4 < graph.stats.pairs_total, "{:?}", graph.stats);
         assert!(graph.stats.commodities_pruned >= 40, "{:?}", graph.stats);
+    }
+
+    #[test]
+    fn the_build_reports_progress_that_ends_at_the_pool_count() {
+        // Silence is the defect: 127 seconds of it at 5,049 markets, measured
+        // 2026-08-06. The last report must say the phase finished, because a
+        // counter that merely stops is indistinguishable from a stall.
+        let markets = [
+            market(1, 0.0, &[(0, 100, 500), (1, 100, 500)], &[]),
+            market(2, 5.0, &[], &[(0, 900, 500), (1, 900, 500)]),
+        ];
+        let seen = std::cell::RefCell::new(Vec::new());
+        let sink = |event: Event| seen.borrow_mut().push(event);
+        let graph = TradeGraph::build(
+            &Pools::from_markets(&markets),
+            &geometry(&markets),
+            &ship(),
+            &limits(),
+            Watch::unlimited().reporting(&sink),
+        );
+        let seen = seen.into_inner();
+        let Some(&Event::Building { done, total, edges }) = seen.last() else {
+            panic!("the build reported nothing: {seen:?}");
+        };
+        assert_eq!((done, total), (2, 2), "two commodities, both finished");
+        assert_eq!(edges, graph.edge_count());
+        // And it said something before it finished, so a long build moves.
+        assert!(seen.len() > 1, "{seen:?}");
     }
 }

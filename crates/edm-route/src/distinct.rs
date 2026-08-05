@@ -68,12 +68,21 @@ use crate::graph::TradeGraph;
 use crate::model::Limits;
 use crate::num::{Credits, Millis, Ratio};
 use crate::ratio::{self, Component, LocalEdge};
-use crate::report::{Guarantee, Route};
+use crate::report::{Guarantee, HeuristicReason, Route};
 use crate::round;
 use crate::time::Geometry;
+use crate::watch::{Event, Watch};
 
 /// See `bounded::UNREACHABLE`.
 const UNREACHABLE: i128 = i128::MIN / 4;
+
+/// How many expansions pass between two consultations of the caller's budget.
+///
+/// The budget predicate is a call through a reference and, for a real caller,
+/// a clock read; at the twenty million expansions [`Limits::search_budget`]
+/// admits, asking on every one of them would cost more than the expansion. A
+/// power of two so the test is a mask.
+const EXPANSIONS_PER_CHECK: u64 = 4_096;
 
 /// The best loop meeting the stop floor, and how well it was established.
 #[derive(Clone, Debug)]
@@ -87,6 +96,15 @@ pub struct ConstrainedCycle {
     /// The free optimum, which bounds every cycle in the graph including this
     /// one. Equal to `rate` when the free optimum already met the floor.
     pub upper: Ratio,
+    /// Whether `upper` was itself proved.
+    ///
+    /// Separate from `proved`, and load-bearing. `upper` comes from the free
+    /// ratio solver, which can now stop on the caller's budget — and a rate the
+    /// free solver merely reached is a rate some cycle achieves, not a bound on
+    /// every cycle. Quoting it as `Guarantee::BoundedGap` would claim "nothing
+    /// better than this exists" from a search that never established it, which
+    /// on the early-return path below would read as an optimum outright.
+    pub bound_proved: bool,
     /// How many partial paths were expanded.
     pub expansions: u64,
 }
@@ -97,8 +115,9 @@ pub fn best_with_min_stops(
     graph: &TradeGraph,
     limits: &Limits,
     k_min: usize,
+    watch: Watch<'_>,
 ) -> Option<ConstrainedCycle> {
-    let free = ratio::max_ratio_cycle(graph)?;
+    let free = ratio::max_ratio_cycle(graph, watch)?;
     let upper = free.rate;
 
     // The cheapest possible outcome: the unconstrained optimum already meets
@@ -111,6 +130,7 @@ pub fn best_with_min_stops(
             rate: free.rate,
             proved: free.proved,
             upper,
+            bound_proved: free.proved,
             expansions: 0,
         });
     }
@@ -128,22 +148,31 @@ pub fn best_with_min_stops(
         ceiling,
         budget: limits.search_budget,
         expansions: 0,
+        expired: false,
+        watch,
         best: None,
     };
 
-    for component in Component::all(graph) {
-        if component.nodes().len() < k_min {
-            continue;
+    // The bound the pruning rests on is `D*[v]` measured at the free optimum,
+    // and it is finite only because the ratio solver proved no cycle has
+    // positive reduced weight there. An unproved `upper` invalidates the
+    // arithmetic, not just the wording — so there is nothing to search.
+    if free.proved {
+        for component in Component::all(graph) {
+            if component.nodes().len() < k_min {
+                continue;
+            }
+            search.run(&component);
         }
-        search.run(&component);
     }
 
     let (nodes, rate) = search.best.clone()?;
     Some(ConstrainedCycle {
         nodes,
         rate,
-        proved: search.expansions < search.budget,
+        proved: free.proved && !search.expired && search.expansions < search.budget,
         upper,
+        bound_proved: free.proved,
         expansions: search.expansions,
     })
 }
@@ -156,6 +185,11 @@ struct Search<'a> {
     ceiling: usize,
     budget: u64,
     expansions: u64,
+    /// Whether the caller's budget stopped this search. Separate from the
+    /// expansion count, because they are different reasons to say the same
+    /// thing and only one of them is visible in `expansions`.
+    expired: bool,
+    watch: Watch<'a>,
     best: Option<(Vec<u32>, Ratio)>,
 }
 
@@ -172,11 +206,11 @@ struct Frame<'a> {
 }
 
 impl Search<'_> {
-    fn run(&mut self, component: &Component) {
+    fn run(&mut self, component: &Component<'_>) {
         let adjacency = component.adjacency();
         let n = component.nodes().len();
         for origin in 0..n as u32 {
-            if self.expansions >= self.budget {
+            if self.expansions >= self.budget || self.stop() {
                 return;
             }
             // One Bellman-Ford pass per origin buys the bound for every partial
@@ -199,9 +233,30 @@ impl Search<'_> {
         }
     }
 
+    /// Whether the caller's budget has been spent, asked rarely and remembered.
+    ///
+    /// Remembered because a predicate that has answered `true` once is
+    /// documented never to answer `false` again, so re-asking is pure cost —
+    /// and because the recursion below needs the answer at every level of a
+    /// path it is unwinding.
+    fn stop(&mut self) -> bool {
+        if self.expired {
+            return true;
+        }
+        if self.expansions.is_multiple_of(EXPANSIONS_PER_CHECK) && self.watch.expired() {
+            self.expired = true;
+            self.watch.report(Event::Abandoned);
+        }
+        self.expired
+    }
+
     fn descend(&mut self, frame: &mut Frame<'_>, node: u32) {
-        if self.expansions >= self.budget {
+        if self.expansions >= self.budget || self.stop() {
             return;
+        }
+        if self.expansions.is_multiple_of(EXPANSIONS_PER_CHECK) {
+            self.watch
+                .report(Event::Expanded { paths: self.expansions, budget: self.budget });
         }
         self.expansions += 1;
 
@@ -404,13 +459,20 @@ pub fn solve(
     geometry: &Geometry<'_>,
     limits: &Limits,
     k_min: usize,
+    watch: Watch<'_>,
 ) -> Vec<Route> {
-    let Some(best) = best_with_min_stops(graph, limits, k_min) else { return Vec::new() };
+    let Some(best) = best_with_min_stops(graph, limits, k_min, watch) else { return Vec::new() };
     let Some(head) = round::route_of(graph, geometry, &best.nodes) else { return Vec::new() };
+    // Three claims, in descending strength, and the middle one is the reason
+    // `bound_proved` exists: an upper bound is only worth quoting if something
+    // proved it. Without that distinction an exhausted run would announce a gap
+    // of zero against a bound it invented, which reads as an optimum.
     let head_guarantee = if best.proved {
         Guarantee::OptimalForStartingCredits
-    } else {
+    } else if best.bound_proved {
         Guarantee::BoundedGap { upper: best.upper }
+    } else {
+        Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
     };
 
     let ceiling = limits
@@ -431,7 +493,20 @@ mod tests {
     use super::{Bracket, Partial, beyond_reach, best_with_min_stops};
     use crate::fixture::{geometry, limits, market, ship};
     use crate::graph::{Pools, TradeGraph};
+    use crate::model::Market;
     use crate::num::{Credits, Millis, Ratio};
+    use crate::report::{Guarantee, HeuristicReason};
+    use crate::watch::Watch;
+
+    fn build(markets: &[Market]) -> TradeGraph {
+        TradeGraph::build(
+            &Pools::from_markets(markets),
+            &geometry(markets),
+            &ship(),
+            &limits(),
+            Watch::unlimited(),
+        )
+    }
 
     #[test]
     fn an_unreachable_completion_is_always_pruned() {
@@ -478,38 +553,59 @@ mod tests {
             market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
             market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
         ];
-        let graph = TradeGraph::build(
-            &Pools::from_markets(&markets),
-            &geometry(&markets),
-            &ship(),
-            &limits(),
-        );
-        let found = best_with_min_stops(&graph, &limits(), 3).expect("a three-stop loop");
+        let graph = build(&markets);
+        let found =
+            best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
         assert_eq!(found.expansions, 0);
         assert_eq!(found.nodes.len(), 3);
         assert_eq!(found.rate, found.upper);
+        assert!(found.bound_proved);
+    }
+
+    /// The two-cycle 0<->1 is the best rate; the three-cycle is worse but is
+    /// the only thing that meets a floor of three.
+    fn floor_forcing() -> [Market; 3] {
+        [
+            market(1, 0.0, &[(0, 100, 500), (3, 100, 500)], &[(2, 900, 500), (1, 900, 500)]),
+            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500), (3, 200, 500)]),
+            market(3, 2.0, &[(2, 100, 500)], &[(1, 200, 500)]),
+        ]
     }
 
     #[test]
     fn a_floor_above_the_free_optimum_forces_the_longer_loop() {
-        // The two-cycle 0<->1 is the best rate; the three-cycle is worse but is
-        // the only thing that meets a floor of three.
-        let markets = [
-            market(1, 0.0, &[(0, 100, 500), (3, 100, 500)], &[(2, 900, 500), (1, 900, 500)]),
-            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500), (3, 200, 500)]),
-            market(3, 2.0, &[(2, 100, 500)], &[(1, 200, 500)]),
-        ];
-        let graph = TradeGraph::build(
-            &Pools::from_markets(&markets),
-            &geometry(&markets),
-            &ship(),
-            &limits(),
-        );
-        let free = crate::ratio::max_ratio_cycle(&graph).expect("a cycle");
+        let markets = floor_forcing();
+        let graph = build(&markets);
+        let free = crate::ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
         assert_eq!(free.nodes.len(), 2);
-        let found = best_with_min_stops(&graph, &limits(), 3).expect("a three-stop loop");
+        let found =
+            best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
         assert_eq!(found.nodes.len(), 3);
         assert!(found.proved);
+        assert!(found.bound_proved);
         assert!(found.rate < found.upper);
+    }
+
+    #[test]
+    fn an_unproved_upper_bound_is_never_quoted_as_a_bounded_gap() {
+        // This is the shape of the claim that was wrong before there was a
+        // budget to expire: on the early-return path `upper == rate`, so
+        // `BoundedGap { upper }` says "nothing better than this exists and this
+        // route achieves it" — a proof of optimality, assembled out of a search
+        // that proved nothing.
+        let markets = floor_forcing();
+        let graph = build(&markets);
+        let spent = || true;
+        let watch = Watch::unlimited().until(&spent);
+        let found = best_with_min_stops(&graph, &limits(), 2, watch).expect("the warm start");
+        assert!(!found.proved);
+        assert!(!found.bound_proved);
+        assert_eq!(found.rate, found.upper, "the early return quotes itself as its own bound");
+
+        let routes = super::solve(&graph, &geometry(&markets), &limits(), 2, watch);
+        assert_eq!(
+            routes[0].guarantee,
+            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+        );
     }
 }

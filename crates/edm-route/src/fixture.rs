@@ -88,6 +88,12 @@ pub(crate) fn proved_round_trip() -> crate::report::Route {
         market(1, 0.0, &[(0, 9_000, 5_000)], &[(1, 6_200, 9_000)]),
         market(2, 8.0, &[(1, 4_500, 6_000)], &[(0, 11_500, 7_000)]),
     ];
-    let solution = crate::solve(&markets, TimeModel::default(), &ship(), &limits());
+    let solution = crate::solve(
+        &markets,
+        TimeModel::default(),
+        &ship(),
+        &limits(),
+        crate::watch::Watch::unlimited(),
+    );
     solution.round_trip.into_iter().next().expect("these two markets trade both ways")
 }

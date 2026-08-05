@@ -21,6 +21,7 @@ use edm_route::num::{Credits, Ratio, Tons};
 use edm_route::report::{RankKey, Route};
 use edm_route::round;
 use edm_route::time::{Geometry, TimeModel};
+use edm_route::watch::Watch;
 use edm_route::topn::TopN;
 use edm_route::weight::leg_weight;
 
@@ -77,6 +78,7 @@ pub(crate) fn graph_of(markets: &[Market], limits: &Limits) -> TradeGraph {
         &Geometry::new(markets, TimeModel::default()),
         &ship(),
         limits,
+        Watch::unlimited(),
     )
 }
 

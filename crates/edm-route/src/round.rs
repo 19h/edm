@@ -288,6 +288,7 @@ mod tests {
     use crate::graph::{Pools, TradeGraph};
     use crate::num::Ratio;
     use crate::report::RouteKind;
+    use crate::watch::Watch;
 
     #[test]
     fn a_round_trip_carries_different_cargo_each_way() {
@@ -297,7 +298,13 @@ mod tests {
         ];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         let routes = solve(&graph, &geometry, &limits());
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].kind, RouteKind::RoundTrip);
@@ -311,7 +318,13 @@ mod tests {
             [market(1, 0.0, &[(0, 100, 500)], &[]), market(2, 5.0, &[], &[(0, 900, 500)])];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         assert!(solve(&graph, &geometry, &limits()).is_empty());
         assert_eq!(best_ratio(&graph), None);
     }
@@ -330,7 +343,13 @@ mod tests {
         let named = |markets: &[crate::model::Market]| {
             let geometry = geometry(markets);
             let graph =
-                TradeGraph::build(&Pools::from_markets(markets), &geometry, &ship(), &limits());
+                TradeGraph::build(
+                    &Pools::from_markets(markets),
+                    &geometry,
+                    &ship(),
+                    &limits(),
+                    Watch::unlimited(),
+                );
             enumerate_cycles(&graph, &geometry, 4, 10_000)
                 .into_iter()
                 .map(|cycle| {
@@ -354,7 +373,13 @@ mod tests {
         ];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         let best = best_ratio(&graph).expect("a round trip");
         let (profit, millis, edges) = price_cycle(&graph, &best.nodes).expect("a priced cycle");
         assert_eq!(best.rate, Ratio::new(profit, millis));

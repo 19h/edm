@@ -13,6 +13,7 @@ use edm_route::num::Ratio;
 use edm_route::ratio;
 use edm_route::round;
 use edm_route::single;
+use edm_route::watch::Watch;
 use support::{
     Rng, all_simple_cycles, best_cycle_rate, brute_force_single_hops, geometry, graph_of,
     limits, random_markets, ranking, ship,
@@ -34,9 +35,9 @@ fn the_free_loop_matches_brute_force_over_every_simple_cycle() {
     for markets in instances(0..60, 7, 4) {
         let graph = graph_of(&markets, &limits());
         let oracle = best_cycle_rate(&graph, 2..=markets.len());
-        let found = ratio::max_ratio_cycle(&graph).map(|best| best.rate);
+        let found = ratio::max_ratio_cycle(&graph, Watch::unlimited()).map(|best| best.rate);
         assert_eq!(found, oracle, "instance of {} markets", markets.len());
-        if let Some(best) = ratio::max_ratio_cycle(&graph) {
+        if let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) {
             assert!(best.proved, "the free solver always terminates with a proof");
             checked += 1;
         }
@@ -50,7 +51,7 @@ fn the_bounded_loop_matches_brute_force_at_every_cap() {
         let graph = graph_of(&markets, &limits());
         for k in 2..=5usize {
             let oracle = best_cycle_rate(&graph, 2..=k);
-            let found = bounded::best_bounded(&graph, k).map(|best| best.rate);
+            let found = bounded::best_bounded(&graph, k, Watch::unlimited()).map(|best| best.rate);
             assert_eq!(found, oracle, "cap of {k}");
         }
     }
@@ -60,7 +61,7 @@ fn the_bounded_loop_matches_brute_force_at_every_cap() {
 fn a_cap_of_two_is_exactly_the_best_round_trip() {
     for markets in instances(200..240, 7, 4) {
         let graph = graph_of(&markets, &limits());
-        let bounded = bounded::best_bounded(&graph, 2).map(|best| best.rate);
+        let bounded = bounded::best_bounded(&graph, 2, Watch::unlimited()).map(|best| best.rate);
         let round_trip = round::best_ratio(&graph).map(|best| best.rate);
         assert_eq!(bounded, round_trip);
     }
@@ -70,8 +71,9 @@ fn a_cap_of_two_is_exactly_the_best_round_trip() {
 fn a_cap_at_the_market_count_is_exactly_the_free_optimum() {
     for markets in instances(300..340, 7, 4) {
         let graph = graph_of(&markets, &limits());
-        let free = ratio::max_ratio_cycle(&graph).map(|best| best.rate);
-        let capped = bounded::best_bounded(&graph, markets.len()).map(|best| best.rate);
+        let free = ratio::max_ratio_cycle(&graph, Watch::unlimited()).map(|best| best.rate);
+        let capped =
+            bounded::best_bounded(&graph, markets.len(), Watch::unlimited()).map(|best| best.rate);
         assert_eq!(free, capped);
     }
 }
@@ -80,10 +82,15 @@ fn a_cap_at_the_market_count_is_exactly_the_free_optimum() {
 fn the_bounded_optimum_is_monotone_in_the_cap_and_never_beats_the_free_one() {
     for markets in instances(400..440, 7, 4) {
         let graph = graph_of(&markets, &limits());
-        let Some(free) = ratio::max_ratio_cycle(&graph).map(|best| best.rate) else { continue };
+        let Some(free) = ratio::max_ratio_cycle(&graph, Watch::unlimited()).map(|best| best.rate)
+        else {
+            continue;
+        };
         let mut previous: Option<Ratio> = None;
         for k in 2..=markets.len() {
-            let Some(rate) = bounded::best_bounded(&graph, k).map(|best| best.rate) else {
+            let Some(rate) =
+                bounded::best_bounded(&graph, k, Watch::unlimited()).map(|best| best.rate)
+            else {
                 continue;
             };
             assert!(rate <= free, "a capped loop beat the uncapped optimum at k = {k}");
@@ -104,7 +111,7 @@ fn the_bounded_walk_optimum_equals_the_bounded_simple_cycle_optimum() {
     for markets in instances(500..560, 7, 4) {
         let graph = graph_of(&markets, &limits());
         for k in 2..=5usize {
-            let walk = bounded::best_bounded(&graph, k).map(|best| best.rate);
+            let walk = bounded::best_bounded(&graph, k, Watch::unlimited()).map(|best| best.rate);
             let simple = best_cycle_rate(&graph, 2..=k);
             assert_eq!(walk, simple, "cap of {k}");
         }
@@ -116,11 +123,11 @@ fn both_loop_solvers_return_a_simple_cycle() {
     for markets in instances(600..640, 7, 4) {
         let graph = graph_of(&markets, &limits());
         let mut answers = Vec::new();
-        if let Some(best) = ratio::max_ratio_cycle(&graph) {
+        if let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) {
             answers.push(best.nodes);
         }
         for k in 2..=5usize {
-            if let Some(best) = bounded::best_bounded(&graph, k) {
+            if let Some(best) = bounded::best_bounded(&graph, k, Watch::unlimited()) {
                 assert!(best.nodes.len() <= k);
                 answers.push(best.nodes);
             }
@@ -141,9 +148,12 @@ fn the_minimum_distinct_search_matches_brute_force() {
         for k_min in 2..=4usize {
             let oracle = best_cycle_rate(&graph, k_min..=markets.len());
             let found =
-                distinct::best_with_min_stops(&graph, &limits(), k_min).map(|best| best.rate);
+                distinct::best_with_min_stops(&graph, &limits(), k_min, Watch::unlimited())
+                    .map(|best| best.rate);
             assert_eq!(found, oracle, "floor of {k_min}");
-            if let Some(best) = distinct::best_with_min_stops(&graph, &limits(), k_min) {
+            if let Some(best) =
+                distinct::best_with_min_stops(&graph, &limits(), k_min, Watch::unlimited())
+            {
                 assert!(best.proved, "the budget is far above these instances");
                 assert!(best.nodes.len() >= k_min);
                 assert!(best.rate <= best.upper);
@@ -176,7 +186,7 @@ fn the_mediant_sandwich_holds() {
     // lies between the worst and the best single edge in the graph.
     for markets in instances(900..960, 7, 4) {
         let graph = graph_of(&markets, &limits());
-        let Some(best) = ratio::max_ratio_cycle(&graph) else { continue };
+        let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) else { continue };
         let mut lowest: Option<Ratio> = None;
         let mut highest: Option<Ratio> = None;
         for (_, _, edge) in graph.edges() {
