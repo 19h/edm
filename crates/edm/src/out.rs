@@ -22,9 +22,36 @@ pub const EXIT_FAILURE: u8 = 1;
 /// The exit code for a command line that could not be parsed.
 pub const EXIT_USAGE: u8 = 2;
 
+/// Where output actually goes.
+///
+/// An enum rather than a generic parameter because `Out` is threaded through
+/// every command function and every one of them would otherwise grow a type
+/// parameter that exists solely for tests. The branch is one predictable
+/// compare per write against a 64 KiB buffer.
+enum Sink {
+    Stdout(BufWriter<std::io::Stdout>),
+    /// Both streams into one buffer, in write order — which is exactly what
+    /// `2>&1` produces, and the ordering is itself part of what is under test.
+    #[cfg(test)]
+    Captured(String),
+}
+
+impl Sink {
+    fn push(&mut self, text: &str) {
+        match self {
+            Self::Stdout(writer) => {
+                let _ = writer.write_all(text.as_bytes());
+                let _ = writer.flush();
+            }
+            #[cfg(test)]
+            Self::Captured(buffer) => buffer.push_str(text),
+        }
+    }
+}
+
 /// The program's stdout, stderr and exit code.
 pub struct Out {
-    stdout: RefCell<BufWriter<std::io::Stdout>>,
+    stdout: RefCell<Sink>,
     exit: Cell<u8>,
     width: usize,
     metric: Metric,
@@ -39,7 +66,10 @@ impl Out {
         Self {
             // 64 KiB: a commodity table at width 200 is a few kilobytes, and a
             // sweep emits one per market.
-            stdout: RefCell::new(BufWriter::with_capacity(64 * 1024, std::io::stdout())),
+            stdout: RefCell::new(Sink::Stdout(BufWriter::with_capacity(
+                64 * 1024,
+                std::io::stdout(),
+            ))),
             exit: Cell::new(0),
             width,
             metric,
@@ -88,15 +118,27 @@ impl Out {
     /// stdout would arrive after the unbuffered stderr and the two streams would
     /// interleave in an order the original never produces.
     pub fn error(&self, text: &str) {
-        self.flush();
-        let _ = writeln!(std::io::stderr(), "{text}");
+        self.diagnostic(&format!("{text}\n"));
     }
 
     /// A parse-error message, which the original follows with a blank line
     /// (`console.error(msg + "\n")`). R49.
     pub fn error_paragraph(&self, text: &str) {
+        self.diagnostic(&format!("{text}\n\n"));
+    }
+
+    /// stderr, after stdout has been flushed so the two interleave the way the
+    /// original's do.
+    fn diagnostic(&self, text: &str) {
         self.flush();
-        let _ = writeln!(std::io::stderr(), "{text}\n");
+        #[cfg(test)]
+        if let Ok(mut sink) = self.stdout.try_borrow_mut()
+            && matches!(*sink, Sink::Captured(_))
+        {
+            sink.push(text);
+            return;
+        }
+        let _ = write!(std::io::stderr(), "{text}");
     }
 
     /// Marks the run as failed without ending it.
@@ -117,15 +159,40 @@ impl Out {
     /// Called at every emission boundary rather than only at the end, so a
     /// `SIGINT` mid-sweep loses no more than the original would.
     pub fn flush(&self) {
-        if let Ok(mut stdout) = self.stdout.try_borrow_mut() {
-            let _ = stdout.flush();
+        if let Ok(mut sink) = self.stdout.try_borrow_mut()
+            && let Sink::Stdout(writer) = &mut *sink
+        {
+            let _ = writer.flush();
         }
     }
 
     fn write(&self, text: &str) {
-        if let Ok(mut stdout) = self.stdout.try_borrow_mut() {
-            let _ = stdout.write_all(text.as_bytes());
-            let _ = stdout.flush();
+        if let Ok(mut sink) = self.stdout.try_borrow_mut() {
+            sink.push(text);
+        }
+    }
+}
+
+#[cfg(test)]
+impl Out {
+    /// An `Out` that keeps everything, for asserting on what a command printed.
+    #[must_use]
+    pub fn capturing(width: usize, metric: Metric, json: bool) -> Self {
+        Self {
+            stdout: RefCell::new(Sink::Captured(String::new())),
+            exit: Cell::new(0),
+            width,
+            metric,
+            json,
+        }
+    }
+
+    /// Everything written so far, stdout and stderr interleaved in write order.
+    #[must_use]
+    pub fn captured(&self) -> String {
+        match &*self.stdout.borrow() {
+            Sink::Stdout(_) => String::new(),
+            Sink::Captured(buffer) => buffer.clone(),
         }
     }
 }

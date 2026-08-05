@@ -6,3 +6,4 @@
 //! sweep that fills the market table the optimiser is handed.
 
 pub mod pacer;
+pub mod plan;
