@@ -59,10 +59,13 @@ pub fn ranking(
                 stops(route, markets).into(),
                 cargo(route, commodities).into(),
                 money(route.profit.0).into(),
-                // A single hop has no steady state at all — repeating it means
-                // flying back empty — so its rate cell is a dash rather than a
-                // number that quietly assumes a free return leg.
-                rate.steady.map_or_else(|| "—".to_owned(), per_hour).into(),
+                // A single hop has no steady state — repeating it means flying
+                // back empty — so it has only a first-lap rate. Printing a dash
+                // there hid the number the ranking is *by*, and the profit
+                // column alone then looked unsorted: 48,400,352 above
+                // 48,389,264 above 48,253,744 above 48,389,264 again. The
+                // caveat says what the number is not.
+                per_hour(rate.steady.unwrap_or(rate.first_lap)).into(),
                 duration(route.cycle_millis.0).into(),
                 claim(rate.guarantee).into(),
             ])
@@ -168,6 +171,11 @@ pub fn progress(event: Event) -> String {
 /// return to `A` by definition. Printing the closing stop spent the width twice
 /// on the name a reader already has.
 ///
+/// **A single hop is not a cycle**, so its destination is printed. Leaving it
+/// off — which is what dropping the closing stop did to every open route —
+/// produced twenty rows that all read `Isherwood Works` and never said where to
+/// fly, the one fact a single hop consists of.
+///
 /// The system is deliberately absent. `Isherwood Works (FF Andromedae)` is
 /// forty-six characters for one stop, and at region scale the systems are
 /// procedural names like `Piscium Sector JH-V b2-4` that no reader recognises
@@ -176,12 +184,13 @@ pub fn progress(event: Event) -> String {
 fn stops(route: &Route, markets: &[Market]) -> String {
     // Every leg's *origin*, which for a cycle is exactly the set of stops with
     // the closing repeat left off.
-    route
-        .legs
-        .iter()
-        .map(|leg| station(markets, leg.from))
-        .collect::<Vec<_>>()
-        .join(" > ")
+    let mut names: Vec<String> = route.legs.iter().map(|leg| station(markets, leg.from)).collect();
+    if !route.kind.is_cycle()
+        && let Some(last) = route.legs.last()
+    {
+        names.push(station(markets, last.to));
+    }
+    names.join(" > ")
 }
 
 /// What is carried, in the same order as the stops.
@@ -639,5 +648,74 @@ mod command_tests {
     #[test]
     fn no_routes_means_no_block_at_all() {
         assert!(trade_commands(&[], &[], &Commodities::new(), None).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod open_route_tests {
+    use super::*;
+    use crate::report::RouteKind;
+
+    /// Twenty single hops that all read `Isherwood Works` and never say where
+    /// to fly. Dropping the closing stop is right for a cycle — its last
+    /// destination is its first origin — and it silently deleted the
+    /// destination of every open route, which is the whole of what a single hop
+    /// is.
+    #[test]
+    fn a_single_hop_says_where_it_goes() {
+        let markets = crate::fixture::round_trip_markets();
+        let geometry = crate::fixture::geometry(&markets);
+        let hop = crate::report::Route::single_hop(
+            &geometry,
+            0,
+            1,
+            crate::fixture::choice(0, 1_000),
+        );
+        assert!(!hop.kind.is_cycle());
+        assert_eq!(stops(&hop, &markets), "Station 1 > Station 2");
+    }
+
+    /// And a cycle still does not repeat the stop it returns to.
+    #[test]
+    fn a_cycle_does_not_repeat_its_origin() {
+        let route = crate::fixture::proved_round_trip();
+        assert!(route.kind.is_cycle());
+        assert_eq!(stops(&route, &crate::fixture::round_trip_markets()), "Station 1 > Station 2");
+    }
+
+    /// A single hop's rate cell shows the first-lap rate, which is the only one
+    /// it has and the one the ranking is by. A dash hid the sort key and left
+    /// the profit column looking unordered.
+    #[test]
+    fn a_single_hop_shows_the_rate_it_is_ranked_by() {
+        let markets = crate::fixture::round_trip_markets();
+        let geometry = crate::fixture::geometry(&markets);
+        let hop = crate::report::Route::single_hop(
+            &geometry,
+            0,
+            1,
+            crate::fixture::choice(0, 1_000),
+        );
+        let blocks = ranking(RouteKind::SingleHop, std::slice::from_ref(&hop), &markets,
+            &crate::fixture::round_trip_commodities());
+        let text = blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table { rows, .. } => Some(
+                    rows.iter()
+                        .filter_map(|row| match row {
+                            Row::Data(cells) => Some(cells.join(" | ")),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!text.contains('—'), "no dash where the ranking key belongs: {text}");
+        assert!(text.contains("/h"), "{text}");
     }
 }

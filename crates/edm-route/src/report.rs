@@ -31,6 +31,21 @@ pub enum RouteKind {
     },
 }
 
+impl RouteKind {
+    /// Whether the route returns to where it started.
+    ///
+    /// The distinction a renderer needs: a cycle's last destination is its
+    /// first origin and so is not worth printing twice, while an open route's
+    /// destination is the whole point of it.
+    #[must_use]
+    pub const fn is_cycle(self) -> bool {
+        match self {
+            Self::SingleHop => false,
+            Self::RoundTrip | Self::Loop { .. } => true,
+        }
+    }
+}
+
 /// What is claimed about the search that produced a route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Guarantee {
