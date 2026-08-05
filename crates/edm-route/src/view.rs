@@ -35,7 +35,12 @@ pub fn title(kind: RouteKind) -> &'static str {
 /// Empty input yields a note rather than an empty frame: "no route" and "the
 /// table did not render" must not look the same.
 #[must_use]
-pub fn ranking(kind: RouteKind, routes: &[Route], markets: &[Market]) -> Vec<Block<'static>> {
+pub fn ranking(
+    kind: RouteKind,
+    routes: &[Route],
+    markets: &[Market],
+    commodities: &Commodities,
+) -> Vec<Block<'static>> {
     if routes.is_empty() {
         return vec![
             Block::Heading(title(kind).to_owned()),
@@ -51,12 +56,12 @@ pub fn ranking(kind: RouteKind, routes: &[Route], markets: &[Market]) -> Vec<Blo
             Row::Data(vec![
                 js::format_integer((index + 1) as f64).into(),
                 stops(route, markets).into(),
+                cargo(route, commodities).into(),
                 money(route.profit.0).into(),
                 // A single hop has no steady state at all — repeating it means
                 // flying back empty — so its rate cell is a dash rather than a
                 // number that quietly assumes a free return leg.
                 rate.steady.map_or_else(|| "—".to_owned(), per_hour).into(),
-                per_hour(rate.first_lap).into(),
                 duration(route.cycle_millis.0).into(),
                 claim(rate.guarantee).into(),
             ])
@@ -114,19 +119,78 @@ pub fn legs(route: &Route, markets: &[Market], commodities: &Commodities) -> Vec
     }]
 }
 
-/// `A -> B -> A`, in flying order.
+/// The stations in flying order, **station names only**.
+///
+/// A cycle's last destination is its first origin, so it is not repeated: a
+/// round trip reads `A > B` and a four-stop loop `A > B > C > D`, both of which
+/// return to `A` by definition. Printing the closing stop spent the width twice
+/// on the name a reader already has.
+///
+/// The system is deliberately absent. `Isherwood Works (FF Andromedae)` is
+/// forty-six characters for one stop, and at region scale the systems are
+/// procedural names like `Piscium Sector JH-V b2-4` that no reader recognises
+/// and that pushed the destination off the end of the cell. `--detail` and
+/// `--json` carry them.
 fn stops(route: &Route, markets: &[Market]) -> String {
-    let mut out = String::new();
-    for (index, leg) in route.legs.iter().enumerate() {
-        if index == 0 {
-            out.push_str(&name(markets, leg.from));
+    // Every leg's *origin*, which for a cycle is exactly the set of stops with
+    // the closing repeat left off.
+    route
+        .legs
+        .iter()
+        .map(|leg| station(markets, leg.from))
+        .collect::<Vec<_>>()
+        .join(" > ")
+}
+
+/// What is carried, in the same order as the stops.
+///
+/// The single most actionable fact about a route and it was reachable only
+/// through `--detail`. A round trip necessarily carries two different
+/// commodities — a station's buy price always exceeds its sell price, so for
+/// any one commodity at most one direction of a pair can pay — so this is never
+/// the same word twice for a 2-cycle.
+fn cargo(route: &Route, commodities: &Commodities) -> String {
+    route
+        .legs
+        .iter()
+        .map(|leg| readable(commodities.name(leg.choice.commodity).unwrap_or("?")))
+        .collect::<Vec<_>>()
+        .join(" > ")
+}
+
+/// `AgronomicTreatment` as `Agronomic Treatment`.
+///
+/// The Companion API returns the internal identifier; the game shows the spaced
+/// form, and so does every third-party tool a commander has ever used. Left
+/// unsplit, a truncated cell reads `AgronomicTr~`, which is both longer and
+/// harder to recognise than `Agronomic Tr~`.
+///
+/// Only ASCII case is examined, which is all these identifiers contain, and a
+/// name that is already spaced is returned unchanged.
+fn readable(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    let mut previous = '\0';
+    for current in name.chars() {
+        if current.is_ascii_uppercase()
+            && previous.is_ascii_lowercase()
+            && !out.ends_with(' ')
+        {
+            out.push(' ');
         }
-        out.push_str(" -> ");
-        out.push_str(&name(markets, leg.to));
+        out.push(current);
+        previous = current;
     }
     out
 }
 
+/// A station's name, without its system.
+fn station(markets: &[Market], index: u32) -> String {
+    markets
+        .get(index as usize)
+        .map_or_else(|| "(unknown)".to_owned(), |market| market.station.clone())
+}
+
+/// A station's name with its system, for the leg table and the empty case.
 fn name(markets: &[Market], index: u32) -> String {
     markets.get(index as usize).map_or_else(
         || "(unknown)".to_owned(),
@@ -248,7 +312,7 @@ mod tests {
 
     #[test]
     fn a_shape_with_no_route_says_so_rather_than_drawing_an_empty_frame() {
-        let blocks = ranking(RouteKind::RoundTrip, &[], &[]);
+        let blocks = ranking(RouteKind::RoundTrip, &[], &[], &Commodities::new());
         assert!(matches!(blocks.last(), Some(Block::Note(text)) if text.contains("no profitable round trip")));
     }
 
@@ -297,6 +361,40 @@ mod tests {
             assert!(text.len() > 20, "{caveat:?}: {text}");
             assert!(!text.contains("Caveat"), "{caveat:?} names its own enum");
         }
+    }
+
+    /// Where to go and what to carry, both legible, neither behind a flag.
+    /// The first live radius-100 run printed `Isherwood Works (FF Andromedae)
+    /// -> Cassidy Beacon (Piscium Sector JH-V b~` and no commodity at all.
+    #[test]
+    fn a_route_row_says_where_to_go_and_what_to_carry() {
+        let route = crate::fixture::proved_round_trip();
+        let markets = crate::fixture::round_trip_markets();
+        let commodities = crate::fixture::round_trip_commodities();
+
+        // The closing stop is not repeated: a cycle returns to its origin by
+        // definition, and printing it spent the width twice on one name.
+        assert_eq!(stops(&route, &markets), "Station 1 > Station 2");
+        // Two legs, two commodities, in flying order — and necessarily
+        // different, because a station's buy price exceeds its sell price.
+        let carried = cargo(&route, &commodities);
+        assert!(carried.contains(" > "), "{carried}");
+        let names: Vec<&str> = carried.split(" > ").collect();
+        assert_eq!(names.len(), 2, "{carried}");
+        assert_ne!(names[0], names[1], "a round trip cannot carry the same thing both ways");
+    }
+
+    /// The API's identifier is not the name a commander knows.
+    #[test]
+    fn a_commodity_reads_the_way_the_game_spells_it() {
+        assert_eq!(readable("AgronomicTreatment"), "Agronomic Treatment");
+        assert_eq!(readable("Gold"), "Gold");
+        assert_eq!(readable("Superconductors"), "Superconductors");
+        assert_eq!(readable("LowTemperatureDiamond"), "Low Temperature Diamond");
+        // Already spaced, and single letters, are left alone.
+        assert_eq!(readable("Agronomic Treatment"), "Agronomic Treatment");
+        assert_eq!(readable("CMMComposite"), "CMMComposite");
+        assert_eq!(readable(""), "");
     }
 
     #[test]

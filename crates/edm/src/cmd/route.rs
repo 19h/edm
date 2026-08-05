@@ -394,7 +394,7 @@ fn rank(
         return;
     }
 
-    out.emit(&view::ranking(kind, routes, &markets));
+    out.emit(&view::ranking(kind, routes, &markets, &commodities));
 
     if config.detail {
         for route in routes {

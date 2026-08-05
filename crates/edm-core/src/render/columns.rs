@@ -34,8 +34,12 @@ pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
 /// A ranked route per row. Nothing here is ported; `edm route` is a new
 /// command \[C25\], and these widths were chosen for its own content.
 ///
-/// `Stops` is the only column with a floor, so it is the only one squeezed;
-/// the rest are dropped whole.
+/// `Route` and `Cargo` are the two squeezable columns, which is the most any
+/// set here may declare (see `fitting_terminates_within_two_steps_per_column`).
+/// They are the two a reader cannot act without: **where to go, and what to
+/// carry.** The first live radius-100 run printed neither legibly — the stops
+/// cell was elided mid-system-name and the commodity appeared only under
+/// `--detail` — which made twenty proved-optimal routes unusable.
 ///
 /// **`Rate` and `Claim` both have priority zero, so neither is ever dropped.**
 /// That is the same rule `Route::rate` enforces in Rust — the number is only
@@ -47,10 +51,14 @@ pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
 /// because it is the same quantity measured differently.
 pub const ROUTE_COLUMNS: &[Column] = &[
     Column::new("rank", "#").right(),
-    Column::new("stops", "Stops").min_width(20),
+    Column::new("route", "Route").min_width(24),
+    Column::new("cargo", "Cargo").min_width(14),
     Column::new("profit", "Profit").right().priority(3),
     Column::new("rate", "Cr/h").right(),
-    Column::new("first", "Cr/h lap 1").right().priority(4),
+    // No `Cr/h lap 1` column. It is the same quantity measured over the
+    // approach as well, useful and secondary, and at any real terminal width it
+    // was thirteen characters taken from `Cargo` — which is the thing a reader
+    // cannot act without. It is in `--json`.
     Column::new("time", "Lap").right().priority(2),
     Column::new("claim", "Claim"),
 ];

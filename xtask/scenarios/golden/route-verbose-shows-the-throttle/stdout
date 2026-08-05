@@ -44,11 +44,12 @@ enumerating systems within 10 Ly of Sol...
 +----------------+----------------+
    every price below was read live from the Companion API during this run
 == BEST ROUND TRIPS ================================================================================
-+---+-----------------------+--------------+--------------+--------------+--------+----------------+
-| # | Stops                 |       Profit |         Cr/h |   Cr/h lap 1 |    Lap | Claim          |
-+===+=======================+==============+==============+==============+========+================+
-| 1 | Galileo (Sol) -> Tit~ | 5,174,400 cr | 68,001,197/h | 45,334,131/h | 4m 33s | proved optimal |
-+---+-----------------------+--------------+--------------+--------------+--------+----------------+
++---+--------------------------+----------------+--------------+--------+----------------+
+| # | Route                    | Cargo          |         Cr/h |    Lap | Claim          |
++===+==========================+================+==============+========+================+
+| 1 | Galileo > Titan City     | Gold > Silver  | 68,001,197/h | 4m 33s | proved optimal |
++---+--------------------------+----------------+--------------+--------+----------------+
+   columns hidden to fit 100 cols: Profit
    prices were read at one instant and are already ageing; another commander may have traded them
    since
    distances are straight lines; the real jump graph may be longer

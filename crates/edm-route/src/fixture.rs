@@ -85,10 +85,30 @@ pub(crate) fn choice(commodity: u32, profit: i64) -> LegChoice {
 /// what `solve` claims shows up here rather than being papered over by a
 /// literal.
 pub(crate) fn proved_round_trip() -> crate::report::Route {
-    let markets = [
+    let solution = crate::solve(
+        &round_trip_markets(),
+        TimeModel::default(),
+        &ship(),
+        &limits(),
+        Wanted::all(),
+    );
+    solution.round_trip.into_iter().next().expect("these two markets trade both ways")
+}
+
+/// The two markets [`proved_round_trip`] is built from: one sells commodity 0
+/// and buys 1, the other the reverse.
+pub(crate) fn round_trip_markets() -> Vec<Market> {
+    vec![
         market(1, 0.0, &[(0, 9_000, 5_000)], &[(1, 6_200, 9_000)]),
         market(2, 8.0, &[(1, 4_500, 6_000)], &[(0, 11_500, 7_000)]),
-    ];
-    let solution = crate::solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
-    solution.round_trip.into_iter().next().expect("these two markets trade both ways")
+    ]
+}
+
+/// Names for the two commodities those markets trade, interned in the same
+/// order the solver interns them.
+pub(crate) fn round_trip_commodities() -> crate::model::Commodities {
+    let mut commodities = crate::model::Commodities::new();
+    commodities.intern("gold");
+    commodities.intern("silver");
+    commodities
 }
