@@ -1,0 +1,19 @@
+[package]
+name = "edm-route"
+description = "Pure trade-route optimiser: exact single hops, round trips and maximum-ratio cycles over live market data, in integer arithmetic."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The only thing this crate needs from the port: a point in galactic space.
+# Everything else here is arithmetic over integers this crate defines itself.
+edm-core.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

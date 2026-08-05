@@ -398,6 +398,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "edm-route"
+version = "1.0.0"
+dependencies = [
+ "edm-core",
+ "proptest",
+]
+
+[[package]]
 name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

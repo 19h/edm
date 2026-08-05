@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/edm-core", "crates/edm", "xtask"]
+members = ["crates/edm-core", "crates/edm-route", "crates/edm", "xtask"]
 
 [workspace.package]
 edition = "2024"
@@ -41,6 +41,7 @@ must_use_candidate = "allow"
 
 [workspace.dependencies]
 edm-core = { path = "crates/edm-core" }
+edm-route = { path = "crates/edm-route" }
 
 # --- pure (edm-core) ---------------------------------------------------------
 serde = { version = "1", features = ["derive"] }
