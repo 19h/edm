@@ -300,6 +300,8 @@ differs is a bug.
 | C22 | `--timeout` above `INT32_MAX` clamps to 1 ms without Node's `TimeoutOverflowWarning`. | The clamp itself is preserved; the warning is `process.emitWarning`. |
 | C23 | `--method connect/trace/track` and a non-ASCII `--user-agent` rejected with our message. | `fetch` forbids them before any socket; matching the *behaviour* matters more than the `TypeError` text. |
 | C24 | `EDM_ORIGIN_OVERRIDE`, `EDM_ARDENT_BASE`, `EDM_EDDN_URL` added. | Harness plumbing. Unset, behaviour is byte-identical. |
+| C25 | `edm route` exists. Bun answers `Unknown command "route"` and exits 2. | A new command, not a port of one. `KNOWN_COMMANDS` is untouched and `route` dispatches from a disjoint `EXTENDED_COMMANDS`, so R48's ordering is unaffected. Confined to argv beginning with `route`. |
+| C26 | Route-only flag names resolve **only** when the command is `route` (a two-pass parse against `Table::Base` / `Table::Extended`). | Widening `Flag::resolve` globally would make `edm market Colonia --pad L` succeed where the TypeScript exits 2 — a fidelity regression on argv the harness never runs, and so one no scenario would catch. The `parity-isolation` gate proves the two tables agree over every committed scenario's argv. |
 
 **Opt-in fixes, all off by default, each an allowlist row only when set:**
 

@@ -14,7 +14,7 @@
 //! belongs permanently.
 
 use edm_core::cli::{
-    self, ArgError, Args, Cli, EnvSnapshot, Flag, POISON_TYPE_ERROR, Value, boolean_literal, normalize, usage,
+    self, ArgError, Args, Cli, EnvSnapshot, Flag, POISON_TYPE_ERROR, Table, Value, boolean_literal, normalize, usage,
 };
 use edm_core::js;
 use proptest::prelude::*;
@@ -751,7 +751,15 @@ proptest! {
             }
         }
 
-        prop_assert_eq!(Flag::resolve(&normalize(&spelled)), Some(flag), "{}", spelled);
+        // Resolved against the extended table so route-only flags are covered
+        // too: the property under test is that *normalisation* survives
+        // separators and case, which is table-independent.
+        prop_assert_eq!(
+            Flag::resolve_in(&normalize(&spelled), Table::Extended),
+            Some(flag),
+            "{}",
+            spelled
+        );
     }
 
     /// A KELVIN SIGN is a `k` after full-Unicode lowercasing, and an
@@ -760,7 +768,7 @@ proptest! {
     fn kelvin_sign_resolves(index in 0usize..Flag::COUNT) {
         let (name, flag) = canonical_names()[index].clone();
         let spelled = name.replace('k', "\u{212A}");
-        prop_assert_eq!(Flag::resolve(&normalize(&spelled)), Some(flag));
+        prop_assert_eq!(Flag::resolve_in(&normalize(&spelled), Table::Extended), Some(flag));
     }
 
     /// A bare switch consumes exactly two tokens when the next one is a boolean

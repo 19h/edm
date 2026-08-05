@@ -7,7 +7,7 @@
 //! command. Each of those is a registered parity row, cited where it is
 //! implemented.
 
-use super::flag::{Flag, Literal, boolean_literal, normalize};
+use super::flag::{Flag, Literal, Table, boolean_literal, normalize};
 
 /// What a flag holds once parsed.
 ///
@@ -97,6 +97,15 @@ impl Args {
 /// JavaScript `process.argv` substitutes U+FFFD for malformed bytes where
 /// `std::env::args` would panic \[R55\].
 pub fn parse(argv: &[String]) -> Result<Args, ArgError> {
+    parse_with(argv, Table::Base)
+}
+
+/// [`parse`], against a chosen flag table.
+///
+/// Separated so a new command can add flag names without widening the grammar
+/// every existing command is held to \[C26\]. `parse` is `parse_with(_,
+/// Table::Base)` and is byte-for-byte what it always was.
+pub fn parse_with(argv: &[String], table: Table) -> Result<Args, ArgError> {
     let mut slots: Box<[Option<Value>]> = vec![None; Flag::COUNT].into_boxed_slice();
     let mut positionals: Vec<String> = Vec::new();
     let mut command = String::new();
@@ -137,7 +146,7 @@ pub fn parse(argv: &[String]) -> Result<Args, ArgError> {
         // made. The regex has no `u` flag, so its case folding is ASCII \[R40\].
         let negated = raw_name.len() >= 3 && raw_name.as_bytes()[..3].eq_ignore_ascii_case(b"no-");
         let stem = if negated { &raw_name[3..] } else { raw_name };
-        let canonical = Flag::resolve(&normalize(stem));
+        let canonical = Flag::resolve_in(&normalize(stem), table);
 
         if negated {
             match canonical {

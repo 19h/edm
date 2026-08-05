@@ -17,6 +17,7 @@ pub(crate) fn run() -> Result<()> {
         ("purity", purity as fn(&Path) -> Result<()>),
         ("no-signal-handling", no_signal_handling),
         ("no-committed-credentials", no_committed_credentials),
+        ("parity-isolation", parity_isolation),
     ] {
         match check(&root) {
             Ok(()) => println!("  pass  {name}"),
@@ -155,6 +156,67 @@ fn cargo_tree(root: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// A new command must not widen the grammar the old ones are held to.
+///
+/// `cargo xtask parity` diffs the same argv through Bun and through this
+/// binary. `route` has no oracle — Bun answers `Unknown command "route"` — so
+/// it is dispatched from a table disjoint from `KNOWN_COMMANDS` and its flag
+/// names resolve only when the command is `route` \[C25, C26\].
+///
+/// The risk this gate exists for is specific and quiet: widening
+/// `Flag::resolve` globally would make `edm market Colonia --pad L` succeed
+/// where the TypeScript exits 2 — a fidelity regression on argv the harness
+/// never runs, and therefore one no scenario would catch.
+fn parity_isolation(root: &Path) -> Result<()> {
+    use edm_core::cli::{self, Flag, Table};
+
+    // 1. The pinned command set is exactly the four the TypeScript dispatches.
+    if cli::KNOWN_COMMANDS != ["market", "list", "markets", "trade"] {
+        bail!("KNOWN_COMMANDS has changed; R48's ordering and the parity scenarios depend on it");
+    }
+    for command in cli::EXTENDED_COMMANDS {
+        if cli::is_known_command(command) {
+            bail!("{command} appears in both KNOWN_COMMANDS and EXTENDED_COMMANDS");
+        }
+    }
+
+    // 2. No route-only name may shadow a base name. A shadow would change what
+    //    an existing command does, silently.
+    for flag in Flag::ALL {
+        let display = flag.display().trim_start_matches('-');
+        let normalized = cli::normalize(display);
+        if let (Some(base), Some(route)) =
+            (Flag::resolve(&normalized), Flag::resolve_route(&normalized))
+            && base != route
+        {
+            bail!("{display} resolves to {base:?} in the base table and {route:?} in the route table");
+        }
+    }
+
+    // 3. The strongest statement available: over every argv the harness
+    //    actually runs, the two tables agree. If they ever disagree, the
+    //    extended table has begun to change an existing command's meaning.
+    let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
+    for scenario in &scenarios {
+        let base = cli::parse(&scenario.argv);
+        let extended = cli::parse_with(&scenario.argv, Table::Extended);
+        let same = match (&base, &extended) {
+            (Ok(a), Ok(b)) => a.command == b.command && a.positionals == b.positionals,
+            (Err(a), Err(b)) => a.to_string() == b.to_string(),
+            _ => false,
+        };
+        if !same {
+            bail!(
+                "scenario {} parses differently under the extended table: {:?}",
+                scenario.name,
+                scenario.argv
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,3 +252,4 @@ mod tests {
         assert_eq!(credential_runs(format!("{json}\n").as_bytes()), Vec::<usize>::new());
     }
 }
+

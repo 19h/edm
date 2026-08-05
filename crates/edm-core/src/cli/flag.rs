@@ -55,6 +55,31 @@ pub enum Flag {
     Timeout,
     Requeue,
 
+    // Route-only value flags. They sit inside the value run rather than after
+    // the switches because `takes_value` is a single comparison against the
+    // arity boundary; putting them at the end would make it two.
+    //
+    // None of these resolve unless the command is `route` \[C26\] — see
+    // [`Flag::resolve_in`]. Their discriminants shift the switches along, which
+    // is harmless: the slot index is never persisted or compared across builds.
+    Radius,
+    Pad,
+    StationTypes,
+    MaxStarDistance,
+    Jump,
+    Shape,
+    Top,
+    MinProfit,
+    MinSupply,
+    MinDemand,
+    MaxAge,
+    Rps,
+    MaxRequests,
+    RetryBudget,
+    Deadline,
+    ArdentQueries,
+    CacheDir,
+
     // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
     DryRun,
@@ -76,11 +101,33 @@ pub enum Flag {
     Detail,
     AllMarkets,
     Help,
+
+    // Route-only switches, after every base flag so the base grammar's own
+    // ordering is untouched.
+    Yes,
+    Settlements,
+    /// `--cache` / `--no-cache`. Named for the positive so the parser's own
+    /// `--no-` negation supplies the other spelling; a flag literally called
+    /// `no-cache` would be read as a negation of `cache` and rejected.
+    Cache,
+    Refresh,
+    FastEstimate,
+}
+
+/// Which flag table a parse resolves names against.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Table {
+    /// Exactly the TypeScript's grammar. Every existing command uses this.
+    #[default]
+    Base,
+    /// `Base` plus the route-only names. Reached only when the command is
+    /// `route`.
+    Extended,
 }
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 77] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -117,6 +164,23 @@ impl Flag {
         Self::Concurrency,
         Self::Timeout,
         Self::Requeue,
+        Self::Radius,
+        Self::Pad,
+        Self::StationTypes,
+        Self::MaxStarDistance,
+        Self::Jump,
+        Self::Shape,
+        Self::Top,
+        Self::MinProfit,
+        Self::MinSupply,
+        Self::MinDemand,
+        Self::MaxAge,
+        Self::Rps,
+        Self::MaxRequests,
+        Self::RetryBudget,
+        Self::Deadline,
+        Self::ArdentQueries,
+        Self::CacheDir,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -136,6 +200,11 @@ impl Flag {
         Self::Detail,
         Self::AllMarkets,
         Self::Help,
+        Self::Yes,
+        Self::Settlements,
+        Self::Cache,
+        Self::Refresh,
+        Self::FastEstimate,
     ];
 
     /// How many distinct flags exist; the width of an [`crate::cli::Args`] slot
@@ -156,6 +225,54 @@ impl Flag {
     #[must_use]
     pub fn takes_value(self) -> bool {
         (self as u8) < (Self::DryRun as u8)
+    }
+
+    /// Which grammar a name is resolved against.
+    ///
+    /// The base table is the TypeScript's, exactly. Widening it globally would
+    /// make `edm market Colonia --pad L` succeed where the original exits 2 —
+    /// a fidelity regression on argv the parity harness never runs, which is
+    /// the worst kind. So route-only names resolve only for `route` \[C26\].
+    #[must_use]
+    pub fn resolve_in(normalized: &str, table: Table) -> Option<Self> {
+        Self::resolve(normalized).or(match table {
+            Table::Base => None,
+            Table::Extended => Self::resolve_route(normalized),
+        })
+    }
+
+    /// The route-only names. Disjoint from the base table by construction, and
+    /// a gate proves it.
+    #[must_use]
+    pub fn resolve_route(normalized: &str) -> Option<Self> {
+        Some(match normalized {
+            "radius" | "range" => Self::Radius,
+            "pad" | "padsize" => Self::Pad,
+            "stationtypes" => Self::StationTypes,
+            "maxstardistance" | "maxstationdistance" => Self::MaxStarDistance,
+            "jump" | "jumprange" => Self::Jump,
+            "shape" => Self::Shape,
+            "top" => Self::Top,
+            "minprofit" => Self::MinProfit,
+            "minsupply" => Self::MinSupply,
+            "mindemand" => Self::MinDemand,
+            "maxage" => Self::MaxAge,
+            // Not `--rate`: that is already an alias for `--concurrency`.
+            "rps" | "requestspersecond" => Self::Rps,
+            "maxrequests" => Self::MaxRequests,
+            "retrybudget" => Self::RetryBudget,
+            "deadline" => Self::Deadline,
+            "ardentqueries" => Self::ArdentQueries,
+            "cachedir" => Self::CacheDir,
+            "yes" => Self::Yes,
+            "settlements" | "includesettlements" => Self::Settlements,
+            "cache" => Self::Cache,
+            "refresh" => Self::Refresh,
+            "fastestimate" => Self::FastEstimate,
+            // `--carriers` already exists and means exactly what route wants.
+            "includecarriers" => Self::Carriers,
+            _ => return None,
+        })
     }
 
     /// The spelling a *message* uses: `flagName` (`market-request.ts:976`),
@@ -192,6 +309,31 @@ impl Flag {
             Self::FullUrl => "--full-url",
             Self::BlackMarket => "--black-market",
             Self::FullMarket => "--full-market",
+
+            // Route-only. Not in `FLAG_DISPLAY` because the TypeScript has no
+            // such command; these are the documented spellings \[C26\].
+            Self::Radius => "--radius",
+            Self::Pad => "--pad",
+            Self::StationTypes => "--station-types",
+            Self::MaxStarDistance => "--max-star-distance",
+            Self::Jump => "--jump",
+            Self::Shape => "--shape",
+            Self::Top => "--top",
+            Self::MinProfit => "--min-profit",
+            Self::MinSupply => "--min-supply",
+            Self::MinDemand => "--min-demand",
+            Self::MaxAge => "--max-age",
+            Self::Rps => "--rps",
+            Self::MaxRequests => "--max-requests",
+            Self::RetryBudget => "--retry-budget",
+            Self::Deadline => "--deadline",
+            Self::ArdentQueries => "--ardent-queries",
+            Self::CacheDir => "--cache-dir",
+            Self::Yes => "--yes",
+            Self::Settlements => "--settlements",
+            Self::Cache => "--cache",
+            Self::Refresh => "--refresh",
+            Self::FastEstimate => "--fast-estimate",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the
             // canonical key, which for these is already the documented
