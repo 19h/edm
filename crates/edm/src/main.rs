@@ -50,7 +50,7 @@ async fn main() -> ExitCode {
     // Parsed before `Out` exists because `Out` needs to know about `--json`
     // and `openSession` — where the TypeScript reads it — cannot run until the
     // credentials have loaded.
-    let parsed = cli::parse(&argv);
+    let parsed = cli::parse_dispatch(&argv);
     let out = Out::new(width, overrides.metric, cmd::wants_json(&parsed));
 
     match LiveHttp::new() {

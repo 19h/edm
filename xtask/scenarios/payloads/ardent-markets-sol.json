@@ -1,0 +1,34 @@
+[
+  {
+    "marketId": 128016384,
+    "stationName": "Galileo",
+    "systemName": "Sol",
+    "stationType": "Ocellus",
+    "maxLandingPadSize": 3,
+    "distanceToArrival": 505
+  },
+  {
+    "marketId": 128016576,
+    "stationName": "Titan City",
+    "systemName": "Sol",
+    "stationType": "Coriolis",
+    "maxLandingPadSize": 3,
+    "distanceToArrival": 505
+  },
+  {
+    "marketId": 3705689344,
+    "stationName": "Comrade Deep",
+    "systemName": "Sol",
+    "stationType": "OnFootSettlement",
+    "maxLandingPadSize": 3,
+    "distanceToArrival": 226
+  },
+  {
+    "marketId": 3706601216,
+    "stationName": "K7Q-BQL",
+    "systemName": "Sol",
+    "stationType": "FleetCarrier",
+    "maxLandingPadSize": 3,
+    "distanceToArrival": 0
+  }
+]

@@ -213,7 +213,7 @@ pub(crate) fn drive_with_env(argv: &[&str], http: &FakeHttp, extra: Vec<(String,
         fs: RecordingFs::default(),
     };
 
-    let parsed = cli::parse(&argv);
+    let parsed = cli::parse_dispatch(&argv);
     let out = Out::new(WIDTH, overrides.metric, cmd::wants_json(&parsed));
 
     let (exit, stdout, stderr) = captured(|| {

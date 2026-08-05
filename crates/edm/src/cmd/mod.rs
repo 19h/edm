@@ -24,6 +24,7 @@
 //! already computes \[R50\].
 
 pub mod market;
+pub mod route;
 pub mod markets;
 pub mod trade;
 
@@ -31,7 +32,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use edm_core::cli::config::{self, SessionConfig, StampDefaults};
-use edm_core::cli::{self, ArgError, Args, Cli, CliError, EnvSnapshot, Flag};
+use edm_core::cli::{self, Args, Cli, CliError, EnvSnapshot, Flag};
 use edm_core::consts::{
     API_ORIGIN, ARDENT_BASE_URL, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT,
     EDDN_UPLOAD_URL, Endpoint, MARKET_LIST,
@@ -511,8 +512,9 @@ pub(crate) fn field(name: &'static str, value: String) -> edm_core::render::Row<
 /// poisoned `--json` throws out of `openSession` before anything is sent, and
 /// text can never land in a switch's slot \[C18\].
 #[must_use]
-pub fn wants_json(parsed: &Result<Args, ArgError>) -> bool {
-    matches!(parsed, Ok(args) if matches!(args.get(Flag::Json), Some(cli::Value::Bool(true))))
+pub fn wants_json(parsed: &cli::Parsed) -> bool {
+    let args = parsed.route.as_ref().or(parsed.base.as_ref().ok());
+    matches!(args, Some(args) if matches!(args.get(Flag::Json), Some(cli::Value::Bool(true))))
 }
 
 /// `main` (ts:3134), minus the process-level parts that belong to the binary.
@@ -522,14 +524,23 @@ pub fn wants_json(parsed: &Result<Args, ArgError>) -> bool {
 /// set, which is why `edm bogus --help` prints the help text and exits 0
 /// \[R48\].
 pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
-    parsed: Result<Args, ArgError>,
+    parsed: cli::Parsed,
     env: &EnvSnapshot,
     http: &H,
     ports: &Ports<C, E, F>,
     out: &Out,
     overrides: &Overrides,
 ) {
-    let args = match parsed {
+    // The extended parse, when there is one, is the only place a route-only
+    // flag resolves \[C26\]. It is consulted *before* the base parse's error,
+    // because `edm route Sol --radius 50` is a base parse failure and a valid
+    // route command, and the base failure is the wrong answer to print.
+    if let Some(route) = parsed.route {
+        route_command(&route, env, http, ports, out, overrides).await;
+        return;
+    }
+
+    let args = match parsed.base {
         Ok(args) => args,
         Err(error) => {
             // ts:3139 — the message and a blank line on stderr, `USAGE` on
@@ -573,6 +584,53 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // ts:3158 — the one try/catch, whose handler prints `error.message` alone
     // and assigns exit 1 \[R82\], \[R75\].
     if let Err(error) = dispatch(&args, cli, http, ports, out, overrides).await {
+        out.error(&error);
+        out.set_exit(EXIT_FAILURE);
+    }
+}
+
+/// `edm route`, which the TypeScript does not have \[C25\].
+///
+/// Its own entry point rather than a fifth arm of `dispatch`, because none of
+/// the ported preamble applies to it: it has its own help text (the pinned one
+/// gains not a character), its own configuration reader, and no `openSession`
+/// until it is about to spend a request. Keeping it out of `run`'s body is
+/// what makes "route cannot change what `market` does" checkable by reading.
+async fn route_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+    args: &Args,
+    env: &EnvSnapshot,
+    http: &H,
+    ports: &Ports<C, E, F>,
+    out: &Out,
+    overrides: &Overrides,
+) {
+    let cli = Cli::new(args, env);
+    if cli.switch_value(Flag::Help, false).unwrap_or(false) {
+        out.line(&cli::route_usage());
+        return;
+    }
+
+    let config = match config::route_config(&cli) {
+        Ok(config) => config,
+        Err(error) => {
+            out.error_paragraph(error.message());
+            out.set_exit(EXIT_USAGE);
+            return;
+        }
+    };
+
+    // `openSession` last, and only because the sweep will need it. A route run
+    // that is going to be refused by the ceiling should be refused whether or
+    // not the machine has credentials — the plan is arithmetic, not access.
+    let app = match App::open(cli, http, ports, out, overrides) {
+        Ok(app) => app,
+        Err(error) => {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+            return;
+        }
+    };
+    if let Err(error) = route::run(&app, &config).await {
         out.error(&error);
         out.set_exit(EXIT_FAILURE);
     }
@@ -631,12 +689,23 @@ mod tests {
             (vec!["market".to_owned(), "--json".to_owned(), "false".to_owned()], false),
             (vec!["market".to_owned(), "--no-json".to_owned()], false),
         ] {
-            let parsed = cli::parse(&argv);
-            let args = parsed.as_ref().expect("parses");
+            let parsed = cli::parse_dispatch(&argv);
+            let args = parsed.base.as_ref().expect("parses");
             let env = EnvSnapshot::empty();
             let accessor = Cli::new(args, &env).switch_value(Flag::Json, false).expect("readable");
             assert_eq!(wants_json(&parsed), expected);
             assert_eq!(wants_json(&parsed), accessor);
         }
+    }
+
+    /// `Out` is built from the peek before either parse is used, so `route
+    /// --json` must reach it through the extended arm — otherwise the route
+    /// command would print tables into a stream a caller is parsing.
+    #[test]
+    fn the_json_peek_sees_the_extended_parse_too() {
+        let argv = vec!["route".to_owned(), "Sol".to_owned(), "--json".to_owned()];
+        let parsed = cli::parse_dispatch(&argv);
+        assert!(parsed.route.is_some(), "route must take the extended arm");
+        assert!(wants_json(&parsed));
     }
 }

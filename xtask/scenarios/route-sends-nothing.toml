@@ -1,5 +1,47 @@
 # route-sends-nothing
-why = "A route run that reaches no market must be shown to have sent nothing, not assumed to have. The mock is up and reachable and `expect-frontier-requests = 0` counts what arrived — the shape every spend-gate scenario needs, since an empty wire log alone cannot tell a gate that refused from a scenario that stopped reaching the gate."
-argv = ["route", "Sol"]
+why = "A route run that reaches no market must be shown to have sent nothing, not assumed to have. Ardent answers in full, the plan prices two starports out of four stations, and `expect-frontier-requests = 0` counts what arrived — the shape every spend-gate scenario needs, since an empty wire log alone cannot tell a gate that refused from a scenario that stopped reaching the gate. The two dropped stations are the whole default filter: a settlement and a carrier, both of which the plan names."
+argv = ["route", "Sol", "--radius", "10", "--dry-run"]
 oracle = "none"
 expect-frontier-requests = 0
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/nearby"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-nearby-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+# Two neighbours with no market at all. A sparse system is not an error and
+# must not cost a starsystem read.
+[[route]]
+path = "/v2/system/name/Alpha%20Centauri/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Barnard's%20Star/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]

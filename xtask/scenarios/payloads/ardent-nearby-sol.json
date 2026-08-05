@@ -1,0 +1,18 @@
+[
+  {
+    "systemName": "Alpha Centauri",
+    "systemAddress": 2871051298739,
+    "systemX": 3.03125,
+    "systemY": -0.09375,
+    "systemZ": 3.15625,
+    "distance": 4
+  },
+  {
+    "systemName": "Barnard's Star",
+    "systemAddress": 5031654888146,
+    "systemX": -3.03125,
+    "systemY": 1.375,
+    "systemZ": 4.9375,
+    "distance": 6
+  }
+]

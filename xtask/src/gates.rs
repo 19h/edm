@@ -247,10 +247,28 @@ fn parity_isolation(root: &Path) -> Result<()> {
     }
 
     // 3. The strongest statement available: over every argv the harness
-    //    actually runs, the two tables agree. If they ever disagree, the
-    //    extended table has begun to change an existing command's meaning.
+    //    actually runs, the two tables agree — *except* on a `route` argv,
+    //    which is the one case the extended table exists for. A route argv
+    //    instead has to satisfy the complementary claim, that the extended
+    //    parse it reached is only ever reached for `route`.
     let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
     for scenario in &scenarios {
+        let dispatched = cli::parse_dispatch(&scenario.argv);
+
+        if let Some(route) = &dispatched.route {
+            // The dispatcher hands the extended parse to the command layer, so
+            // this is the whole of what "route-only" means at run time.
+            if route.command != "route" {
+                bail!(
+                    "scenario {} took the extended arm as command {:?}, not route: {:?}",
+                    scenario.name,
+                    route.command,
+                    scenario.argv
+                );
+            }
+            continue;
+        }
+
         let base = cli::parse(&scenario.argv);
         let extended = cli::parse_with(&scenario.argv, Table::Extended);
         let same = match (&base, &extended) {
@@ -264,6 +282,22 @@ fn parity_isolation(root: &Path) -> Result<()> {
                 scenario.name,
                 scenario.argv
             );
+        }
+    }
+
+    // 4. And the case no scenario covers, because it is a *failure* the harness
+    //    would have nothing to compare: a route-only flag on a ported command
+    //    must still be an unknown option. This is the regression the whole
+    //    two-table arrangement exists to prevent, so it is asserted directly
+    //    rather than inferred from the scenarios that happen to be committed.
+    for argv in [
+        vec!["market".to_owned(), "Colonia".to_owned(), "--radius".to_owned(), "30".to_owned()],
+        vec!["markets".to_owned(), "--pad".to_owned(), "L".to_owned()],
+        vec!["trade".to_owned(), "--min-profit".to_owned(), "1000".to_owned()],
+    ] {
+        let dispatched = cli::parse_dispatch(&argv);
+        if dispatched.route.is_some() || dispatched.base.is_ok() {
+            bail!("a route-only flag was accepted on a ported command: {argv:?}");
         }
     }
 
