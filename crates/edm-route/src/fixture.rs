@@ -9,6 +9,7 @@ use crate::model::{
     CommodityId, Demand, DemandQty, Limits, Market, ShipConfig, Supply,
 };
 use crate::num::{Credits, Tons};
+use crate::Wanted;
 use crate::time::{Geometry, TimeModel};
 use crate::weight::{LegChoice, Limiter};
 use edm_core::domain::id64::Coordinates;
@@ -88,6 +89,6 @@ pub(crate) fn proved_round_trip() -> crate::report::Route {
         market(1, 0.0, &[(0, 9_000, 5_000)], &[(1, 6_200, 9_000)]),
         market(2, 8.0, &[(1, 4_500, 6_000)], &[(0, 11_500, 7_000)]),
     ];
-    let solution = crate::solve(&markets, TimeModel::default(), &ship(), &limits());
+    let solution = crate::solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
     solution.round_trip.into_iter().next().expect("these two markets trade both ways")
 }

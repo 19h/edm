@@ -5,6 +5,7 @@ mod support;
 
 use edm_route::num::{Credits, Millis, Ratio, Tons};
 use edm_route::report::{Caveat, Guarantee, RouteKind};
+use edm_route::Wanted;
 use edm_route::time::TimeModel;
 use edm_route::{bounded, distinct, model, ratio, round, solve};
 use support::{best_cycle_rate, graph_of, limits, market, ship};
@@ -63,7 +64,7 @@ fn three_markets_by_hand() {
 #[test]
 fn three_markets_end_to_end() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
 
     assert!(solution.round_trip.is_empty());
 
@@ -90,7 +91,7 @@ fn three_markets_end_to_end() {
 #[test]
 fn a_full_hold_and_a_full_purse_prove_the_result_outright() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
     for route in solution.loops.iter().chain(&solution.single) {
         // Every route in the list is either proved or explicitly labelled;
         // there is no third state where a rate reads as proved by omission.
@@ -108,7 +109,7 @@ fn a_thinner_purse_says_so_instead() {
     let markets = three_markets();
     // 50,000 credits buys 500 tons at 100 each: the cap binds on every leg.
     let poor = model::ShipConfig { cargo: Tons(1_000), credits: Credits(50_000) };
-    let solution = solve(&markets, TimeModel::default(), &poor, &limits());
+    let solution = solve(&markets, TimeModel::default(), &poor, &limits(), Wanted::all());
     let route = &solution.loops[0];
     assert_eq!(route.legs[0].choice.units, Tons(500));
     assert_eq!(route.rate().guarantee, Guarantee::OptimalForStartingCredits);

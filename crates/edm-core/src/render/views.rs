@@ -885,6 +885,12 @@ pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
     if coverage.systems_failed > 0 {
         rows.push(field_row("systems failed", int(coverage.systems_failed as f64)));
     }
+    if coverage.markets_absent > 0 {
+        rows.push(field_row(
+            "no market at station",
+            format!("{} (HTTP 410)", int(coverage.markets_absent as f64)),
+        ));
+    }
     if coverage.markets_failed > 0 {
         rows.push(field_row("markets failed", int(coverage.markets_failed as f64)));
     }
@@ -928,6 +934,12 @@ pub struct RouteCoverage {
     pub markets_polled: usize,
     pub markets_priced: usize,
     pub markets_failed: usize,
+    /// Reached, and answered that they have no commodity market — HTTP 410.
+    ///
+    /// Counted apart from both the priced and the failed, because it is neither.
+    /// A live radius-100 sweep found 40 of 5,089, and reporting them as failures
+    /// told the user forty markets had been missed when every one had answered.
+    pub markets_absent: usize,
     pub cache_hits: usize,
     pub requests_sent: usize,
     pub throttled: usize,
@@ -966,6 +978,14 @@ impl RouteCoverage {
             });
         }
 
+        if self.markets_absent > 0 {
+            let (count, verb) = plural(self.markets_absent, "station", "has", "have");
+            let they = if self.markets_absent == 1 { "it" } else { "they" };
+            notes.push(format!(
+                "{count} {verb} no commodity market right now — {they} answered, {they} are \
+                 simply not trading, and {they} are not missing from the ranking",
+            ));
+        }
         if self.markets_failed > 0 {
             let (count, verb) = plural(self.markets_failed, "market", "was", "were");
             notes.push(format!(

@@ -724,6 +724,7 @@ fn sample_coverage() -> views::RouteCoverage {
         markets_polled: 151,
         markets_priced: 149,
         markets_failed: 6,
+        markets_absent: 3,
         cache_hits: 22,
         requests_sent: 267,
         throttled: 3,
@@ -970,4 +971,46 @@ fn a_retry_with_no_status_prints_a_dash() {
         status: None,
     });
     assert!(text.contains("HTTP -"), "{text}");
+}
+
+/// HTTP 410 — "commodities not currently available at this market" — is a
+/// correct, permanent answer to a well-formed request. The station is real, it
+/// was reached, and it has nothing to trade.
+///
+/// A live radius-100 sweep found 40 of 5,089 answering this, and counting them
+/// as failures told the user forty markets had been "not reached and absent
+/// from the ranking" when every one of them had answered. It is neither a
+/// success to rank nor a failure to chase, so it is counted as neither.
+#[test]
+fn a_station_with_no_market_is_not_a_failure() {
+    let coverage = views::RouteCoverage {
+        markets_found: 10,
+        markets_polled: 9,
+        markets_priced: 9,
+        markets_absent: 1,
+        requests_sent: 10,
+        ..views::RouteCoverage::default()
+    };
+
+    let text = emit(&views::route_coverage(&coverage), 200);
+    assert!(text.contains("no market at station"), "{text}");
+    assert!(text.contains("(HTTP 410)"), "{text}");
+    assert!(!text.contains("markets failed"), "not a failure\n{text}");
+
+    let notes = coverage.notes().join("\n");
+    assert!(notes.contains("1 station has no commodity market"), "{notes}");
+    assert!(notes.contains("it answered, it are") || notes.contains("not trading"), "{notes}");
+    assert!(!notes.contains("not reached"), "they were reached\n{notes}");
+}
+
+/// And plurals agree, because these notes exist to be believed.
+#[test]
+fn the_absent_note_agrees_in_number() {
+    let many = views::RouteCoverage {
+        markets_priced: 5_049,
+        markets_absent: 40,
+        ..views::RouteCoverage::default()
+    };
+    let notes = many.notes().join("\n");
+    assert!(notes.contains("40 stations have no commodity market"), "{notes}");
 }

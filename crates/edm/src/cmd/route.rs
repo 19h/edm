@@ -284,11 +284,19 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let unreached = !acquired.unreached.is_empty();
     rank(out, config, acquired, &selection.keep, &coverage);
 
-    // A market in radius that was never read is not a market that ranked
-    // badly, and the exit code says so.
-    if unreached || coverage.breaker_tripped {
-        out.set_exit(crate::out::EXIT_FAILURE);
-    }
+    // Set, not merely raised. `exchange::send` assigns exit 1 for every non-2xx
+    // it sees, which is R75 and is exactly right for the ported commands — but
+    // a route sweep *expects* some non-2xx: HTTP 410 means a station has no
+    // commodity market, which is an answer, not a failure. Route decides its
+    // own exit code from what it actually reached, and it is the last word.
+    //
+    // A market in radius that was never read is not a market that ranked badly,
+    // and that is the one thing this code reports.
+    out.set_exit(if unreached || coverage.breaker_tripped {
+        crate::out::EXIT_FAILURE
+    } else {
+        0
+    });
     Ok(())
 }
 
@@ -315,6 +323,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         markets_polled: m.acquired.listings.len(),
         markets_priced: m.priced,
         markets_failed: m.acquired.unreached.len(),
+        markets_absent: m.acquired.tally.markets_absent,
         cache_hits: m.acquired.cache.fresh,
         requests_sent: m.spent.requests,
         throttled: m.spent.throttled,
@@ -347,20 +356,34 @@ fn rank(
         ));
     }
 
-    let solution = edm_route::solve(&markets, time_model(config), &ship(config), &limits(config));
-
-    // Only the shape that was asked for. Printing all three would bury the
-    // answer, and the two the user did not ask for carry different claims.
-    let (kind, routes) = match config.shape {
-        Shape::OneWay => (RouteKind::SingleHop, &solution.single),
-        Shape::RoundTrip => (RouteKind::RoundTrip, &solution.round_trip),
-        Shape::Loop | Shape::BoundedLoop(_) => (RouteKind::Loop { stops: 0 }, &solution.loops),
+    // Only the shape that was asked for — and it is *searched* for, not merely
+    // printed. `solve` used to run all three every time, so a plain
+    // `edm route Sol --radius 100`, whose default shape is a round trip, spent
+    // tens of minutes on a loop search whose result was then discarded
+    // unprinted. Reported from a live run, 2026-08-05.
+    let kind = match config.shape {
+        Shape::OneWay => RouteKind::SingleHop,
+        Shape::RoundTrip => RouteKind::RoundTrip,
+        Shape::Loop | Shape::BoundedLoop(_) => RouteKind::Loop { stops: 0 },
+    };
+    let solution = edm_route::solve(
+        &markets,
+        time_model(config),
+        &ship(config),
+        &limits(config),
+        edm_route::Wanted::only(kind),
+    );
+    let routes = match kind {
+        RouteKind::SingleHop => &solution.single,
+        RouteKind::RoundTrip => &solution.round_trip,
+        RouteKind::Loop { .. } => &solution.loops,
     };
 
     if config.json {
-        // One document. Every shape is included whatever `--shape` asked for:
-        // a consumer that pipes this can pick, and a field that is present or
-        // absent depending on a flag is the harder thing to consume.
+        // All three keys are always present, but only the requested one is
+        // populated — a key that appears and disappears with a flag is the
+        // harder thing to consume, and searching the other two would cost
+        // minutes for output nobody asked for.
         let document = edm_route::json::document(
             &solution,
             &markets,
@@ -400,6 +423,7 @@ fn coverage_json(
         ("marketsPolled".into(), n(coverage.markets_polled)),
         ("marketsPriced".into(), n(coverage.markets_priced)),
         ("marketsFailed".into(), n(coverage.markets_failed)),
+        ("marketsAbsent".into(), n(coverage.markets_absent)),
         ("cacheHits".into(), n(coverage.cache_hits)),
         ("requestsSent".into(), n(coverage.requests_sent)),
         ("throttled".into(), n(coverage.throttled)),

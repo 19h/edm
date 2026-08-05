@@ -28,6 +28,12 @@ use crate::route::pacer::Pacer;
 use crate::route::pool::{self, Abandoned, Job, Outcome, Pool};
 use crate::sweep::next_stamp;
 
+/// `commodities not currently available at this market`.
+///
+/// Measured on a live radius-100 sweep, 2026-08-05: 40 of 5,089 markets answer
+/// this. The station is real and was reached; it simply has nothing to trade.
+const MARKET_GONE: u16 = 410;
+
 /// One market's live listing.
 #[derive(Clone, Debug)]
 pub struct Listing {
@@ -319,7 +325,7 @@ where
             system: name.to_owned(),
         })
         .collect();
-    Outcome { status: Some(exchange.status), retry_after, ok: true, tradable: None, follow_on }
+    Outcome { status: Some(exchange.status), retry_after, ok: true, absent: false, tradable: None, follow_on }
 }
 
 /// One market poll.
@@ -380,6 +386,19 @@ where
         .and_then(|text| JsValue::parse(text).ok())
         .filter(|doc| edm_core::domain::parse_market_snapshot(doc).is_some());
 
+    // 410 is the Companion API saying, correctly and permanently, that this
+    // station has no commodity market. Retrying it repeats a question that has
+    // been answered; counting it as unreached tells the user a market was
+    // missed when it was not.
+    if exchange.status == MARKET_GONE {
+        return Outcome {
+            status: Some(exchange.status),
+            retry_after,
+            absent: true,
+            ..Outcome::default()
+        };
+    }
+
     let Some(document) = document else {
         // A 200 that does not decrypt to a market listing is not a success.
         // Treating it as one would put an empty market in the graph and rank a
@@ -399,7 +418,14 @@ where
         from_cache: false,
     });
 
-    Outcome { status: Some(exchange.status), retry_after, ok: true, tradable, follow_on: Vec::new() }
+    Outcome {
+        status: Some(exchange.status),
+        retry_after,
+        ok: true,
+        absent: false,
+        tradable,
+        follow_on: Vec::new(),
+    }
 }
 
 /// Rows this market will actually sell or buy.

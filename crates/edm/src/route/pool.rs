@@ -61,6 +61,17 @@ pub struct Outcome {
     pub ok: bool,
     /// Markets this system turned out to hold. Queued immediately.
     pub follow_on: Vec<Job>,
+    /// The server answered definitively that this market has no commodity
+    /// market at all.
+    ///
+    /// **HTTP 410 with `"commodities not currently available at this market"`.**
+    /// Measured against a live radius-100 sweep, 2026-08-05: 40 of 5,089
+    /// markets. It is a correct, permanent answer to a well-formed request —
+    /// the station is real, it was reached, and it has nothing to trade. A
+    /// failure it is not, and counting it as one made the coverage block report
+    /// forty markets "not reached and absent from the ranking, not ranked low"
+    /// when every one of them had been reached and had answered.
+    pub absent: bool,
     /// Rows worth trading, for the progress line.
     ///
     /// Not the commodity count: **every Companion API market returns the same
@@ -76,6 +87,8 @@ pub struct Tally {
     pub systems_failed: usize,
     pub markets_polled: usize,
     pub markets_failed: usize,
+    /// Answered, and definitively empty. See [`Outcome::absent`].
+    pub markets_absent: usize,
     /// Set when the breaker stopped the run before the queue drained.
     pub abandoned: usize,
 }
@@ -238,6 +251,18 @@ where
                     }
                 }
 
+                // A definitive "nothing here" retires quietly: it is neither a
+                // success to rank nor a failure to report.
+                if outcome.absent {
+                    tally.borrow_mut().markets_absent += 1;
+                    completed.set(completed.get() + 1);
+                    if let Some(report) = pool.report {
+                        report(&ticket.job, &outcome, ticket.attempts, completed.get());
+                    }
+                    retire(outstanding, tx);
+                    continue;
+                }
+
                 if !outcome.ok {
                     let transient = crate::sweep::is_transient_status(outcome.status);
                     let before = pool.pacer.spent().waited_ms;
@@ -290,8 +315,9 @@ where
                 // counter never dips through zero between a system landing and
                 // its markets being queued — which would close the channel with
                 // work still to do.
-                let Outcome { follow_on, status, retry_after, ok, tradable } = outcome;
-                let outcome = Outcome { status, retry_after, ok, tradable, follow_on: Vec::new() };
+                let Outcome { follow_on, status, retry_after, ok, tradable, absent } = outcome;
+                let outcome =
+                    Outcome { status, retry_after, ok, tradable, absent, follow_on: Vec::new() };
                 for next in follow_on {
                     outstanding.set(outstanding.get() + 1);
                     let _ = tx.try_send(Ticket {

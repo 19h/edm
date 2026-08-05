@@ -68,7 +68,7 @@ pub mod weight;
 
 use crate::graph::{Pools, TradeGraph};
 use crate::model::{Limits, Market, ShipConfig};
-use crate::report::{Caveat, Route};
+use crate::report::{Caveat, Route, RouteKind};
 use crate::time::{Geometry, TimeModel};
 
 /// Everything the optimiser found, one list per shape.
@@ -85,7 +85,46 @@ pub struct Solution {
     pub stats: graph::BuildStats,
 }
 
-/// Runs every solver over one set of markets.
+/// Which searches to run.
+///
+/// **A search nobody asked for is the most expensive thing this crate can do.**
+/// The loop search is a Dinkelbach iteration over Bellman-Ford probes, minutes
+/// at region scale, and `solve` used to run it on every call — so a plain
+/// `edm route Sol --radius 100`, whose default shape is a round trip, spent
+/// tens of minutes computing a loop ranking that was then discarded unprinted.
+/// Reported from a live run, 2026-08-05.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Wanted {
+    pub single: bool,
+    pub round_trip: bool,
+    pub loops: bool,
+}
+
+impl Wanted {
+    /// Every shape. What the tests and the oracles compare.
+    #[must_use]
+    pub const fn all() -> Self {
+        Self { single: true, round_trip: true, loops: true }
+    }
+
+    /// Just one — what a command with a `--shape` should ask for.
+    #[must_use]
+    pub const fn only(kind: RouteKind) -> Self {
+        match kind {
+            RouteKind::SingleHop => Self { single: true, round_trip: false, loops: false },
+            RouteKind::RoundTrip => Self { single: false, round_trip: true, loops: false },
+            RouteKind::Loop { .. } => Self { single: false, round_trip: false, loops: true },
+        }
+    }
+}
+
+impl Default for Wanted {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+/// Runs the requested solvers over one set of markets.
 ///
 /// The shape of the loop search is taken from [`Limits::max_stops`] and
 /// [`Limits::min_distinct`]: unconstrained, capped in length, or required to
@@ -96,18 +135,35 @@ pub fn solve(
     time: TimeModel,
     ship: &ShipConfig,
     limits: &Limits,
+    wanted: Wanted,
 ) -> Solution {
     let geometry = Geometry::new(markets, time);
     let pools = Pools::from_markets(markets);
     let graph = TradeGraph::build(&pools, &geometry, ship, limits);
 
-    let mut single = single::solve(&pools, &geometry, ship, limits);
-    let mut round_trip = round::solve(&graph, &geometry, limits);
-    let mut loops = match (limits.min_distinct, limits.max_stops) {
-        (Some(k_min), _) => distinct::solve(&graph, &geometry, limits, k_min),
-        (None, Some(k)) => bounded::solve(&graph, &geometry, limits, k),
-        (None, None) => ratio::solve(&graph, &geometry, limits),
+    let mut single =
+        if wanted.single { single::solve(&pools, &geometry, ship, limits) } else { Vec::new() };
+    // The round trip is also the loop search's warm start — an achievable
+    // rational lower bound that Dinkelbach begins from — so it is computed
+    // whenever either is wanted, and is cheap either way (exact enumeration
+    // over 2-cycles).
+    let mut round_trip = if wanted.round_trip || wanted.loops {
+        round::solve(&graph, &geometry, limits)
+    } else {
+        Vec::new()
     };
+    let mut loops = if wanted.loops {
+        match (limits.min_distinct, limits.max_stops) {
+            (Some(k_min), _) => distinct::solve(&graph, &geometry, limits, k_min),
+            (None, Some(k)) => bounded::solve(&graph, &geometry, limits, k),
+            (None, None) => ratio::solve(&graph, &geometry, limits),
+        }
+    } else {
+        Vec::new()
+    };
+    if !wanted.round_trip {
+        round_trip.clear();
+    }
 
     if graph.stats.profit_floor_applied {
         for route in single.iter_mut().chain(&mut round_trip).chain(&mut loops) {

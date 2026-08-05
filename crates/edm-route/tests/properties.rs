@@ -13,6 +13,7 @@ mod support;
 use edm_route::model::{Limits, ShipConfig};
 use edm_route::num::{Credits, Ratio, Tons};
 use edm_route::report::Guarantee;
+use edm_route::Wanted;
 use edm_route::time::TimeModel;
 use edm_route::{model, ratio, solve};
 use proptest::prelude::*;
@@ -54,8 +55,8 @@ proptest! {
         let mut shuffler = Rng::new(seed ^ 0xa5a5_a5a5);
         let permuted = shuffled(&markets, &mut shuffler);
 
-        let straight = solve(&markets, TimeModel::default(), &ship(), &limits());
-        let crooked = solve(&permuted, TimeModel::default(), &ship(), &limits());
+        let straight = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
+        let crooked = solve(&permuted, TimeModel::default(), &ship(), &limits(), Wanted::all());
 
         prop_assert_eq!(ranking(&straight.single), ranking(&crooked.single));
         prop_assert_eq!(ranking(&straight.round_trip), ranking(&crooked.round_trip));
@@ -68,7 +69,7 @@ proptest! {
         let markets = random_markets(&mut rng, 7, 4);
         // A balance tight enough that the cap binds somewhere.
         let ship = ShipConfig { cargo: Tons(1_000), credits: Credits(30_000) };
-        let solution = solve(&markets, TimeModel::default(), &ship, &limits());
+        let solution = solve(&markets, TimeModel::default(), &ship, &limits(), Wanted::all());
         for route in solution.single.iter().chain(&solution.round_trip).chain(&solution.loops) {
             let threaded = route.threaded.expect("finalists are threaded");
             prop_assert!(threaded.profit >= route.profit);
@@ -79,7 +80,7 @@ proptest! {
     fn an_unbindable_credit_cap_proves_the_result(seed in 0u64..100_000) {
         let mut rng = Rng::new(seed);
         let markets = random_markets(&mut rng, 7, 4);
-        let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+        let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
         for route in solution.single.iter().chain(&solution.round_trip).chain(&solution.loops) {
             let threaded = route.threaded.expect("finalists are threaded");
             prop_assert_eq!(threaded.profit, route.profit);
@@ -94,7 +95,7 @@ proptest! {
     fn a_ranked_list_descends(seed in 0u64..100_000) {
         let mut rng = Rng::new(seed);
         let markets = random_markets(&mut rng, 7, 4);
-        let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+        let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
         for list in [&solution.single, &solution.round_trip, &solution.loops] {
             for pair in list.windows(2) {
                 prop_assert!(pair[0].rank >= pair[1].rank);
@@ -106,7 +107,7 @@ proptest! {
     fn every_reported_loop_is_a_real_simple_cycle(seed in 0u64..100_000) {
         let mut rng = Rng::new(seed);
         let markets = random_markets(&mut rng, 7, 4);
-        let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+        let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
         for route in &solution.loops {
             let mut stations = route.rank.stations.clone();
             let stops = stations.len();
@@ -127,8 +128,8 @@ proptest! {
         let markets = random_markets(&mut rng, 7, 4);
         let open = limits();
         let floored = Limits { min_profit: Credits(100_000), ..open };
-        let wide = solve(&markets, TimeModel::default(), &ship(), &open);
-        let narrow = solve(&markets, TimeModel::default(), &ship(), &floored);
+        let wide = solve(&markets, TimeModel::default(), &ship(), &open, Wanted::all());
+        let narrow = solve(&markets, TimeModel::default(), &ship(), &floored, Wanted::all());
         // Dropping edges changes the stated feasible set, so the answer may get
         // worse — but it may never get better, and it must say what happened.
         if let (Some(a), Some(b)) = (wide.loops.first(), narrow.loops.first()) {
@@ -171,7 +172,7 @@ fn a_rate_cannot_be_read_without_its_guarantee() {
         support::market(1, 0.0, &[(0, 100, 500)], &[(1, 900, 500)]),
         support::market(2, 5.0, &[(1, 100, 500)], &[(0, 900, 500)]),
     ];
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits());
+    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
     let claim = solution.round_trip[0].rate();
     assert!(claim.steady.is_some());
     assert!(!claim.caveats.is_empty());
