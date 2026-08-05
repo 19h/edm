@@ -84,6 +84,15 @@ pub enum Block<'a> {
     /// A line printed as-is, clamped to the terminal width — the streamed
     /// progress lines of `emitProgressLine` (`market-request.ts:2043`) [R33].
     Line(String),
+    /// Text printed verbatim, with no clamping at all.
+    ///
+    /// R33's clamp applies to progress lines and *only* to progress lines. Two
+    /// emitters `console.log` a payload straight out: the full request URL
+    /// under `--full-url` (ts:1195) and a decoded non-market body (ts:1296).
+    /// Routing a thousand-character URL through [`Block::Line`] would truncate
+    /// it to a `~`, which is exactly the sort of quiet wrongness the port
+    /// exists to avoid.
+    Raw(String),
 }
 
 /// Renders blocks into `out`, each line terminated by `\n`.
@@ -103,6 +112,7 @@ pub fn write_blocks(out: &mut String, blocks: &[Block<'_>], width: usize, metric
             Block::Line(line) => {
                 push_line(out, &text::clamp(line, width.cast_signed(), metric));
             }
+            Block::Raw(text) => push_line(out, text),
             Block::Table { title, columns, rows } => {
                 push_line(out, &heading(title, width, metric));
                 let rendered = render_table(columns, rows, width, metric);

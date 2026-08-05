@@ -17,7 +17,7 @@ use edm_core::domain::{self, Commodity};
 use edm_core::js::json::JsValue;
 use edm_core::js::text::Metric;
 use edm_core::render::views::{
-    self, EddnOutcome, Emission, Header, PlanField, RequestView, TradeRecord, Visit,
+    self, EddnOutcome, Header, PlanField, RequestView, TradeRecord, Visit,
 };
 use edm_core::render::{Block, Row, write_blocks};
 
@@ -35,15 +35,7 @@ fn emit(blocks: &[Block<'_>], width: usize) -> String {
     out
 }
 
-/// The blocks, then the unclamped trailing text the caller would `console.log`.
-fn emit_all(emission: &Emission<'_>, width: usize) -> String {
-    let mut out = emit(&emission.blocks, width);
-    if let Some(raw) = &emission.raw {
-        out.push_str(raw);
-        out.push('\n');
-    }
-    out
-}
+
 
 fn snapshot_at_widths(name: &str, blocks: &[Block<'_>]) {
     for width in WIDTHS {
@@ -320,11 +312,11 @@ fn request_and_response() {
     for width in WIDTHS {
         insta::assert_snapshot!(
             format!("request_w{width}"),
-            emit_all(&views::request(&view, false), width)
+            emit(&views::request(&view, false), width)
         );
         insta::assert_snapshot!(
             format!("request_full_url_w{width}"),
-            emit_all(&views::request(&view, true), width)
+            emit(&views::request(&view, true), width)
         );
     }
     snapshot_at_widths("response", &views::response(200.0, "OK", &header_list));
@@ -335,8 +327,8 @@ fn opaque_payload_is_pretty_printed_when_it_parses() {
     let parsed = views::opaque_payload(r#"{"errors":[{"code":401,"message":"unauthorized"}]}"#);
     let raw = views::opaque_payload("not json at all {");
     for width in WIDTHS {
-        insta::assert_snapshot!(format!("opaque_json_w{width}"), emit_all(&parsed, width));
-        insta::assert_snapshot!(format!("opaque_raw_w{width}"), emit_all(&raw, width));
+        insta::assert_snapshot!(format!("opaque_json_w{width}"), emit(&parsed, width));
+        insta::assert_snapshot!(format!("opaque_raw_w{width}"), emit(&raw, width));
     }
 }
 

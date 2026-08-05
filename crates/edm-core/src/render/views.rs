@@ -304,21 +304,6 @@ pub fn market_snapshot<'a>(snapshot: &'a MarketSnapshot<'_>, title: &str) -> Vec
 // Request and response
 // ---------------------------------------------------------------------------
 
-/// Output that is not a [`Block`].
-///
-/// Two emitters `console.log` a payload verbatim — the full request URL
-/// (ts:1195) and the decoded body of a non-market response (ts:1296) — and
-/// neither is clamped to the terminal. [`Block::Line`] *is* clamped, because it
-/// models `emitProgressLine` [R33], so a thousand-character URL routed through
-/// it would come back as a `~`. The text therefore travels beside the blocks
-/// rather than inside them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Emission<'a> {
-    pub blocks: Vec<Block<'a>>,
-    /// Printed after `blocks`, byte for byte, with a single trailing newline.
-    pub raw: Option<String>,
-}
-
 /// One `name: value` header pair, already combined and lowercased the way
 /// `Headers` iteration presents them [R71].
 pub type Header = (String, String);
@@ -356,7 +341,7 @@ fn header_rows(headers: &[Header]) -> Vec<Row<'_>> {
 
 /// `emitRequest` (ts:1175).
 #[must_use]
-pub fn request<'a>(view: &RequestView<'a>, full_url: bool) -> Emission<'a> {
+pub fn request<'a>(view: &RequestView<'a>, full_url: bool) -> Vec<Block<'a>> {
     // `url.slice(url.indexOf("?") + 1)` — with no `?` at all, `indexOf` is -1
     // and the slice is the whole URL. `?` is ASCII, so the byte offset and the
     // UTF-16 offset agree.
@@ -394,11 +379,14 @@ pub fn request<'a>(view: &RequestView<'a>, full_url: bool) -> Emission<'a> {
 
     if full_url {
         blocks.push(Block::Heading("REQUEST URL".to_owned()));
-        return Emission { blocks, raw: Some(view.url.to_owned()) };
+        // Verbatim: the encrypted query is a kilobyte of base64 and clamping it
+        // would defeat the whole point of the flag.
+        blocks.push(Block::Raw(view.url.to_owned()));
+        return blocks;
     }
     // ts:1197
     blocks.push(Block::Note("pass --full-url to print the encrypted query in full".to_owned()));
-    Emission { blocks, raw: None }
+    blocks
 }
 
 /// `emitResponse` (ts:1200).
@@ -425,15 +413,12 @@ pub fn response<'a>(status: f64, status_text: &str, headers: &'a [Header]) -> Ve
 /// `serde_json` rejects but JavaScript accepts takes the second path, which is
 /// how [C15] degrades identically.
 #[must_use]
-pub fn opaque_payload(decrypted: &str) -> Emission<'static> {
+pub fn opaque_payload(decrypted: &str) -> Vec<Block<'static>> {
     let rendered = match JsValue::parse(decrypted) {
         Ok(value) => value.stringify(2),
         Err(_) => decrypted.to_owned(),
     };
-    Emission {
-        blocks: vec![Block::Heading("PAYLOAD".to_owned())],
-        raw: Some(rendered),
-    }
+    vec![Block::Heading("PAYLOAD".to_owned()), Block::Raw(rendered)]
 }
 
 // ---------------------------------------------------------------------------

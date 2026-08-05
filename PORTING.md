@@ -17,9 +17,9 @@ so renumbering them is a breaking change to the test suite.
 | 3 | `edm_core::wire` | done — 18 LZ4 vectors + 4 RFC 8439 vectors, Bun-golden |
 | 4 | `edm_core::render` | done — 90 Bun-blessed snapshots |
 | 5 | `edm_core::cli` | done |
-| 6 | `edm_core::domain` | read/id64/starsystem/eddn/trade/ardent done; batch loop pending |
-| 7-10 | `edm` I/O layer | |
-| 11-12 | sweep and commands | |
+| 6 | `edm_core::domain` | done — including the batch state machine |
+| 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
+| 11-12 | sweep and commands | sweep done; command entry points pending |
 | 13 | `cargo xtask parity` | |
 
 ## Measured deviations from the design
@@ -57,6 +57,40 @@ Recorded when an assumption made while planning turned out to be wrong.
 - **R59 is incomplete.** `decodeOpaqueBody` also `.trim()`s its input (ts:2820),
   sharing `decryptResponse`'s `js_trim` prefix including U+FEFF. R59 lists three
   deviations and omits this one.
+- **R18 covers three of four optional summary rows, not four.** `credits`, `debt`
+  and `allowsDumping` are presence probes; `lastModified` is gated on `asRecord`
+  (ts:736), so `"lastModified": 1700000000` omits the row entirely while
+  `"credits": null` still prints `0 cr`.
+- **R33's clamp is only about progress lines.** Two emitters print verbatim — the
+  full URL under `--full-url` (ts:1195) and a decoded non-market body (ts:1296).
+  `Block::Raw` exists for them; routing a kilobyte of base64 through
+  `Block::Line` would render it as a single `~`.
+- **R94's ladder starts three steps earlier than stated.** `--market-id`,
+  `--type` and `--item` are each a `requireValue` that can throw, and they are
+  ordered too: `trade --type nonsense --qty 0` reports the *missing market id*.
+- **`derivePrice` precedes the stock clamp.** A commodity with `buyPrice 0` *and*
+  `stock 0` reports "not sold at this market", never "stock is 0". Neither R91
+  nor R94 gives their relative order.
+- **`--cargo` is read *inside* the `commodity && capQty` branch**, so
+  `--no-cap --cargo abc` and every `--no-resolve` path never validate it at all.
+  R94 lists "parse cargo" as an unconditional step.
+- **ts:1847 is dead code.** The ts:1829 guard already requires `--unit-price`
+  whenever there is no commodity, so `Could not determine a unit price` is
+  unconstructible. Transcribed anyway rather than added to C18.
+- **R47's poison is reachable only past a short-circuit.** `runTrade`'s `||`
+  chain and `runMarketSweep`'s `wantsEddn` both skip the poisoned slot when an
+  earlier operand is true: `trade --item a,b --fill constructor` succeeds where
+  the single-item form exits 1.
+- **Two batch guards are wider than they read.** `--qty must be at least 1` is
+  not gated on `!fill`, so `--fill --cargo N --qty 0` is rejected even though
+  `--qty` is otherwise ignored; and `--no-resolve cannot be used with --fill or
+  multiple items` fires for *every* batch run, naming two situations the guard
+  does not test for.
+- **`markets` reads `--address` before the missing-name check**, so
+  `markets --address abc` with no name reports the address, not the name.
+- **`formatBracketMeter(NaN)` yields `""`**, not `"..."` — both `repeat` calls
+  receive NaN. Unreachable, since the brackets come through `readNumber`, but a
+  divergence in waiting if anything ever passes a raw value.
 
 # Parity register
 
