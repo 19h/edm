@@ -5,7 +5,9 @@
 //! sequencing is itself observable, because the original interleaves network
 //! calls with printing in an order the parity harness diffs.
 
+pub mod capi;
 pub mod net;
+pub mod out;
 pub mod ports;
 pub mod secret;
 pub mod sys;
