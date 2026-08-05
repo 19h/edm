@@ -31,6 +31,30 @@ pub struct Survey {
     pub exclusions: Vec<spend::Exclusion>,
 }
 
+/// The refusals that depend on nothing but the command line.
+///
+/// **Checked before any work at all**, which is not the same as "before
+/// anything is sent". A radius past the ceiling is a fact about the argv: it
+/// cannot become acceptable once the region is known, so enumerating the region
+/// first spends minutes of Ardent queries to reach a conclusion that was
+/// available immediately. Reported live at `--radius 200`, where the run sat
+/// through nine anchor queries before being told the ceiling is 100.
+#[must_use]
+pub fn preflight(config: &RouteConfig) -> Option<Refusal> {
+    (config.radius_ly > spend::MAX_RADIUS_LY).then_some(Refusal::RadiusTooWide)
+}
+
+/// The message a pre-flight refusal prints.
+pub fn refuse(out: &Out, config: &RouteConfig, refusal: &Refusal) {
+    out.error_paragraph(&spend::refusal_message(
+        refusal,
+        &Estimate::build(spend::Counts::default(), Vec::new(), config.rate_per_second, &SizePrior::default()),
+        config.radius_ly,
+        config.max_requests,
+    ));
+    out.set_exit(crate::out::EXIT_FAILURE);
+}
+
 /// The gate's answer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Decision {
@@ -178,6 +202,27 @@ mod tests {
         let (_, text) = run(&["route", "Sol", "--max-requests", "100"], &survey(200, 400));
         assert!(text.contains("ROUTE PLAN"), "{text}");
         assert!(text.contains("600  = 200 starsystem + 400 market"), "{text}");
+    }
+
+    /// And it is refused before a single Ardent query, not after the region has
+    /// been enumerated. A radius past the ceiling is a fact about the argv:
+    /// nothing learned about the region can make it acceptable. Measured live
+    /// at `--radius 200`, where the run sat through nine anchor queries — over
+    /// a minute — before being told the ceiling is 100.
+    #[test]
+    fn a_radius_past_the_ceiling_is_refused_before_any_work() {
+        let over = config(&["route", "Sol", "--radius", "200"]);
+        assert_eq!(preflight(&over), Some(Refusal::RadiusTooWide));
+
+        // And nothing at or under it is pre-refused, whatever else is wrong
+        // with the command — those answers need the region.
+        for argv in [
+            vec!["route", "Sol", "--radius", "100"],
+            vec!["route", "Sol"],
+            vec!["route", "Sol", "--max-requests", "1"],
+        ] {
+            assert_eq!(preflight(&config(&argv)), None, "{argv:?}");
+        }
     }
 
     /// A radius past the hard ceiling is refused *without* drawing the table:

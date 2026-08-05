@@ -87,6 +87,15 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // Nothing below this point may run on a name that was never resolved: an
     // enumeration centred on the wrong system is a complete, confident answer
     // about the wrong region.
+    // Before anything at all — not merely before anything is *sent*. A radius
+    // past the ceiling is a fact about the argv and cannot become acceptable
+    // once the region is known, so enumerating first spends minutes of Ardent
+    // queries to reach a conclusion that was available immediately.
+    if let Some(refusal) = plan::preflight(config) {
+        plan::refuse(out, config, &refusal);
+        return Ok(());
+    }
+
     let note = |text: String| {
         if !config.quiet {
             out.line(&text);
