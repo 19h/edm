@@ -1,0 +1,18 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== BAND AND RULE STATE MACHINE =============================
++-------------+---------------------+-------+
+| Field       | Value               | From  |
++=============+=====================+=======+
+| leading band emits no dash before it      |
++-------------+---------------------+-------+
+| two bands in a row                        |
++-------------+---------------------+-------+
+| after band  | no dash before this | state |
++-------------+---------------------+-------+
+| after rules | one dash only       | state |
++-------------+---------------------+-------+
+| band after data gets a dash on both sides |
++-------------+---------------------+-------+

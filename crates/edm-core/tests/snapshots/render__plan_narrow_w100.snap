@@ -1,0 +1,12 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== TRADE PLAN ======================================================================================
++----------+------------+-------+
+| Field    | Value      | From  |
++==========+============+=======+
+| type     | buy        | flag  |
+| item     | Gold       | flag  |
+| qty      | 12         | clamp |
++----------+------------+-------+

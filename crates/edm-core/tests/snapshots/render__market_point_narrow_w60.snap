@@ -1,0 +1,13 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== MARKETS  2 in Shinrarta Dezhra ==========================
++------------+------------------+-------+-----+-----+
+|  Market ID | Name             | CBOYF | Imp | Exp |
++============+==================+=======+=====+=====+
+| 3229028096 | Jameson Memorial | CBOYF |  44 |  51 |
+| 3223343616 | Abraham Lincoln  | C.O.F |  12 |   8 |
++------------+------------------+-------+-----+-----+
+   columns hidden to fit 60 cols: Body, Faction, Economy,
+   Dist (Ls)

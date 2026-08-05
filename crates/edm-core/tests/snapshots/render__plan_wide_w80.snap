@@ -1,0 +1,16 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== TRADE PLAN  market 3229028096 — Jameson Memorial ============================
++----------------------+---------------------------------+---------------------+
+| Field                | Value                           | From                |
++======================+=================================+=====================+
+| commodity resolution | Advanced Catalysers Mk II Prim~ | market snapshot     |
+| unitPrice            | 12,345,678                      | market snapshot     |
+| qty                  | 1,024 clamped from 4,096 by cr~ | affordability clamp |
++----------------------+---------------------------------+---------------------+
+| clamps applied in resolveTrade order                                         |
++----------------------+---------------------------------+---------------------+
+| finalQty             | 1,024                           | computed            |
++----------------------+---------------------------------+---------------------+

@@ -1,0 +1,201 @@
+[
+  {
+    "name": "field_narrow",
+    "columns": "FIELD",
+    "title": "REQUEST  GET /market",
+    "rows": [
+      { "kind": "data", "cells": ["method", "GET"] },
+      { "kind": "data", "cells": ["marketId", "3229028096"] },
+      { "kind": "data", "cells": ["dryRun", "no"] }
+    ]
+  },
+  {
+    "name": "field_wide",
+    "columns": "FIELD",
+    "title": "RESPONSE  HTTP 200 OK",
+    "rows": [
+      { "kind": "data", "cells": ["content-type", "application/json; charset=utf-8"] },
+      { "kind": "data", "cells": ["uncompressedsize (header)", "1,048,576"] },
+      { "kind": "data", "cells": ["url", "https://companion.orerve.net/market?ZmxhZ3M9MSZtYXJrZXRJZD0zMjI5MDI4MDk2"] },
+      { "kind": "rule" },
+      { "kind": "data", "cells": ["nonce", "a1b2c3d4e5f6"] }
+    ]
+  },
+  {
+    "name": "commodity_narrow",
+    "columns": "COMMODITY",
+    "title": "COMMODITIES  3 entries in 2 categories",
+    "rows": [
+      { "kind": "band", "text": "CHEMICALS  2 items | 1 supplied | 1 in demand" },
+      { "kind": "data", "cells": ["128049202", "Explosives", "1,204", "##.", "312", "296", "-", "-", "...", "301", "..R."] },
+      { "kind": "data", "cells": ["128049203", "Hydrogen Fuel", "-", "...", "110", "104", "-", "3,412", "#..", "107", ".P.."] },
+      { "kind": "band", "text": "METALS  1 items | 0 supplied | 1 in demand" },
+      { "kind": "data", "cells": ["128049152", "Gold", "-", "...", "9,428", "9,301", "-", "812", "#..", "9,401", "C..I"] }
+    ]
+  },
+  {
+    "name": "commodity_wide",
+    "columns": "COMMODITY",
+    "title": "COMMODITIES  4 entries in 2 categories",
+    "rows": [
+      { "kind": "band", "text": "CONSUMER ITEMS  2 items | 1 supplied | 2 in demand" },
+      { "kind": "data", "cells": ["128049204", "Advanced Catalysers Mk II Prime", "12,345,678", "###", "12,345,678", "12,345,600", "9,999,999", "98,765,432", "..#", "11,900,000", "CP.I"] },
+      { "kind": "data", "cells": ["128673850", "Hydrogen Fuel", "-", "...", "110", "104", "-", "3,412", "#..", "107", ".P.."] },
+      { "kind": "band", "text": "LEGAL DRUGS  2 items | 2 supplied | 0 in demand" },
+      { "kind": "data", "cells": ["128049210", "Onionhead Alpha Strain", "204", "#..", "8,214", "8,100", "4,003", "-", "...", "8,150", "C.RI"] },
+      { "kind": "data", "cells": ["128049211", "Tobacco", "9,004", "##.", "5,412", "5,300", "-", "-", "...", "5,380", "C..."] }
+    ]
+  },
+  {
+    "name": "commodity_unicode",
+    "columns": "COMMODITY",
+    "title": "COMMODITIES  3 entries in 1 categories",
+    "rows": [
+      { "kind": "band", "text": "SALVAGE — RECOVERED  3 items | 1 supplied | 0 in demand" },
+      { "kind": "data", "cells": ["128666754", "Grüne Ölproben aus Sträßchen", "12", "#..", "1,204", "1,180", "-", "-", "...", "1,190", "..RI"] },
+      { "kind": "data", "cells": ["128666755", "東京ステーション記念品セット", "-", "...", "412", "400", "-", "18", "#..", "406", "C..."] },
+      { "kind": "data", "cells": ["128666756", "🚀🛰️🪐 Deep Space Relics 🌌", "-", "...", "9,001", "8,900", "-", "-", "...", "8,950", "..R."] }
+    ]
+  },
+  {
+    "name": "inventory_narrow",
+    "columns": "INVENTORY",
+    "title": "INVENTORY  2 items",
+    "rows": [
+      { "kind": "data", "cells": ["Gold", "12", "9,401", ".", "-", "0", "0", "-"] },
+      { "kind": "data", "cells": ["Tobacco", "4", "5,380", "S", "4", "0", "0", "-"] }
+    ]
+  },
+  {
+    "name": "inventory_wide",
+    "columns": "INVENTORY",
+    "title": "INVENTORY  3 items",
+    "rows": [
+      { "kind": "data", "cells": ["Advanced Catalysers Mk II Prime", "1,024", "12,345,678", "S", "1,024", "3229028096", "128049204", "-1204.5 / 88.0 / 3212.9"] },
+      { "kind": "data", "cells": ["Onionhead Alpha Strain", "16", "8,150", ".", "-", "0", "0", "0.0 / 0.0 / 0.0"] },
+      { "kind": "rule" },
+      { "kind": "data", "cells": ["Hydrogen Fuel", "-", "-", ".", "-", "0", "0", "-"] }
+    ]
+  },
+  {
+    "name": "sweep_narrow",
+    "columns": "SWEEP",
+    "title": "SWEEP RESULTS  2 markets",
+    "rows": [
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial", "200", "112", "44", "51", "sent", "1"] },
+      { "kind": "data", "cells": ["3223343616", "Abraham Lincoln", "429", "-", "-", "-", "-", "3"] }
+    ]
+  },
+  {
+    "name": "sweep_wide",
+    "columns": "SWEEP",
+    "title": "SWEEP RESULTS  3 markets — 1 failed",
+    "rows": [
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial Fleet Landing", "200", "112", "44", "51", "sent", "1"] },
+      { "kind": "data", "cells": ["3223343616", "Hutton Orbital Deep Space Anchorage", "500", "-", "-", "-", "500 Internal Server E~", "4"] },
+      { "kind": "data", "cells": ["3700286976", "K7Q-BQL Carrier Nostromo", "200", "8", "0", "8", "202 Accepted body was~", "2"] }
+    ]
+  },
+  {
+    "name": "plan_narrow",
+    "columns": "PLAN",
+    "title": "TRADE PLAN",
+    "rows": [
+      { "kind": "data", "cells": ["type", "buy", "flag"] },
+      { "kind": "data", "cells": ["item", "Gold", "flag"] },
+      { "kind": "data", "cells": ["qty", "12", "clamp"] }
+    ]
+  },
+  {
+    "name": "plan_wide",
+    "columns": "PLAN",
+    "title": "TRADE PLAN  market 3229028096 — Jameson Memorial",
+    "rows": [
+      { "kind": "data", "cells": ["commodity resolution", "Advanced Catalysers Mk II Prime (128049204)", "market snapshot"] },
+      { "kind": "data", "cells": ["unitPrice", "12,345,678", "market snapshot"] },
+      { "kind": "data", "cells": ["qty", "1,024 clamped from 4,096 by credits", "affordability clamp"] },
+      { "kind": "band", "text": "clamps applied in resolveTrade order" },
+      { "kind": "data", "cells": ["finalQty", "1,024", "computed"] }
+    ]
+  },
+  {
+    "name": "trade_log_narrow",
+    "columns": "TRADE_LOG",
+    "title": "TRADES  2 requests over 1 round — complete",
+    "rows": [
+      { "kind": "data", "cells": ["1", "Gold", "12", "9,401", "112,812", "200", "12/64"] },
+      { "kind": "data", "cells": ["2", "Tobacco", "4", "5,380", "21,520", "200", "16/64"] }
+    ]
+  },
+  {
+    "name": "trade_log_wide",
+    "columns": "TRADE_LOG",
+    "title": "TRADES  3 requests over 2 rounds — hold is full",
+    "rows": [
+      { "kind": "data", "cells": ["1", "Advanced Catalysers Mk II Prime", "1,024", "12,345,678", "12,641,974,272", "200", "1,024/1,024"] },
+      { "kind": "data", "cells": ["2", "Onionhead Alpha Strain", "16", "8,150", "130,400", "418", "1,040/1,024"] },
+      { "kind": "rule" },
+      { "kind": "rule" },
+      { "kind": "data", "cells": ["3", "Hydrogen Fuel", "0", "110", "0", "-", "1,040/1,024"] }
+    ]
+  },
+  {
+    "name": "poi_narrow",
+    "columns": "POI",
+    "title": "MARKETS FOUND BY SCAN  2 points",
+    "rows": [
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial", "Orbis", "High Tech", "Pilots Federation", "polities.0.markets"] },
+      { "kind": "data", "cells": ["3223343616", "Abraham Lincoln", "Coriolis", "Refinery", "Mother Gaia", "polities.0.markets"] }
+    ]
+  },
+  {
+    "name": "poi_wide",
+    "columns": "POI",
+    "title": "MARKETS FOUND BY SCAN  2 points",
+    "rows": [
+      { "kind": "band", "text": "ORBIS STARPORT" },
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial Fleet Landing Pad", "Orbis Starport Type C", "High Technology and Refinery", "The Pilots Federation of Shinrarta", "starsystem.polities.0.markets.3229028096"] },
+      { "kind": "band", "text": "FLEET CARRIER" },
+      { "kind": "data", "cells": ["3700286976", "K7Q-BQL Nostromo Deep Space Anchor", "Drake Class Carrier", "Colony", "Independent Pilot", "starsystem.polities.1.markets.3700286976"] }
+    ]
+  },
+  {
+    "name": "market_point_narrow",
+    "columns": "MARKET_POINT",
+    "title": "MARKETS  2 in Shinrarta Dezhra",
+    "rows": [
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial", "CBOYF", "44", "51", "324.6", "High Tech", "Pilots Fed", "Shinrarta"] },
+      { "kind": "data", "cells": ["3223343616", "Abraham Lincoln", "C.O.F", "12", "8", "1,204.0", "Refinery", "Mother Gaia", "Founders World"] }
+    ]
+  },
+  {
+    "name": "market_point_wide",
+    "columns": "MARKET_POINT",
+    "title": "MARKETS  3 in Shinrarta Dezhra — 1 filtered out",
+    "rows": [
+      { "kind": "band", "text": "ORBIS STARPORT  2 markets" },
+      { "kind": "data", "cells": ["3229028096", "Jameson Memorial Fleet Landing Pad 07", "CBOYF", "44", "51", "324.6", "High Technology", "The Pilots Federation of Shinrarta", "Shinrarta Dezhra A 1"] },
+      { "kind": "data", "cells": ["3223343616", "Abraham Lincoln Founders Orbital", "C.O.F", "128", "96", "1,204,000.0", "Refinery", "Mother Gaia Independents", "Founders World"] },
+      { "kind": "band", "text": "FLEET CARRIER  1 market" },
+      { "kind": "data", "cells": ["3700286976", "K7Q-BQL Nostromo", "C....", "0", "8", "-", "Colony", "Independent Pilot", "-"] }
+    ]
+  },
+  {
+    "name": "band_state_machine",
+    "columns": "PLAN",
+    "title": "BAND AND RULE STATE MACHINE",
+    "rows": [
+      { "kind": "rule" },
+      { "kind": "rule" },
+      { "kind": "band", "text": "leading band emits no dash before it" },
+      { "kind": "band", "text": "two bands in a row" },
+      { "kind": "data", "cells": ["after band", "no dash before this", "state"] },
+      { "kind": "rule" },
+      { "kind": "rule" },
+      { "kind": "rule" },
+      { "kind": "data", "cells": ["after rules", "one dash only", "state"] },
+      { "kind": "band", "text": "band after data gets a dash on both sides" },
+      { "kind": "rule" }
+    ]
+  }
+]

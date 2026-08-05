@@ -1,0 +1,12 @@
+---
+source: crates/edm-core/tests/render.rs
+expression: "emit(&scenario, width)"
+---
+== INVENTORY  2 items ======================================
++------------+-----+-------+---+----------------------+
+| Commodity  | Qty | Value | S | Position (x / y / z) |
++============+=====+=======+===+======================+
+| Gold       |  12 | 9,401 | . | -                    |
+| Tobacco    |   4 | 5,380 | S | -                    |
++------------+-----+-------+---+----------------------+
+   columns hidden to fit 60 cols: Marked, Owner, Origin
