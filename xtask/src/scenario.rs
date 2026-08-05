@@ -122,6 +122,14 @@ pub(crate) struct Scenario {
     pub(crate) why: String,
     pub(crate) argv: Vec<String>,
     pub(crate) env: Vec<(String, String)>,
+    /// Run the same argv twice against the same cache, and diff only the second
+    /// run.
+    ///
+    /// The only way to assert what a *warm* cache does: that the second run
+    /// prices zero requests and sends none. The wire counter spans both runs,
+    /// so a cache that quietly re-polled shows up as double the arrivals rather
+    /// than as a silently identical answer.
+    pub(crate) run_twice: bool,
     /// `COLUMNS`, which pins `TERMINAL_WIDTH` on both sides. **[R31]**
     pub(crate) columns: String,
     /// False for the `cli` suite: no server is started and no request may be
@@ -173,6 +181,7 @@ const SCENARIO_KEYS: &[&str] = &[
     "expect-min-gap-ms",
     "expect-frontier-requests",
     "wall-clock-limit",
+    "run-twice",
 ];
 
 /// The two paths a sweep worker touches.
@@ -252,6 +261,7 @@ fn from_toml(text: &str, file: &Path) -> Result<Scenario> {
         other => bail!("`record` may only be `r86`, not `{other}`"),
     };
 
+    let run_twice = doc.boolean("run-twice", false)?;
     let env = doc.table("env").map(toml::Table::string_pairs).transpose()?.unwrap_or_default();
 
     let mut routes = Vec::new();
@@ -284,6 +294,7 @@ fn from_toml(text: &str, file: &Path) -> Result<Scenario> {
         dump: argv.iter().any(|token| token == "{dump}"),
         argv,
         env,
+        run_twice,
         columns: doc.string("columns", "100")?,
         network,
         oracle,

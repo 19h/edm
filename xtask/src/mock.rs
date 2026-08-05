@@ -109,6 +109,12 @@ struct State {
     /// The zero of every recorded arrival: the moment the script was installed,
     /// which is as close to "before the side started" as the harness can get.
     loaded_at: Instant,
+    /// Whether replies going unused is the scenario's point.
+    ///
+    /// Set for a `run-twice` scenario: the script is written for the first run
+    /// and the second is supposed to need none of it. Everywhere else an unused
+    /// reply means the scenario has stopped testing what it claims to.
+    unused_replies_expected: bool,
 }
 
 impl Default for State {
@@ -119,6 +125,7 @@ impl Default for State {
             problems: Vec::new(),
             generation: 0,
             loaded_at: Instant::now(),
+            unused_replies_expected: false,
         }
     }
 }
@@ -204,6 +211,7 @@ impl Mock {
         state.problems.clear();
         state.generation += 1;
         state.loaded_at = Instant::now();
+        state.unused_replies_expected = scenario.run_twice;
     }
 
     /// The wire log, the arrival instants, and anything that went wrong while
@@ -215,7 +223,7 @@ impl Mock {
         // testing what it says it tests. Only worth reporting once the side
         // under test has made *some* request: a side that made none has a much
         // louder failure than this one.
-        if !state.log.is_empty() {
+        if !state.log.is_empty() && !state.unused_replies_expected {
             for entry in &state.routes {
                 if entry.served < entry.route.replies.len() {
                     problems.push(format!(

@@ -1,0 +1,41 @@
+== ROUTE PLAN ======================================================================================
++-------------------------+----------------------------------------------+
+| Field                   | Value                                        |
++=========================+==============================================+
+| reference               | Sol                                          |
+| radius                  | 10 Ly (complete, 1 Ardent query)             |
+| systems                 | 3 in radius                                  |
+| stations known          | 4 (Ardent)                                   |
+|   - Odyssey settlements | -1   (--settlements to keep)                 |
+|   - fleet carriers      | -1   (--include-carriers to keep)            |
+| markets to poll         | 0                                            |
+| cached and still fresh  | 2                                            |
+| CAPI requests           | 0  (one per market)                          |
+| estimated transfer      | 0-0 KB  (prior: 500 KB/system, 20 KB/market) |
+| pacing                  | 8 req/s                                      |
+| estimated wall clock    | 0s                                           |
+| ceiling                 | 0 of 2,000   (--max-requests to raise)       |
++-------------------------+----------------------------------------------+
+== ROUTE COVERAGE ==================================================================================
++----------------+--------------+
+| Field          | Value        |
++================+==============+
+| markets polled | 2 of 2       |
+| markets priced | 2            |
+| from cache     | 2            |
+| requests sent  | 0            |
+| elapsed        | <ELAPSED>    |
++----------------+--------------+
+   every price below came from the cache, not from this run; --refresh re-reads them
+== BEST ROUND TRIPS ================================================================================
++---+-----------------------+--------------+--------------+--------------+--------+----------------+
+| # | Stops                 |       Profit |         Cr/h |   Cr/h lap 1 |    Lap | Claim          |
++===+=======================+==============+==============+==============+========+================+
+| 1 | Galileo (Sol) -> Tit~ | 3,292,800 cr | 43,273,489/h | 28,848,992/h | 4m 33s | proved optimal |
++---+-----------------------+--------------+--------------+--------------+--------+----------------+
+   prices were read at one instant and are already ageing; another commander may have traded them
+   since
+   distances are straight lines; the real jump graph may be longer
+   permits, allegiance and landing-pad availability are not modelled
+   times come from a calibrated model, not from your ship
+   legs below --min-profit were excluded; the result is optimal for what remained

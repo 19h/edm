@@ -209,16 +209,7 @@ fn compare(
         Oracle::None => None,
     };
 
-    if let Some(mock) = mock {
-        mock.load(scenario);
-    }
-    let rust_side =
-        execute(scenario, root, &dir.join("rust"), Command::new(binary), |command| {
-            command
-                .env("EDM_ORIGIN_OVERRIDE", base)
-                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
-                .env("EDM_EDDN_URL", format!("{base}/upload/"));
-        })?;
+    let rust_side = run_rust(scenario, root, &dir, binary, mock, base)?;
     let rust_observed = observe(mock, ordered_wire, &dir.join("rust"))?;
     problems.extend(rust_observed.problems.into_iter().map(|note| format!("mock (rust): {note}")));
     // Asserted on the Rust side alone, and deliberately: pacing is C27, a
@@ -465,12 +456,24 @@ pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
             mock.load(scenario);
         }
         let dir = work.join(&scenario.name);
-        let capture = execute(scenario, root, &dir, Command::new(&binary), |command| {
-            command
-                .env("EDM_ORIGIN_OVERRIDE", &base)
-                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
-                .env("EDM_EDDN_URL", format!("{base}/upload/"));
-        })?;
+        let run = || {
+            execute(scenario, root, &dir, Command::new(&binary), |command| {
+                command
+                    .env("EDM_ORIGIN_OVERRIDE", &base)
+                    .env("EDM_ARDENT_BASE", format!("{base}/v2"))
+                    .env("EDM_EDDN_URL", format!("{base}/upload/"));
+            })
+        };
+        // The same two-run shape the comparison uses, or the golden would be
+        // blessed from a cold cache and then diffed against a warm one. The
+        // reload between them matches, too: the script is written for one run.
+        if scenario.run_twice {
+            run()?;
+            if let Some(mock) = &mock {
+                mock.load(scenario);
+            }
+        }
+        let capture = run()?;
         // A killed process has no output worth committing, and a golden made
         // from one would turn a hang into a green.
         if capture.timed_out {
@@ -492,6 +495,40 @@ pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
         written.push(scenario.name.clone());
     }
     Ok(written)
+}
+
+/// The side under test, run once — or twice against one cache directory.
+///
+/// A `run-twice` scenario diffs only the second run. The mock is reloaded
+/// between them, because the script is written for one run, so the wire counter
+/// covers the second alone — which is what makes `expect-frontier-requests = 0`
+/// say exactly what it should: with everything already cached, nothing is sent.
+fn run_rust(
+    scenario: &Scenario,
+    root: &Path,
+    dir: &Path,
+    binary: &Path,
+    mock: Option<&Mock>,
+    base: &str,
+) -> Result<Capture> {
+    let run = || {
+        execute(scenario, root, &dir.join("rust"), Command::new(binary), |command| {
+            command
+                .env("EDM_ORIGIN_OVERRIDE", base)
+                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
+                .env("EDM_EDDN_URL", format!("{base}/upload/"));
+        })
+    };
+    if scenario.run_twice {
+        if let Some(mock) = mock {
+            mock.load(scenario);
+        }
+        run()?;
+    }
+    if let Some(mock) = mock {
+        mock.load(scenario);
+    }
+    run()
 }
 
 /// The streams a golden holds, normalised the way the differential path
