@@ -21,6 +21,7 @@
 //! U+FFFD where `std::env::args` panics \[R55\].
 
 pub mod access;
+pub mod config;
 pub mod flag;
 pub mod parse;
 pub mod usage;
