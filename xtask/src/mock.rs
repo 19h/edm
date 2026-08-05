@@ -344,10 +344,16 @@ fn choose(
             return (Some(reply.clone()), None);
         }
     }
+    // A miss says what it saw. Without this, an envelope that does not match
+    // any route is indistinguishable from a path that has none, and the two
+    // have very different causes.
+    let seen = envelope.as_deref().map_or_else(String::new, |plaintext| {
+        format!(" (envelope {:?})", &plaintext[..plaintext.len().min(48)])
+    });
     let note = if path_matched {
-        format!("{} {} exhausted its scripted replies", request.method, request.path)
+        format!("{} {} exhausted its scripted replies{seen}", request.method, request.path)
     } else {
-        format!("nothing routes {} {}", request.method, request.path)
+        format!("nothing routes {} {}{seen}", request.method, request.path)
     };
     (None, Some(note))
 }

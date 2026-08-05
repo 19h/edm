@@ -60,18 +60,21 @@ impl HttpTransport for LiveHttp {
             .map_err(|_| TransportError::Other(format!("bad method {}", request.method)))?;
 
         let mut builder = self.client(request.profile).request(method, request.url);
+        // Set explicitly, because reqwest is no longer doing content coding for
+        // us. This is the list Bun's fetch advertises.
+        builder = builder.header("accept-encoding", "gzip, deflate, br");
         for (name, value) in request.headers {
             builder = builder.header(*name, value);
         }
-        // `Accept-Encoding` is never set by us: reqwest only decompresses
-        // transparently when *it* chose the encoding, and a body that arrived
-        // still gzipped would fail the base64 gate and take every request down
-        // with "Response is not valid standard Base64".
         builder = match request.body {
             Body::None => builder,
-            Body::EmptyText => {
-                builder.header("content-type", "text/plain;charset=UTF-8").body("")
-            }
+            // `Content-Length: 0` and nothing else — no `content-type`,
+            // measured against bun 1.2.3 with a raw socket server; R66's
+            // Content-Type half is wrong. The length has to be set explicitly
+            // because reqwest omits the header entirely for an empty body,
+            // where `fetch` sends it, and the Companion API's PUT routes want
+            // the framing.
+            Body::EmptyText => builder.header("content-length", "0").body(""),
             Body::Json(bytes) => {
                 builder.header("content-type", "application/json").body(bytes.to_vec())
             }
@@ -95,6 +98,10 @@ impl HttpTransport for LiveHttp {
                 "response body exceeds {MAX_BODY_BYTES} bytes"
             )));
         }
+        // The headers were captured *before* this, so `content-encoding` and
+        // the compressed `content-length` are still in them — which is what
+        // `fetch` shows and therefore what the RESPONSE table must print.
+        let bytes = decode_content(&headers, &bytes)?;
 
         Ok(HttpResponse {
             status: status.as_u16(),
@@ -120,4 +127,38 @@ fn classify(error: &reqwest::Error) -> TransportError {
         // harness allowlists rather than diffing.
         TransportError::Other(error.to_string())
     }
+}
+
+/// Undoes `Content-Encoding`.
+///
+/// A body that arrived still compressed would fail the base64 gate and take
+/// every request down with `Response is not valid standard Base64`, so this is
+/// not optional — it is just done here instead of inside reqwest, so that the
+/// headers survive to be printed.
+fn decode_content(headers: &HeaderView, bytes: &[u8]) -> Result<Vec<u8>, TransportError> {
+    use std::io::Read as _;
+
+    let Some(encoding) = headers.get("content-encoding") else {
+        return Ok(bytes.to_vec());
+    };
+    let mut out = Vec::new();
+    let failed = |what: &str| TransportError::Other(format!("could not decode a {what} body"));
+
+    match edm_core::js::text::js_trim(&encoding).to_ascii_lowercase().as_str() {
+        "gzip" | "x-gzip" => flate2::read::GzDecoder::new(bytes)
+            .read_to_end(&mut out)
+            .map(|_| ())
+            .map_err(|_| failed("gzip"))?,
+        "deflate" => flate2::read::ZlibDecoder::new(bytes)
+            .read_to_end(&mut out)
+            .map(|_| ())
+            .map_err(|_| failed("deflate"))?,
+        "br" => brotli::Decompressor::new(bytes, 4096)
+            .read_to_end(&mut out)
+            .map(|_| ())
+            .map_err(|_| failed("brotli"))?,
+        // `identity`, or something no one advertised. Pass it through.
+        _ => return Ok(bytes.to_vec()),
+    }
+    Ok(out)
 }

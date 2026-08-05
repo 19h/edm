@@ -366,6 +366,7 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         system_name: &resolved.system.name,
     });
     let cx = Cx {
+        origin: &app.overrides.origin,
         http: app.http,
         clock: &app.ports.clock,
         entropy: &app.ports.entropy,

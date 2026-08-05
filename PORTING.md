@@ -20,7 +20,7 @@ so renumbering them is a breaking change to the test suite.
 | 6 | `edm_core::domain` | done — including the batch state machine |
 | 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
 | 11-12 | sweep and commands | sweep done; command entry points pending |
-| 13 | `cargo xtask parity` | |
+| 13 | `cargo xtask parity` | **green — 64 of 64 scenarios byte-identical** |
 
 ## Measured deviations from the design
 
@@ -50,6 +50,31 @@ Recorded when an assumption made while planning turned out to be wrong.
   a `RangeError: Invalid count value`; `COLUMNS` of four hundred digits yields
   `Infinity` and a *different* `RangeError`. Both happen at module init, outside
   `main`'s try/catch. The single clamp covers both.
+- **R71 is wrong.** A repeated *response* header does not combine with `", "`
+  under bun 1.2.3 — it **overwrites**. Two `uncompressedsize` headers of `512`
+  and `4096` yield `4096`, so the body is decrypted at the wrong size and
+  refused by the LZ4 length check rather than by the header check; two `allow`
+  headers on a 405 yield only the last. The WHATWG `Headers` class does specify
+  combining, and a port written from the specification gets this wrong.
+  Measured with a raw socket server; `HeaderView::get` is last-wins.
+- **R66's Content-Type half is wrong.** A `""` body on PUT sends
+  `Content-Length: 0` and **no** `Content-Type`. Measured the same way. (reqwest
+  omits the length entirely for an empty body, so it has to be set by hand.)
+- **C11 is wrong twice over.** The failure is not a `RangeError` and not at
+  module initialisation: `TERMINAL_WIDTH` computes fine, and nothing goes wrong
+  until the first `heading` calls `"=".repeat(1e20)`, at which point Bun prints
+  a bare `Out of memory` and exits 1. The clamp is still right; the description
+  was not, and the scenario asserting it ran `help`, which never renders a
+  heading and so could never have shown the divergence.
+- **Content coding is done by hand, not by reqwest.** reqwest decompresses and
+  then removes `content-encoding` and `content-length` from the response
+  headers; `fetch` leaves both visible, and this program prints the header
+  table.
+- **The Companion API origin is an argument to `capi::prepare`, not a constant
+  it reaches for.** Building with the constant and rewriting the prefix
+  afterwards is a step a caller can forget, and one did: the sweep sent every
+  market poll to the live Companion API while the harness believed it was
+  talking to a mock. The signature now cannot be satisfied without deciding.
 - **R47 swallows exactly two tokens, and the reason is not the obvious one.**
   The lookup is `BOOLEAN_LITERALS[next.toLowerCase()]`, so the token is folded
   *before* the property access — `toString` becomes `tostring`, which is not a

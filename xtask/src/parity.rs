@@ -83,6 +83,10 @@ struct Capture {
     dump: Option<Vec<u8>>,
     wire: String,
     timed_out: bool,
+    /// Where this side ran. `--dump` writes into it and the program then
+    /// *prints the path*, so the two sides necessarily disagree about a string
+    /// that has nothing to do with the port.
+    dir: String,
 }
 
 pub(crate) fn run(options: &Options) -> Result<()> {
@@ -246,12 +250,16 @@ fn compare(
     if bun_side.code != rust_side.code {
         report.push(format!("exit code: bun {} vs rust {}", bun_side.code, rust_side.code));
     }
-    let rust_stdout = canonicalise(&rust_side.stdout, base);
-    let rust_stderr = canonicalise(&rust_side.stderr, base);
-    if let Some(diff) = compare_stream("stdout", &bun_side.stdout, &rust_stdout, multiset) {
+    let bun_stdout = normalise_side_dir(&bun_side.stdout, &bun_side.dir);
+    let bun_stderr = normalise_side_dir(&bun_side.stderr, &bun_side.dir);
+    let rust_stdout =
+        normalise_side_dir(&canonicalise(&rust_side.stdout, base), &rust_side.dir);
+    let rust_stderr =
+        normalise_side_dir(&canonicalise(&rust_side.stderr, base), &rust_side.dir);
+    if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, multiset) {
         report.push(diff);
     }
-    if let Some(diff) = compare_stream("stderr", &bun_side.stderr, &rust_stderr, multiset) {
+    if let Some(diff) = compare_stream("stderr", &bun_stderr, &rust_stderr, multiset) {
         report.push(diff);
     }
     match (&bun_side.dump, &rust_side.dump) {
@@ -343,6 +351,7 @@ fn execute(
         dump: scenario.dump.then(|| std::fs::read(&dump_path).ok()).flatten(),
         wire: String::new(),
         timed_out,
+        dir: dir.to_string_lossy().into_owned(),
     })
 }
 
@@ -370,6 +379,17 @@ fn canonicalise(bytes: &[u8], base: &str) -> Vec<u8> {
     }
     out.push_str(rest);
     out.into_bytes()
+}
+
+/// Replaces the side's own working directory with a placeholder.
+///
+/// The only thing that reaches it is `markets --dump <file>`, which reports the
+/// path it wrote to. Each side writes into its own directory, so that one line
+/// differs for a reason that is entirely the harness's doing. Everything else
+/// about the dump — its contents, its reported length — is still diffed.
+fn normalise_side_dir(bytes: &[u8], dir: &str) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    text.replace(dir, "<OUTDIR>").into_bytes()
 }
 
 /// Replaces a well-formed EDDN message timestamp with a placeholder.

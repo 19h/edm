@@ -246,17 +246,7 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
     /// query is encrypted from the envelope alone and the origin is not part of
     /// it \[C24\].
     pub fn prepare(&self, endpoint: Endpoint, fields: Vec<Field>, stamp: Stamp) -> PreparedRequest {
-        let mut request = capi::prepare(
-            endpoint,
-            self.session.method_override.as_deref(),
-            fields,
-            stamp,
-            &self.headers,
-        );
-        if self.overrides.origin != API_ORIGIN {
-            request.url = format!("{}{}", self.overrides.origin, &request.url[API_ORIGIN.len()..]);
-        }
-        request
+        capi::prepare(&self.overrides.origin, endpoint, self.session.method_override.as_deref(), fields, stamp, &self.headers)
     }
 
     /// `send` (ts:1224), with the two tables wired in.
@@ -432,7 +422,12 @@ fn emit_request(out: &Out, request: &PreparedRequest, origin: &str, full_url: bo
 }
 
 /// `emitResponse` (ts:1200).
-fn emit_response(out: &Out, exchange: &Exchange) {
+/// The RESPONSE table.
+///
+/// `pub(crate)` because the sweep needs it too: a quiet poll still prints this
+/// table when the status is not 2xx, since the headers carry the diagnosis
+/// \[R74\].
+pub(crate) fn emit_response(out: &Out, exchange: &Exchange) {
     let headers = exchange.headers.sorted();
     out.emit(&views::response(f64::from(exchange.status), &exchange.status_text, &headers));
 }

@@ -56,6 +56,7 @@ fn build(name: &str) -> capi::PreparedRequest {
 
     match name {
         "trade_buy" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
             capi::trade_fields(
@@ -67,6 +68,7 @@ fn build(name: &str) -> capi::PreparedRequest {
             &HeaderConfig::default(),
         ),
         "trade_sell_stolen" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
             capi::trade_fields(
@@ -81,6 +83,7 @@ fn build(name: &str) -> capi::PreparedRequest {
         // the wire. A port that reached for a `u64` here would send
         // `4306502403` and the ciphertext would not match.
         "trade_leading_zero_market" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
             capi::trade_fields(
@@ -92,6 +95,7 @@ fn build(name: &str) -> capi::PreparedRequest {
             &HeaderConfig::default(),
         ),
         "markets_by_address" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             None,
             capi::starsystem_fields(5_378_909_424_384.0, "en", 0.0, &credentials, time),
@@ -101,6 +105,7 @@ fn build(name: &str) -> capi::PreparedRequest {
         // R65: `--language` is unvalidated, so a non-ASCII value lengthens the
         // plaintext in bytes and shifts everything after it.
         "markets_language" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             None,
             capi::starsystem_fields(10_477_373_803.0, "fr-Ø", 0.0, &credentials, time),
@@ -110,6 +115,7 @@ fn build(name: &str) -> capi::PreparedRequest {
         // R66: the verb is uppercased by the session and changes only the
         // method, never the query.
         "markets_method_override" => capi::prepare(
+            edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             Some("PUT"),
             capi::starsystem_fields(10_477_373_803.0, "en", 0.0, &credentials, time),

@@ -69,12 +69,14 @@ tokio = { version = "1", default-features = false, features = ["rt", "macros", "
 # call. `charset` is absent because Response.text() must be an unconditional
 # lossy UTF-8 decode (R62), and `json` because our serializer is the only one
 # allowed to touch a payload (F2).
-reqwest = { version = "0.13", default-features = false, features = [
-    "rustls",
-    "gzip",
-    "brotli",
-    "deflate",
-] }
+# Content coding is handled here rather than by reqwest. reqwest decompresses
+# transparently and then *removes* `content-encoding` and `content-length` from
+# the response headers — but `fetch` leaves both visible, and this program
+# prints the header table, so the difference is on screen. Doing it by hand also
+# keeps reqwest's magic out of a byte-diff harness.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+flate2 = "1.1"
+brotli = "8"
 http = "1"
 async-channel = "2.5"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }

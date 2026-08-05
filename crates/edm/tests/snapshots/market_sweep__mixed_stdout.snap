@@ -17,7 +17,19 @@ expression: run.stdout
 | no-market skipped | 1                                 |
 +-------------------+-----------------------------------+
 [1/5] Jaques Station (3229009408)  HTTP 200  3 commodities
+== RESPONSE  HTTP 500 Internal Server Error ========================================================
++----------+--------------+
+| Field    | Value        |
++==========+==============+
+| HEADERS                 |
++----------+--------------+
 [requeue 1/1] Ohm City (3229009409): HTTP 500
+== RESPONSE  HTTP 404 Not Found ====================================================================
++----------+--------------+
+| Field    | Value        |
++==========+==============+
+| HEADERS                 |
++----------+--------------+
 [2/5] Kinsey Orbital (3229009410)  HTTP 404  HTTP 404
 [3/5] Colonia Hub (3229009411)  HTTP 200  HTTP 200
 [4/5] Centauri Depot (3229009412)  HTTP 200  3 commodities

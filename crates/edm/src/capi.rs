@@ -10,8 +10,8 @@
 //! them. This module is written statement-for-statement against ts:1224-1290.
 
 use edm_core::consts::{
-    API_ORIGIN, AUTH_TOKEN_LENGTH, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT,
-    Endpoint, MACHINE_TOKEN_LENGTH,
+    AUTH_TOKEN_LENGTH, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT, Endpoint,
+    MACHINE_TOKEN_LENGTH,
 };
 use edm_core::js::{self, text};
 use edm_core::wire::{self, Nonce};
@@ -288,6 +288,7 @@ impl Default for HeaderConfig {
 /// fixture the harness can diff.
 #[must_use]
 pub fn prepare(
+    origin: &str,
     endpoint: Endpoint,
     method_override: Option<&str>,
     fields: Vec<Field>,
@@ -296,7 +297,13 @@ pub fn prepare(
 ) -> PreparedRequest {
     let plaintext = serialize_envelope(&fields);
     let sealed = wire::seal_query(plaintext.as_bytes(), &stamp.nonce);
-    let url = format!("{API_ORIGIN}{}?{sealed}", endpoint.path);
+    // The origin is a parameter, not the constant, because the alternative —
+    // building with the constant and rewriting the prefix afterwards — is a
+    // step a caller can forget. One did: the sweep sent every market poll to
+    // the live Companion API while the harness believed it was talking to a
+    // mock. A signature that cannot be satisfied without deciding the origin
+    // makes that class of mistake unrepresentable.
+    let url = format!("{origin}{}?{sealed}", endpoint.path);
 
     let request_headers = vec![
         ("Request-Time", js::js_number(f64::from(stamp.request_time))),
@@ -382,6 +389,7 @@ mod tests {
     #[test]
     fn the_printed_envelope_hides_the_tokens() {
         let request = prepare(
+            edm_core::consts::API_ORIGIN,
             edm_core::consts::MARKET_LIST,
             None,
             list_fields("1", &credentials(), 0.0),
@@ -415,6 +423,7 @@ mod tests {
             request_time: 0,
         };
         let request = prepare(
+            edm_core::consts::API_ORIGIN,
             edm_core::consts::MARKET_LIST,
             None,
             list_fields("1", &credentials(), 0.0),
@@ -425,6 +434,7 @@ mod tests {
         assert!(matches!(request.body_kind(), crate::net::Body::None));
 
         let overridden = prepare(
+            edm_core::consts::API_ORIGIN,
             edm_core::consts::MARKET_LIST,
             Some("PUT"),
             list_fields("1", &credentials(), 0.0),
@@ -445,6 +455,7 @@ mod tests {
             request_time: 12345,
         };
         let request = prepare(
+            edm_core::consts::API_ORIGIN,
             edm_core::consts::MARKET_LIST,
             None,
             list_fields("4306502403", &credentials(), 1_700_000_000.0),

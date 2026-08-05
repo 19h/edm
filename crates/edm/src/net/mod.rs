@@ -28,10 +28,14 @@ pub enum Body<'a> {
     None,
     /// The empty string.
     ///
-    /// Not the same as [`Body::None`]: `fetch` with `body: ""` adds
-    /// `Content-Type: text/plain;charset=UTF-8` and `Content-Length: 0`, and
-    /// the Companion API's PUT routes want that framing. Those headers appear
-    /// on the wire but *not* in the request table the program prints. R66.
+    /// Not the same as [`Body::None`]: `fetch` with `body: ""` sends
+    /// `Content-Length: 0`, which is the framing the Companion API's PUT routes
+    /// want, and that header appears on the wire but *not* in the request table
+    /// the program prints.
+    ///
+    /// It does **not** send a `Content-Type`. R66 claims
+    /// `text/plain;charset=UTF-8` and the register is wrong: measured against
+    /// bun 1.2.3, a `""` body carries a length and nothing else.
     EmptyText,
     /// A JSON document, for EDDN.
     Json(&'a [u8]),
@@ -79,16 +83,27 @@ pub enum TransportError {
     Other(String),
 }
 
-/// A drained set of response headers with WHATWG `Headers` semantics.
+/// A drained set of response headers, as Bun's `fetch` presents them.
 ///
-/// Three behaviours are load-bearing and none of them are what a `HashMap`
-/// would give you. `get` joins duplicates with `", "` — which is how two
-/// `uncompressedsize` headers become `"12, 34"`, then `NaN`, then a rejected
-/// response. Iteration is lowercased and **sorted**, which fixes the row order
-/// of every printed header table. And lookup is case-insensitive. R71.
+/// **R71 as written in the register is wrong, and this is what measurement
+/// says instead.** The WHATWG `Headers` class does define `get` as a
+/// comma-joined combination of every matching value, and a port written from
+/// the specification will implement that — but Bun's HTTP client does not
+/// *append* a repeated response header, it **overwrites**. So two
+/// `uncompressedsize` headers of `512` and `4096` yield `4096`, not
+/// `"512, 4096"`, and the response goes on to be decrypted at the wrong size
+/// and refused by the LZ4 length check rather than by the header check. Two
+/// `allow` headers on a 405 likewise yield only the last.
+///
+/// Verified against bun 1.2.3 with a raw socket server writing the duplicates
+/// by hand; see `xtask/scenarios/fail-duplicate-size.toml`.
+///
+/// The other two behaviours are as the register describes: iteration is
+/// lowercased and **sorted**, which fixes the row order of every printed header
+/// table, and lookup is case-insensitive.
 #[derive(Clone, Debug, Default)]
 pub struct HeaderView {
-    /// Lowercased name, value — in insertion order; sorting happens on iteration.
+    /// Lowercased name, value — in arrival order; the last of a name wins.
     entries: Vec<(String, String)>,
 }
 
@@ -98,29 +113,19 @@ impl HeaderView {
         Self { entries: pairs.into_iter().map(|(k, v)| (k.to_lowercase(), v)).collect() }
     }
 
-    /// `headers.get(name)` — every matching value, joined with `", "`, or
-    /// `None` when the name is absent.
+    /// `headers.get(name)` — the **last** value under that name, or `None`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<String> {
         let wanted = name.to_lowercase();
-        let mut found: Option<String> = None;
-        for (key, value) in &self.entries {
-            if *key != wanted {
-                continue;
-            }
-            match &mut found {
-                Some(joined) => {
-                    joined.push_str(", ");
-                    joined.push_str(value);
-                }
-                None => found = Some(value.clone()),
-            }
-        }
-        found
+        self.entries
+            .iter()
+            .rev()
+            .find(|(key, _)| *key == wanted)
+            .map(|(_, value)| value.clone())
     }
 
     /// `for (const [name, value] of headers)` — lowercased, sorted by name,
-    /// duplicates already combined.
+    /// one row per name.
     #[must_use]
     pub fn sorted(&self) -> Vec<(String, String)> {
         let mut names: Vec<&str> = self.entries.iter().map(|(k, _)| k.as_str()).collect();
@@ -164,18 +169,30 @@ pub fn decode_body(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    /// Two headers of the same name are one value joined with `", "` — which is
-    /// exactly how a duplicated `uncompressedsize` becomes unparseable and gets
-    /// the response rejected. R71.
+    /// A repeated response header overwrites; it does not combine.
+    ///
+    /// The register said otherwise, and the specification agrees with the
+    /// register — but Bun's client does not append, so the last value is the
+    /// only one anybody sees. Getting this wrong would print
+    /// `Missing or invalid uncompressedSize header: 512, 4096` where the
+    /// original decrypts at 4096 and fails later, in a different place, with a
+    /// different message. R71, corrected by measurement.
     #[test]
-    fn duplicates_join_with_a_comma() {
+    fn a_repeated_header_overwrites_rather_than_combining() {
         let headers = HeaderView::from_pairs([
-            ("UncompressedSize".to_owned(), "12".to_owned()),
-            ("uncompressedsize".to_owned(), "34".to_owned()),
+            ("UncompressedSize".to_owned(), "512".to_owned()),
+            ("uncompressedsize".to_owned(), "4096".to_owned()),
         ]);
-        assert_eq!(headers.get("uncompressedsize").as_deref(), Some("12, 34"));
-        // Which is then `Number("12, 34")` — NaN — and the response is refused.
-        assert!(edm_core::js::to_number("12, 34").is_nan());
+        assert_eq!(headers.get("uncompressedsize").as_deref(), Some("4096"));
+        assert_eq!(edm_core::js::to_number("4096"), 4096.0);
+
+        // The same rule decides which verbs a 405 appears to allow.
+        let headers = HeaderView::from_pairs([
+            ("allow".to_owned(), "PUT".to_owned()),
+            ("allow".to_owned(), "OPTIONS".to_owned()),
+        ]);
+        assert_eq!(headers.get("allow").as_deref(), Some("OPTIONS"));
+        assert_eq!(headers.sorted(), vec![("allow".to_owned(), "OPTIONS".to_owned())]);
     }
 
     #[test]

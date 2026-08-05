@@ -1,6 +1,18 @@
 # A registered divergence, asserted rather than ignored.
-why = "COLUMNS of twenty digits. Number(COLUMNS) is 1e20, and the original's `\"=\".repeat(1e20)` throws a RangeError at module initialisation — outside main's try/catch, so Bun reports an uncaught error with a stack trace. C11 clamps to 10,000 instead. This scenario passes when the two sides differ; if they ever agree, C11 has become untrue and the row should be deleted."
-argv = ["help"]
+#
+# Measured, and the register row was wrong twice over. C11 said the failure was
+# a `RangeError` raised "at module initialisation, outside main's try/catch".
+# It is neither. `TERMINAL_WIDTH` is only a `Math.max(48, 1e20)` and computes
+# happily; nothing goes wrong until something actually *renders*, at which point
+# `"=".repeat(1e20)` inside `heading` asks for a hundred-exabyte string and Bun
+# dies with a bare `Out of memory` and exit 1.
+#
+# That also means the original scenario could never have shown the divergence:
+# it ran `help`, which prints one string and calls `heading` not once. At a
+# COLUMNS of twenty digits `bun market-request.ts help` exits 0 and prints
+# normally — which is exactly what the harness reported.
+why = "COLUMNS of twenty digits. Number(COLUMNS) is 1e20, and the first `\"=\".repeat(1e20)` inside `heading` exhausts memory — Bun prints `Out of memory` and exits 1. C11 clamps to 10,000 instead and renders. This scenario passes when the two sides differ; if they ever agree, C11 has become untrue and the row should be deleted."
+argv = ["markets", "--address", "5378909424384", "--dry-run"]
 columns = "99999999999999999999"
 network = false
 divergence = "C11"

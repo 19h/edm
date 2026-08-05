@@ -76,6 +76,8 @@ impl MarketVisit {
 /// and none of them need to be printable for this to be useful in a panic.
 pub struct Cx<'a, H, C, E> {
     pub http: &'a H,
+    /// `EDM_ORIGIN_OVERRIDE`, or the Companion API's own origin.
+    pub origin: &'a str,
     pub clock: &'a C,
     pub entropy: &'a E,
     pub out: &'a Out,
@@ -218,6 +220,7 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.request_time_override,
     );
     let request = capi::prepare(
+        cx.origin,
         MARKET_LIST,
         cx.method_override,
         capi::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
@@ -225,8 +228,12 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.headers,
     );
 
-    // A sweep polls quietly: the per-market tables would drown the progress
-    // lines, and `--detail` re-emits the snapshot afterwards instead.
+    // A sweep polls quietly, so the request table is suppressed — the
+    // per-market tables would drown the progress lines. The *response* table is
+    // not suppressed unconditionally: `send` prints it from a second site when
+    // a quiet poll fails, because the headers are where the diagnosis is
+    // \[R74\]. Passing a no-op here would silently drop the RESPONSE block for
+    // every 405 and 500 in a sweep.
     let exchange = crate::exchange::send(
         cx.http,
         cx.out,
@@ -234,7 +241,7 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.dry_run,
         crate::exchange::SendOptions { quiet: true, ignore_dry_run: false },
         |_| {},
-        |_| {},
+        |exchange| crate::cmd::emit_response(cx.out, exchange),
     )
     .await;
 
