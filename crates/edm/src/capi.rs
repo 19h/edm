@@ -201,6 +201,33 @@ pub fn starsystem_fields(
     fields
 }
 
+/// `tradeEnvelopeFields` (ts:246).
+///
+/// The booleans go on the wire as `1`/`0`, and `finalQty` is the size the
+/// stack ends up at rather than a copy of `qty` — sending `qty` there earns an
+/// HTTP 402.
+#[must_use]
+pub fn trade_fields(
+    plan: &edm_core::domain::trade::TradePlan,
+    credentials: &Credentials,
+    frontier_time: f64,
+) -> Vec<Field> {
+    let mut fields = vec![
+        Field::text("cmdrId", credentials.commander_id.clone()),
+        // Never parsed, so whatever the flag said reaches the wire. R53.
+        Field::text("marketId", plan.market_id.clone()),
+        Field::text("transactionType", plan.kind.as_str()),
+        Field::number("commodityId", plan.commodity_id),
+        Field::number("blackMarket", f64::from(u8::from(plan.black_market))),
+        Field::number("stolen", f64::from(u8::from(plan.stolen))),
+        Field::number("unitPrice", plan.unit_price),
+        Field::number("qty", plan.qty),
+        Field::number("finalQty", plan.final_qty),
+    ];
+    fields.extend(credential_fields(credentials, frontier_time));
+    fields
+}
+
 /// `serializeEnvelope` (ts:204) — `k=v` joined with `&`, and nothing is
 /// percent-encoded: the game concatenates these values directly.
 #[must_use]

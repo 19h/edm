@@ -31,6 +31,7 @@ default = []
 replay = []
 
 [dev-dependencies]
+serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util", "rt", "macros", "time"] }
 insta.workspace = true
 proptest.workspace = true

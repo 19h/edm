@@ -396,6 +396,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rustix",
+ "serde_json",
  "thiserror",
  "tokio",
  "zeroize",
