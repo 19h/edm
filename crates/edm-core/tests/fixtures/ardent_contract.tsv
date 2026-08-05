@@ -1,0 +1,79 @@
+# the four ardent.ts exports market-request.ts duck-types, recorded from the real module
+# source: /models/dev/edtrade/src/ardent.ts
+# bun 1.2.3
+# kind<TAB>input (JSON)<TAB>output
+BASE_URL	https://api.ardent-insight.com/v2
+systemUrl	"Sol"	https://api.ardent-insight.com/v2/system/name/Sol
+stationSearchUrl	"Sol"	https://api.ardent-insight.com/v2/search/station/name/Sol
+systemUrl	"Colonia"	https://api.ardent-insight.com/v2/system/name/Colonia
+stationSearchUrl	"Colonia"	https://api.ardent-insight.com/v2/search/station/name/Colonia
+systemUrl	"Jaques Station"	https://api.ardent-insight.com/v2/system/name/Jaques%20Station
+stationSearchUrl	"Jaques Station"	https://api.ardent-insight.com/v2/search/station/name/Jaques%20Station
+systemUrl	"Hyades Sector NI-X a16-0"	https://api.ardent-insight.com/v2/system/name/Hyades%20Sector%20NI-X%20a16-0
+stationSearchUrl	"Hyades Sector NI-X a16-0"	https://api.ardent-insight.com/v2/search/station/name/Hyades%20Sector%20NI-X%20a16-0
+systemUrl	"Eol Prou LRL-C d22-215"	https://api.ardent-insight.com/v2/system/name/Eol%20Prou%20LRL-C%20d22-215
+stationSearchUrl	"Eol Prou LRL-C d22-215"	https://api.ardent-insight.com/v2/search/station/name/Eol%20Prou%20LRL-C%20d22-215
+systemUrl	"Ohm City"	https://api.ardent-insight.com/v2/system/name/Ohm%20City
+stationSearchUrl	"Ohm City"	https://api.ardent-insight.com/v2/search/station/name/Ohm%20City
+systemUrl	"Hutton Orbital"	https://api.ardent-insight.com/v2/system/name/Hutton%20Orbital
+stationSearchUrl	"Hutton Orbital"	https://api.ardent-insight.com/v2/search/station/name/Hutton%20Orbital
+systemUrl	"Böthold"	https://api.ardent-insight.com/v2/system/name/B%C3%B6thold
+stationSearchUrl	"Böthold"	https://api.ardent-insight.com/v2/search/station/name/B%C3%B6thold
+systemUrl	"Ånderson's Rest"	https://api.ardent-insight.com/v2/system/name/%C3%85nderson's%20Rest
+stationSearchUrl	"Ånderson's Rest"	https://api.ardent-insight.com/v2/search/station/name/%C3%85nderson's%20Rest
+systemUrl	"Nuñez Terminal"	https://api.ardent-insight.com/v2/system/name/Nu%C3%B1ez%20Terminal
+stationSearchUrl	"Nuñez Terminal"	https://api.ardent-insight.com/v2/search/station/name/Nu%C3%B1ez%20Terminal
+systemUrl	"Łódź Port"	https://api.ardent-insight.com/v2/system/name/%C5%81%C3%B3d%C5%BA%20Port
+stationSearchUrl	"Łódź Port"	https://api.ardent-insight.com/v2/search/station/name/%C5%81%C3%B3d%C5%BA%20Port
+systemUrl	"Δ Velorum"	https://api.ardent-insight.com/v2/system/name/%CE%94%20Velorum
+stationSearchUrl	"Δ Velorum"	https://api.ardent-insight.com/v2/search/station/name/%CE%94%20Velorum
+systemUrl	"a-_.!~*'()"	https://api.ardent-insight.com/v2/system/name/a-_.!~*'()
+stationSearchUrl	"a-_.!~*'()"	https://api.ardent-insight.com/v2/search/station/name/a-_.!~*'()
+systemUrl	"/?&=#+%"	https://api.ardent-insight.com/v2/system/name/%2F%3F%26%3D%23%2B%25
+stationSearchUrl	"/?&=#+%"	https://api.ardent-insight.com/v2/search/station/name/%2F%3F%26%3D%23%2B%25
+systemUrl	"with  double  spaces"	https://api.ardent-insight.com/v2/system/name/with%20%20double%20%20spaces
+stationSearchUrl	"with  double  spaces"	https://api.ardent-insight.com/v2/search/station/name/with%20%20double%20%20spaces
+systemUrl	" leading"	https://api.ardent-insight.com/v2/system/name/%20leading
+stationSearchUrl	" leading"	https://api.ardent-insight.com/v2/search/station/name/%20leading
+systemUrl	"trailing "	https://api.ardent-insight.com/v2/system/name/trailing%20
+stationSearchUrl	"trailing "	https://api.ardent-insight.com/v2/search/station/name/trailing%20
+systemUrl	""	https://api.ardent-insight.com/v2/system/name/
+stationSearchUrl	""	https://api.ardent-insight.com/v2/search/station/name/
+systemUrl	"100% Proof"	https://api.ardent-insight.com/v2/system/name/100%25%20Proof
+stationSearchUrl	"100% Proof"	https://api.ardent-insight.com/v2/search/station/name/100%25%20Proof
+systemUrl	"Smith & Sons"	https://api.ardent-insight.com/v2/system/name/Smith%20%26%20Sons
+stationSearchUrl	"Smith & Sons"	https://api.ardent-insight.com/v2/search/station/name/Smith%20%26%20Sons
+systemUrl	"\"quoted\""	https://api.ardent-insight.com/v2/system/name/%22quoted%22
+stationSearchUrl	"\"quoted\""	https://api.ardent-insight.com/v2/search/station/name/%22quoted%22
+systemUrl	"back\\slash"	https://api.ardent-insight.com/v2/system/name/back%5Cslash
+stationSearchUrl	"back\\slash"	https://api.ardent-insight.com/v2/search/station/name/back%5Cslash
+systemUrl	"emoji 🚀 station"	https://api.ardent-insight.com/v2/system/name/emoji%20%F0%9F%9A%80%20station
+stationSearchUrl	"emoji 🚀 station"	https://api.ardent-insight.com/v2/search/station/name/emoji%20%F0%9F%9A%80%20station
+systemUrl	"tab\there"	https://api.ardent-insight.com/v2/system/name/tab%09here
+stationSearchUrl	"tab\there"	https://api.ardent-insight.com/v2/search/station/name/tab%09here
+systemUrl	"new\nline"	https://api.ardent-insight.com/v2/system/name/new%0Aline
+stationSearchUrl	"new\nline"	https://api.ardent-insight.com/v2/search/station/name/new%0Aline
+systemUrl	"半人马座"	https://api.ardent-insight.com/v2/system/name/%E5%8D%8A%E4%BA%BA%E9%A9%AC%E5%BA%A7
+stationSearchUrl	"半人马座"	https://api.ardent-insight.com/v2/search/station/name/%E5%8D%8A%E4%BA%BA%E9%A9%AC%E5%BA%A7
+systemUrl	"Ω Carinae"	https://api.ardent-insight.com/v2/system/name/%CE%A9%20Carinae
+stationSearchUrl	"Ω Carinae"	https://api.ardent-insight.com/v2/search/station/name/%CE%A9%20Carinae
+parseSystem	{"systemName":"Sol","systemAddress":10477373803,"systemX":0,"systemY":0,"systemZ":0}	{"name":"Sol","address":10477373803,"coords":{"x":0,"y":0,"z":0}}
+parseSystem	{"systemName":"Colonia","systemAddress":3238296097059,"systemX":-9530.5,"systemY":-910.28125,"systemZ":19808.125}	{"name":"Colonia","address":3238296097059,"coords":{"x":-9530.5,"y":-910.28125,"z":19808.125}}
+parseSystem	{"systemName":"Sol","systemAddress":1,"systemX":0,"systemY":0}	null
+parseSystem	{"systemName":42,"systemAddress":1,"systemX":0,"systemY":0,"systemZ":0}	null
+parseSystem	{"systemName":"Sol","systemAddress":null,"systemX":0,"systemY":0,"systemZ":0}	null
+parseSystem	{"systemName":"Sol","systemAddress":"1","systemX":0,"systemY":0,"systemZ":0}	null
+parseSystem	{"systemName":"Sol","systemAddress":null,"systemX":0,"systemY":0,"systemZ":0}	null
+parseSystem	{"systemName":"","systemAddress":1,"systemX":0,"systemY":0,"systemZ":0}	{"name":"","address":1,"coords":{"x":0,"y":0,"z":0}}
+parseSystem	{}	null
+parseSystem	[]	null
+parseSystem	null	null
+parseSystem	"not an object"	null
+parseSystem	{"systemName":"Big","systemAddress":9007199254740992,"systemX":1.5,"systemY":-2.25,"systemZ":0}	{"name":"Big","address":9007199254740992,"coords":{"x":1.5,"y":-2.25,"z":0}}
+parseStationMatches	[{"stationName":"Jaques Station","systemName":"Colonia","stationType":"Coriolis","maxLandingPadSize":3},{"stationName":"Ohm City","systemName":"Colonia","stationType":null,"maxLandingPadSize":2}]	[{"stationName":"Jaques Station","systemName":"Colonia","stationType":"Coriolis","pad":3},{"stationName":"Ohm City","systemName":"Colonia","stationType":null,"pad":2}]
+parseStationMatches	[{"stationName":"Only Name","systemName":"Somewhere"}]	[{"stationName":"Only Name","systemName":"Somewhere","stationType":null,"pad":null}]
+parseStationMatches	[{"stationName":1,"systemName":"X"},{"stationName":"Y","systemName":2},{"stationName":"Z","systemName":"W"}]	[{"stationName":"Z","systemName":"W","stationType":null,"pad":null}]
+parseStationMatches	[null,"string",42,{"stationName":"Survivor","systemName":"S"}]	[{"stationName":"Survivor","systemName":"S","stationType":null,"pad":null}]
+parseStationMatches	[]	[]
+parseStationMatches	{}	[]
+parseStationMatches	null	[]

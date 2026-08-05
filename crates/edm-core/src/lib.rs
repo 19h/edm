@@ -16,6 +16,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ardent;
 pub mod cli;
 pub mod consts;
 pub mod domain;
