@@ -19,8 +19,11 @@ so renumbering them is a breaking change to the test suite.
 | 5 | `edm_core::cli` | done |
 | 6 | `edm_core::domain` | done — including the batch state machine |
 | 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
-| 11-12 | sweep and commands | sweep done; command entry points pending |
-| 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 2 `route` scenarios diffed against goldens (C25)** |
+| 11-12 | sweep and commands | done |
+| 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 8 `route` scenarios diffed against goldens (C25)** |
+| 14 | `edm_core::pace` / `edm::route` | done — pacer, two-stage pool, spend gate, resumable cache |
+| 15 | `edm-route` | done — the optimiser: exact-integer arithmetic, Dinkelbach max-ratio cycle, brute-force oracles |
+| 16 | first live run | done — `route Sol --radius 10`: 22 markets, 22 requests, 7.5 s against a 6 s estimate |
 
 ## Known gaps
 
@@ -37,6 +40,30 @@ default path, and none is exercised by the harness.
 - **R86 reports the clamped delay.** `timeout_failure` reads a `Duration`, so a
   `--timeout` above `INT32_MAX/1000` prints `1 ms` where the original prints the
   raw value. C22's clamp itself is implemented.
+
+## What the first live route run found
+
+`edm route Sol --radius 10 --max-requests 200 --cargo 784`, 2026-08-05: 13
+systems in radius, 466 stations known to Ardent, **22 markets after the default
+filter** — 254 fleet carriers, 127 Odyssey settlements and 61 outposts removed,
+95% of the region. 22 requests in 7.5 s against a 6 s estimate. Every reported
+route carried `proved optimal`.
+
+Three defects it found, all now fixed and all with a test:
+
+1. **`Claim` was dropped to fit an ordinary 100-column terminal**, so the run
+   printed twenty credits-per-hour figures with nothing said about what was
+   proved of any of them. `Rate` and `Claim` both declare priority zero now —
+   the rule `Route::rate` enforces in Rust, carried into the table.
+2. **The second run was served entirely from the cache and still printed "every
+   price below was read live from the Companion API during this run".**
+3. **That run's plan priced 22 requests and then sent none**, because the cache
+   was consulted after the spend gate rather than before it.
+
+And one in the harness: scenarios shared a cache through the developer's real
+`~/.cache`, so `route-ceiling-refuses` began proceeding past its ceiling once an
+earlier scenario had cached one of the two markets it counted. Each side now
+gets an `XDG_CACHE_HOME` under its own scenario directory.
 
 ## Measured facts about the Companion API
 
@@ -63,6 +90,24 @@ default path, and none is exercised by the harness.
 
 Recorded when an assumption made while planning turned out to be wrong.
 
+- **This tree is hand-formatted and there is no `rustfmt.toml`.** `cargo fmt`
+  rewrites 68 files and ~4,300 lines, and no simple configuration round-trips
+  the committed layout — `use_small_heuristics = "Max"` collapses some
+  expansions and expands others. A config file that did not reproduce the tree
+  would be a trap for the next person, so there is none. **Do not run
+  `cargo fmt` here**: a formatting sweep in one branch makes every other branch
+  conflict, and this repository's value is a byte-for-byte comparison whose
+  diffs have to stay readable. Making the tree rustfmt-clean is a defensible
+  decision; it is a commit of its own, not a side effect.
+- **The plan's starsystem-per-system read is off by default.** §3.1 has the
+  Companion API's `starsystem` payload confirm what Ardent proposed, one read
+  per system. Step 0 then established that the Companion API answers for a
+  market the commander is not docked at, which makes Ardent's market ids usable
+  directly — and a starsystem payload is ~500 KB against a market's ~20 KB, with
+  roughly one starport per system near Sol. Reading one per system to
+  rediscover ids already in hand is twenty-five times the transfer for the same
+  prices. It is `--verify-systems`, and what it buys — a market Ardent has never
+  seen — is stated rather than paid for by default.
 - **The parity harness's `env_clear()` did not clear the environment.** Bun
   loads `.env` from its working directory before the script runs, and the
   harness runs both sides in the repository root. The moment a `.env` existed
@@ -336,6 +381,9 @@ differs is a bug.
 | C24 | `EDM_ORIGIN_OVERRIDE`, `EDM_ARDENT_BASE`, `EDM_EDDN_URL` added. | Harness plumbing. Unset, behaviour is byte-identical. |
 | C25 | `edm route` exists. Bun answers `Unknown command "route"` and exits 2. | A new command, not a port of one. `KNOWN_COMMANDS` is untouched and `route` dispatches from a disjoint `EXTENDED_COMMANDS`, so R48's ordering is unaffected. Confined to argv beginning with `route`. |
 | C26 | Route-only flag names resolve **only** when the command is `route` (a two-pass parse against `Table::Base` / `Table::Extended`). | Widening `Flag::resolve` globally would make `edm market Colonia --pad L` succeed where the TypeScript exits 2 — a fidelity regression on argv the harness never runs, and so one no scenario would catch. The `parity-isolation` gate proves the two tables agree over every committed scenario's argv. |
+| C27 | `route` paces its requests, backs off on `Retry-After`, trips a breaker and bounds retries by wall clock. | R84 and R98 continue to describe `edm market` exactly. The original has no pacer at all: `market-request.ts:2988` is a `// Request pacing` header with an empty body, and a 429 is requeued immediately with no delay and no header read — affordable for a seven-market system sweep and not for a thousand-market region. |
+| C28 | `route --json` is one well-formed document. | R76's leak — a diagnostic in the middle of the stream — is faithful for the ported commands and is reproduced for them. `route` has no oracle to be faithful to, and a document a consumer cannot parse is not an output format. `Out::aside` sends the plan and diagnostics to stderr when stdout is a document. |
+| C29 | `EDM_JITTER` pins backoff jitter to a fixed fraction of the window. | Backoff jitter is the one random quantity a recorded run cannot reproduce, and it decides how many attempts fit inside a wall-clock budget. It delegates `nonce_bytes` untouched: a pinned nonce is a separate decision with a separate flag. |
 
 **Opt-in fixes, all off by default, each an allowlist row only when set:**
 
