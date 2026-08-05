@@ -50,6 +50,12 @@ Recorded when an assumption made while planning turned out to be wrong.
   a `RangeError: Invalid count value`; `COLUMNS` of four hundred digits yields
   `Infinity` and a *different* `RangeError`. Both happen at module init, outside
   `main`'s try/catch. The single clamp covers both.
+- **R47 swallows exactly two tokens, and the reason is not the obvious one.**
+  The lookup is `BOOLEAN_LITERALS[next.toLowerCase()]`, so the token is folded
+  *before* the property access — `toString` becomes `tostring`, which is not a
+  key on `Object.prototype`. Only `constructor` and `__proto__` are already
+  lowercase and survive the fold. Widening the set to every prototype member
+  would swallow tokens the original leaves as positionals.
 - **R47's message, measured:** a poisoned switch throws
   `value.toLowerCase is not a function. (In 'value.toLowerCase()', 'value.toLowerCase' is undefined)`
   under Bun 1.2.3, and exits **1**. Recorded in `cli_errors.tsv` and asserted

@@ -109,3 +109,40 @@ fn the_prototype_hit_carries_the_engine_s_own_message() {
         "the literal was consumed by the switch, not left as a positional"
     );
 }
+
+/// Exactly two tokens reach `Object.prototype`, and the reason is not obvious.
+///
+/// The lookup is `BOOLEAN_LITERALS[next.toLowerCase()]`, so the token is folded
+/// *before* the property access. `toString` becomes `tostring`, which is not a
+/// key on `Object.prototype` — only `constructor` and `__proto__` are already
+/// lowercase and survive the fold. Widening the set to every prototype member
+/// would swallow tokens the original leaves as positionals.
+#[test]
+fn only_the_already_lowercase_prototype_keys_are_swallowed() {
+    use cli::boolean_literal;
+
+    for token in ["constructor", "__proto__", "CONSTRUCTOR", "__PROTO__"] {
+        assert!(
+            matches!(boolean_literal(token), Some(cli::Literal::Poison)),
+            "{token} should poison the slot"
+        );
+    }
+    for token in [
+        "toString",
+        "tostring",
+        "valueOf",
+        "hasOwnProperty",
+        "propertyIsEnumerable",
+        "__defineGetter__",
+        "isPrototypeOf",
+    ] {
+        assert!(
+            boolean_literal(token).is_none(),
+            "{token} is not a literal — it must stay a positional"
+        );
+    }
+    // The eight documented spellings still work, in any case.
+    for (token, expected) in [("1", true), ("YES", true), ("Off", false), ("false", false)] {
+        assert!(matches!(boolean_literal(token), Some(cli::Literal::Bool(b)) if b == expected));
+    }
+}
