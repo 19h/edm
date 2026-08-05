@@ -38,6 +38,26 @@ use edm_core::js;
 use crate::ardent::ArdentClient;
 use crate::net::HttpTransport;
 
+/// Called before each re-anchored query.
+///
+/// Carries the system count as well as the completeness radius, because the
+/// radius is the number a user cares about and the count is the number that
+/// *moves*. `frontier` anchors on the **farthest** uncovered system, so the
+/// nearest uncovered one — and hence the completeness claim — can sit still for
+/// dozens of anchors while the shell fills in behind it. A progress line
+/// showing only the radius reads as a stall.
+pub type AnchorReport<'a> = &'a dyn Fn(&AnchorProgress<'_>);
+
+/// What an anchor is about to do, and what is known so far.
+#[derive(Clone, Copy, Debug)]
+pub struct AnchorProgress<'a> {
+    pub anchor: u32,
+    pub budget: u32,
+    pub system: &'a str,
+    pub systems_known: usize,
+    pub complete_to_ly: f64,
+}
+
 /// How many `/nearby` requests one enumeration may spend.
 ///
 /// The expansion terminates on its own — every anchor is a distinct system and
@@ -96,6 +116,7 @@ pub async fn enumerate<H: HttpTransport>(
     centre: &ReferenceSystem,
     radius_ly: f64,
     budget: u32,
+    report: Option<AnchorReport<'_>>,
 ) -> Result<Enumeration, String> {
     // Asking for more than the server honours does not fail, it quietly
     // narrows the answer — so completeness may never be claimed past the clamp.
@@ -130,6 +151,20 @@ pub async fn enumerate<H: HttpTransport>(
         // The farthest uncovered system, so each anchor reaches as much of the
         // unclaimed shell as one query can.
         let anchor = systems[frontier.farthest].clone();
+        // Announced before it is issued, not after. This is the phase where a
+        // user most needs to know whether the budget is about to truncate the
+        // claim they are going to act on — and at radius 100 it is 41 serial
+        // round trips for a 144 KB page each, which is a long time to say
+        // nothing.
+        if let Some(report) = report {
+            report(&AnchorProgress {
+                anchor: anchors + 1,
+                budget,
+                system: &anchor.name,
+                systems_known: systems.len(),
+                complete_to_ly: frontier.nearest_ly,
+            });
+        }
         let page = ardent.nearby(&anchor.name, radius_ly).await?;
         requests += 1;
         anchors += 1;
@@ -333,7 +368,7 @@ mod tests {
 
     async fn run(http: &FakeArdent, radius_ly: f64, budget: u32) -> Enumeration {
         let client = ArdentClient::new(http, BASE);
-        enumerate(&client, &centre(), radius_ly, budget).await.expect("the script answers")
+        enumerate(&client, &centre(), radius_ly, budget, None).await.expect("the script answers")
     }
 
     /// A page under the cap exhausted the radius, so one request settles it.

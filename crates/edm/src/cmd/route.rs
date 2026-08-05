@@ -37,6 +37,16 @@ use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
 use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
 
+/// Above this many markets, the cache pre-pass says it is happening.
+///
+/// It reads and JSON-decodes one file per market, ~0.8 ms each, and it sits
+/// between the filter and the spend gate where nothing else is printed — five
+/// thousand markets is four seconds of silence in a place a reader would take
+/// for a stall. Below the threshold it is milliseconds and the line would be
+/// noise, which is its own kind of dishonesty: a progress report that fires
+/// when there is no progress to report teaches people to ignore it.
+const CACHE_NOTE_THRESHOLD: usize = 500;
+
 /// How many Ardent market lists are read at once.
 ///
 /// Ardent is CDN-fronted, unmetered and undocumented as to limits; sixteen
@@ -77,9 +87,25 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         edm_core::js::js_number(config.radius_ly),
         centre.name
     ));
-    let enumeration = discover::enumerate(&ardent, &centre, config.radius_ly, budget)
-        .await
-        .map_err(|error| format!("enumerating systems around {}: {error}", centre.name))?;
+    let anchor_report = (!config.quiet).then_some(move |p: &discover::AnchorProgress<'_>| {
+        out.progress(&format!(
+            "  anchor {}/{}: {} systems known, complete to {} Ly ({})",
+            edm_core::js::format_integer(f64::from(p.anchor)),
+            edm_core::js::format_integer(f64::from(p.budget)),
+            edm_core::js::format_integer(p.systems_known as f64),
+            edm_core::js::js_number(edm_core::js::js_round(p.complete_to_ly)),
+            p.system,
+        ));
+    });
+    let enumeration = discover::enumerate(
+        &ardent,
+        &centre,
+        config.radius_ly,
+        budget,
+        anchor_report.as_ref().map(|f| f as discover::AnchorReport<'_>),
+    )
+    .await
+    .map_err(|error| format!("enumerating systems around {}: {error}", centre.name))?;
 
     // One free `/markets` per system, then the filter. Both happen before the
     // plan is priced, so the plan's market count is measured rather than
@@ -117,6 +143,12 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // sweep will actually send, and a plan that priced twenty-two and then
     // sent none is a plan nobody can check. A few file reads.
     let cache = cache_for(app, config);
+    if config.cache && selection.keep.len() >= CACHE_NOTE_THRESHOLD {
+        note(format!(
+            "checking the cache for {} markets...",
+            edm_core::js::format_integer(selection.keep.len() as f64)
+        ));
+    }
     let prepared = acquire::prepare(
         &cache,
         &app.ports.fs,
@@ -238,6 +270,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         acquired: &acquired,
         enumeration: &enumeration,
         spent: pacer.spent(),
+        priced: ingest::priced(&acquired.listings),
         breaker_tripped: pacer.tripped().is_some(),
         elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
     });
@@ -247,11 +280,13 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         out.aside(&views::route_coverage(&coverage));
     }
 
-    rank(out, config, &acquired, &selection.keep, &coverage);
+    // Read before `rank` consumes the listings; the ranking cannot change it.
+    let unreached = !acquired.unreached.is_empty();
+    rank(out, config, acquired, &selection.keep, &coverage);
 
     // A market in radius that was never read is not a market that ranked
     // badly, and the exit code says so.
-    if !acquired.unreached.is_empty() || coverage.breaker_tripped {
+    if unreached || coverage.breaker_tripped {
         out.set_exit(crate::out::EXIT_FAILURE);
     }
     Ok(())
@@ -264,6 +299,8 @@ struct Measured<'a> {
     acquired: &'a acquire::Acquired,
     enumeration: &'a discover::Enumeration,
     spent: crate::route::pacer::Spent,
+    /// Counted before ingest consumes the listings.
+    priced: usize,
     breaker_tripped: bool,
     elapsed_seconds: f64,
 }
@@ -276,7 +313,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         systems_failed: 0,
         markets_found: m.selection.keep.len(),
         markets_polled: m.acquired.listings.len(),
-        markets_priced: m.acquired.listings.iter().filter(|l| l.snapshot().is_some()).count(),
+        markets_priced: m.priced,
         markets_failed: m.acquired.unreached.len(),
         cache_hits: m.acquired.cache.fresh,
         requests_sent: m.spent.requests,
@@ -291,12 +328,15 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
 fn rank(
     out: &crate::out::Out,
     config: &RouteConfig,
-    acquired: &acquire::Acquired,
+    acquired: acquire::Acquired,
     stations: &[ardent::ArdentStation],
     coverage: &RouteCoverage,
 ) {
+    // By value: `ingest::markets` drops each payload as it builds its `Market`,
+    // and at five thousand markets those payloads are ~2.3 GiB that would
+    // otherwise stay resident through the graph build.
     let (markets, commodities, crossing) =
-        ingest::markets(&acquired.listings, stations, ingest::floors(config));
+        ingest::markets(acquired.listings, stations, ingest::floors(config));
     // Not under `--json`: a diagnostic in the middle of the stream is exactly
     // what R76 does to the ported commands, and C28 says route's document is
     // one well-formed document or nothing.

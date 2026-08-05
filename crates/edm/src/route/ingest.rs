@@ -40,9 +40,16 @@ pub struct Crossing {
 /// `stations` supplies the coordinates and arrival distance, which the market
 /// payload does not carry — the position of a station is a property of where it
 /// is, not of what it sells.
+///
+/// **Takes the listings by value and drops each payload as it is consumed.** A
+/// parsed 391-commodity document is ~0.48 MiB resident — 5.5x its own
+/// decompressed wire text — so at five thousand markets holding them all costs
+/// about 2.3 GiB, and the trade graph the optimiser is about to build is
+/// another gigabyte and a half. Nothing reads a `JsValue` again after its
+/// `Market` exists, so keeping them alive only raised the peak.
 #[must_use]
 pub fn markets(
-    listings: &[Listing],
+    listings: Vec<Listing>,
     stations: &[ArdentStation],
     floors: RowFloors,
 ) -> (Vec<Market>, Commodities, Crossing) {
@@ -86,6 +93,16 @@ pub fn markets(
     }
 
     (built, commodities, crossing)
+}
+
+/// How many of these listings the optimiser can actually price.
+///
+/// Counted here rather than by the caller because the caller no longer has the
+/// listings once [`markets`] has consumed them — and counting before ingest
+/// would parse every payload twice.
+#[must_use]
+pub fn priced(listings: &[Listing]) -> usize {
+    listings.iter().filter(|listing| listing.snapshot().is_some()).count()
 }
 
 /// One commodity row, or `None` if it does not cross the boundary intact.
