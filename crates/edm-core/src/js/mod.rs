@@ -11,6 +11,7 @@
 //! this workspace, it is a bug. `clippy.toml` enforces that.
 
 pub mod collate;
+pub mod json;
 pub mod text;
 pub mod time;
 

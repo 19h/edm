@@ -235,4 +235,91 @@ write(
   write("collate.txt", "localeCompare under the default locale", rows);
 }
 
+// ---------------------------------------------------------------------------
+// JSON: enumeration order and round-trip serialization.
+//
+// The documents are built as *text*, not by stringifying an object, so that
+// document order and duplicate keys survive into the fixture — both of which
+// JSON.parse observes and neither of which a JS object literal could express.
+// ---------------------------------------------------------------------------
+
+{
+  const r = rng(0x1501);
+
+  const keyPool = [
+    // Canonical array indices, which ECMAScript hoists.
+    "0", "1", "2", "9", "10", "42", "1000", "4294967293", "4294967294",
+    // One past the limit, and beyond: ordinary string keys.
+    "4294967295", "4294967296", "9007199254740993",
+    // Near-miss shapes that must NOT be treated as indices.
+    "01", "007", "1.5", "1e3", "-1", "+1", " 1", "1 ", "", "0x1", "١",
+    // Real ids from the two maps that straddle the boundary.
+    "128049204", "128049152", "128673845", "4306502403", "128667761",
+    // Ordinary names.
+    "name", "id", "stock", "buyPrice", "commodities", "zzz", "Aaa",
+  ];
+
+  const valuePool = [
+    "0", "-0", "1", "1.0", "-1", "0.1", "1e21", "1e-7", "123456789012345678901",
+    "72060832334024995", "9007199254740993", "1.7976931348623157e308",
+    '"str"', '"a\\"b"', '"tab\\there"', '"\\u001f"', '"é☃"', "true", "false",
+    "null", "[]", "{}", "[1,2,3]", '{"a":1}', '{"1":"one","0":"zero"}',
+  ];
+
+  const docs: string[] = [
+    // Hand-picked shapes that pin the specific claims in PORTING.md R5/R6.
+    '{"2":"b","1":"a","0":"c"}',
+    '{"b":1,"0":2,"a":3,"1":4}',
+    '{"4294967295":"plain","4294967294":"index","0":"index"}',
+    '{"a":1,"b":2,"a":3}',
+    '{"01":"x","1":"y"}',
+    '{"128049204":{},"128049152":{},"128673845":{}}',
+    '{"4306502403":{},"128667761":{},"3223343616":{}}',
+    "{}",
+    "[]",
+    '{"n":1e21}',
+    '{"n":-0}',
+    '{"n":1.0}',
+    '{"n":72060832334024995}',
+    '{"deep":{"deeper":{"deepest":[1,{"k":"v"}]}}}',
+  ];
+
+  for (let i = 0; i < 600; i++) {
+    const n = 1 + Math.floor(r() * 7);
+    const parts: string[] = [];
+    for (let j = 0; j < n; j++) {
+      const k = keyPool[Math.floor(r() * keyPool.length)]!;
+      const v = valuePool[Math.floor(r() * valuePool.length)]!;
+      parts.push(`${JSON.stringify(k)}:${v}`);
+    }
+    docs.push(`{${parts.join(",")}}`);
+  }
+
+  const rows: string[] = [];
+  for (const doc of docs) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(doc);
+    } catch {
+      continue; // a generated document that JS itself rejects teaches nothing
+    }
+    const keys = Array.isArray(parsed) || typeof parsed !== "object" || parsed === null
+      ? []
+      : Object.keys(parsed as object);
+    rows.push(
+      [
+        JSON.stringify(doc),
+        JSON.stringify(keys),
+        JSON.stringify(JSON.stringify(parsed)),
+        JSON.stringify(JSON.stringify(parsed, null, 2)),
+      ].join("\t"),
+    );
+  }
+  write(
+    "json.tsv",
+    "doc<TAB>Object.keys<TAB>JSON.stringify<TAB>JSON.stringify(_,null,2) — all JSON-quoted",
+    rows,
+  );
+}
+
 console.log(`\nwrote fixtures to ${outDir} using bun ${Bun.version}`);

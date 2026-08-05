@@ -13,7 +13,7 @@ so renumbering them is a breaking change to the test suite.
 | Step | Module | State |
 |---|---|---|
 | 1 | `edm_core::js` | done — 7 oracle fixtures green against bun 1.2.3 |
-| 2 | `edm_core::js::json` | |
+| 2 | `edm_core::js::json` | done — key order and round-trip green over 614 documents |
 | 3 | `edm_core::wire` | |
 | 4 | `edm_core::render` | |
 | 5 | `edm_core::cli` | |

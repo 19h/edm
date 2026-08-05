@@ -5,6 +5,7 @@
 //! When one of these fails, the fixture is right and the Rust is wrong — that
 //! is the whole point of generating them rather than reasoning about them.
 
+use edm_core::js::json::JsValue;
 use edm_core::js::{self, collate, text, time};
 
 fn fixture(name: &str) -> String {
@@ -193,6 +194,67 @@ fn locale_compare_matches_bun() {
         n += 1;
     }
     f.finish(n);
+}
+
+/// The two findings that a port can get wrong while looking entirely correct:
+/// ECMAScript's object enumeration order, and integral doubles serializing
+/// without a decimal point. See `js::json`'s module docs for why each matters.
+#[test]
+fn json_key_order_and_serialization_match_bun() {
+    let body = fixture("json.tsv");
+    let mut keys = Failures::new("Object.keys");
+    let mut compact = Failures::new("JSON.stringify");
+    let mut pretty = Failures::new("JSON.stringify(_, null, 2)");
+    let mut n = 0;
+
+    for (line, cols) in rows(&body) {
+        // Decoded with serde_json rather than our own parser, so a bug in the
+        // thing under test cannot hide itself by also mis-reading the fixture.
+        let doc: String = serde_json::from_str(cols[0]).expect("doc column");
+        let want_keys: Vec<String> = serde_json::from_str(cols[1]).expect("keys column");
+        let want_compact: String = serde_json::from_str(cols[2]).expect("compact column");
+        let want_pretty: String = serde_json::from_str(cols[3]).expect("pretty column");
+
+        let value = match JsValue::parse(&doc) {
+            Ok(v) => v,
+            Err(e) => panic!("line {line}: {doc} failed to parse: {e}"),
+        };
+
+        if let Some(object) = value.as_object() {
+            let actual: Vec<&str> = object.iter().map(|(k, _)| k).collect();
+            keys.check(line, &doc, &want_keys.join("\u{1f}"), &actual.join("\u{1f}"));
+        }
+        compact.check(line, &doc, &want_compact, &value.stringify_compact());
+        pretty.check(line, &doc, &want_pretty, &value.stringify(2));
+        n += 1;
+    }
+
+    keys.finish(n);
+    compact.finish(n);
+    pretty.finish(n);
+}
+
+/// The boundary itself, stated directly rather than inferred from the corpus.
+#[test]
+fn array_index_boundary() {
+    use edm_core::js::json::array_index;
+    for yes in ["0", "1", "9", "4294967294"] {
+        assert!(array_index(yes).is_some(), "{yes} should be an array index");
+    }
+    for no in [
+        "4294967295", "4294967296", "01", "007", "", "1.5", "1e3", "-1", "+1", " 1", "1 ",
+        "0x1", "١", "9007199254740993",
+    ] {
+        assert!(array_index(no).is_none(), "{no} should not be an array index");
+    }
+}
+
+/// The one that would break every EDDN upload: an integral double must not
+/// acquire a decimal point on the way out.
+#[test]
+fn integral_doubles_serialize_without_a_point() {
+    let value = JsValue::parse(r#"{"meanPrice":123.0,"stock":0,"demand":1e3}"#).unwrap();
+    assert_eq!(value.stringify_compact(), r#"{"meanPrice":123,"stock":0,"demand":1000}"#);
 }
 
 fn render(chars: &[char]) -> String {
