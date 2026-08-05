@@ -1,0 +1,13 @@
+# fail-500-encrypted
+why = "500 whose body is encrypted like any other: decodeOpaqueBody opens it and it prints under an ERROR PAYLOAD heading (ts:1259)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 500
+encode = "capi"
+payload = """
+{"code":"MarketNotFound","message":"no such market"}
+"""

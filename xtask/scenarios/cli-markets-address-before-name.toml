@@ -1,0 +1,4 @@
+# cli-markets-address-before-name
+why = "`markets` reads --address before it checks for a missing name, so this reports the address rather than the name."
+argv = ["markets", "--address", "abc"]
+network = false

@@ -1,0 +1,4 @@
+# cli-unicode-flag-name
+why = "Normalisation strips every - and _ and then lowercases with full Unicode, so U+212A KELVIN SIGN in the middle of a flag name still reaches --market-id (R41). It then fails on the value, which proves the flag was found: to_ascii_lowercase would have left it an unknown option."
+argv = ["market", "--marKet-id", "abc"]
+network = false

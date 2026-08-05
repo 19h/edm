@@ -1,0 +1,10 @@
+# fail-405-allow
+why = "405 with an Allow header the verb is missing from: the diagnosis line names verbs[0] and prints the raw header value (R73)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 405
+headers = [["Allow", "PUT, OPTIONS"]]

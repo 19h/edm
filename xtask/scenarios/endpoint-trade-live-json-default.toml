@@ -1,0 +1,11 @@
+# endpoint-trade-live-json-default
+why = "PUT /2.0/elite/market/trade, one buy with no price lookup — sent, JSON output."
+argv = ["trade", "--market-id", "3229009408", "--type", "buy", "--item", "128049204", "--qty", "10", "--unit-price", "9500", "--no-resolve", "--json"]
+
+[[route]]
+path = "/2.0/elite/market/trade"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/trade.json"

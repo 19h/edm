@@ -1,0 +1,9 @@
+# fail-405-no-allow
+why = "405 with no Allow header at all: the empty header is falsy, so there is no diagnosis line (R73)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 405

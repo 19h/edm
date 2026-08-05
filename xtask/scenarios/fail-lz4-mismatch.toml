@@ -1,0 +1,12 @@
+# fail-lz4-mismatch
+why = "200 whose uncompressedsize is larger than the block decodes to. The output buffer is big enough, so the loop runs to completion and the final length check is what refuses it — `LZ4 size mismatch: expected N, produced M`, the sixth of R61's error strings. Declaring a size *smaller* than the block reaches `Invalid LZ4 literal length` instead, which is what fail-lz4-corrupt covers."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+size-header = "9999"

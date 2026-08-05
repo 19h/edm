@@ -1,0 +1,23 @@
+# The single highest-value fixture in the suite.
+why = "A `markets` map mixing sub-2^32 and super-2^32 ids in adversarial document order, swept by one worker so that F1's enumeration order is visible as line order. Array-index keys (canonical decimal, <= 2^32-2) come first in ascending numeric order, then the rest in insertion order (R5); the sweep enqueues in that order, so progress lines and SWEEP RESULTS rows follow it (R83)."
+argv = ["market", "Colonia", "--dry-run", "--concurrency", "1"]
+
+# --dry-run means every market retires with no data and no requeue (R87), so the
+# only thing this scenario measures is order — and one worker makes that order a
+# property of the payload rather than of the scheduler.
+[[route]]
+path = "/v2/system/name/Colonia"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-system.json"
+headers = [["Content-Type", "application/json"]]
+
+# `ignoreDryRun` (ts:1617): the star system read happens even under --dry-run.
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"

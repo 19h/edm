@@ -1,0 +1,85 @@
+{
+  "starsystem": {
+    "starsystem": {
+      "name": "Colonia",
+      "minorFactions": { "3416": { "name": "Colonia Council" } }
+    },
+    "polities": {
+      "council": {
+        "controllingMinorFaction": 3416,
+        "markets": {
+          "3229009401": {
+            "id": 3229009401,
+            "name": "Alpha Dock",
+            "poiType": "starport",
+            "distFromSystem": 10,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009402": {
+            "id": 3229009402,
+            "name": "Bravo Port",
+            "poiType": "outpost",
+            "distFromSystem": 20,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009403": {
+            "id": 3229009403,
+            "name": "Charlie Hub",
+            "poiType": "starport",
+            "distFromSystem": 30,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009404": {
+            "id": 3229009404,
+            "name": "Delta Ring",
+            "poiType": "outpost",
+            "distFromSystem": 40,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009405": {
+            "id": 3229009405,
+            "name": "Echo Landing",
+            "poiType": "starport",
+            "distFromSystem": 50,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009406": {
+            "id": 3229009406,
+            "name": "Foxtrot Base",
+            "poiType": "outpost",
+            "distFromSystem": 60,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "3229009407": {
+            "id": 3229009407,
+            "name": "Golf Terminal",
+            "poiType": "starport",
+            "distFromSystem": 70,
+            "economies": { "0": { "name": "Industrial", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          }
+        }
+      }
+    }
+  }
+}

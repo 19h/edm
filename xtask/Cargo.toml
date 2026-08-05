@@ -10,6 +10,14 @@ publish.workspace = true
 [dependencies]
 edm-core.workspace = true
 anyhow.workspace = true
+# The mock server is hand-rolled on `TcpListener` — see `src/mock.rs` for why
+# nothing higher-level will do. `rt` is the current-thread runtime only: the
+# server owns one OS thread and the runner stays synchronous.
+tokio = { workspace = true, features = ["rt", "time", "net", "io-util"] }
+base64.workspace = true
+# Only for `StatusCode::canonical_reason`, which is what C3 constrains the
+# mock's reason phrases to.
+http.workspace = true
 
 [lints]
 workspace = true

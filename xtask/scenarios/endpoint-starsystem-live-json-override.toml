@@ -1,0 +1,11 @@
+# endpoint-starsystem-live-json-override
+why = "GET /2.0/elite/starsystem, the market listing for one address — sent, JSON output, verb overridden to PUT (R66)."
+argv = ["markets", "--address", "3238296097059", "--json", "--method", "PUT"]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"

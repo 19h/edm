@@ -1,0 +1,4 @@
+# cli-value-flag-takes-single-dash
+why = "A value flag accepts a next token starting with a single -, but not one starting with -- (R44)."
+argv = ["market", "--market-id", "-1"]
+network = false

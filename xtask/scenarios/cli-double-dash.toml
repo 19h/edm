@@ -1,0 +1,4 @@
+# cli-double-dash
+why = "`--` is not an options terminator; it is the option named `--` and it is unknown (R38)."
+argv = ["market", "--", "Colonia"]
+network = false

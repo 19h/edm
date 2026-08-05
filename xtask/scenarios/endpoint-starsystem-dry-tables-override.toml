@@ -1,0 +1,7 @@
+# endpoint-starsystem-dry-tables-override
+why = "GET /2.0/elite/starsystem, the market listing for one address — resolved but not sent (--dry-run), table output, verb overridden to PUT (R66)."
+argv = ["markets", "--address", "3238296097059", "--dry-run", "--method", "PUT"]
+
+# --dry-run returns before `fetch` (ts:1228), so this one belongs to
+# the `cli` suite: it runs without a server at all.
+network = false

@@ -1,0 +1,19 @@
+# endpoint-trade-live-tables-default
+#
+# MEASURED, and it trims R66. The register says the explicit `""` body makes
+# fetch add `Content-Type: text/plain;charset=UTF-8` *and* `Content-Length: 0`
+# on the wire. Under bun 1.2.3 only the second appears: the wire log for this
+# scenario has `content-length: 0` and no content-type at all, while the GET
+# override (endpoint-trade-live-tables-override) has neither. The half of R66
+# that matters — a body-bearing verb sends a length and GET/HEAD send nothing —
+# holds exactly as written.
+why = "PUT /2.0/elite/market/trade, one buy with no price lookup — sent, table output. The wire log is where R66's empty-body rule is visible."
+argv = ["trade", "--market-id", "3229009408", "--type", "buy", "--item", "128049204", "--qty", "10", "--unit-price", "9500", "--no-resolve"]
+
+[[route]]
+path = "/2.0/elite/market/trade"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/trade.json"

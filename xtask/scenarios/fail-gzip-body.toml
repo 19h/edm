@@ -1,0 +1,12 @@
+# fail-gzip-body
+why = "200 sent with Content-Encoding: gzip. Both clients must unwrap it before the base64 gate sees it, so the outcome is an ordinary market listing."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+gzip = true

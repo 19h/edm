@@ -1,0 +1,23 @@
+why = "A starsystem payload with nothing under starsystem.polities: readMarketPoints returns nothing and the structural scan takes over (ts:3073). POI_TYPE_LABELS is matched with an ASCII-case-insensitive regex and no /u flag (R32), and the results sort market-bearing entries first, then by localeCompare (R26)."
+argv = ["markets", "--address", "3238296097059"]
+columns = "150"
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload = """
+{
+  "starsystem": {
+    "starsystem": { "name": "Colonia" },
+    "bodies": [
+      { "name": "Zeta Landing", "type": "Planetary Outpost", "services": { "commodities": "ok" } },
+      { "name": "Ångström Relay", "marketId": 3229009999, "type": "STARPORT", "economy": "Refinery" },
+      { "name": "alpha depot", "marketId": 3229009888, "stationType": "outpost" },
+      { "name": "Not A Port", "colour": "blue" }
+    ]
+  }
+}
+"""

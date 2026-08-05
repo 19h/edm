@@ -1,0 +1,7 @@
+# endpoint-trade-dry-json-default
+why = "PUT /2.0/elite/market/trade, one buy with no price lookup — resolved but not sent (--dry-run), JSON output."
+argv = ["trade", "--market-id", "3229009408", "--type", "buy", "--item", "128049204", "--qty", "10", "--unit-price", "9500", "--no-resolve", "--dry-run", "--json"]
+
+# --dry-run returns before `fetch` (ts:1228), so this one belongs to
+# the `cli` suite: it runs without a server at all.
+network = false

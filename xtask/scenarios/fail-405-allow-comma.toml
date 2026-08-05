@@ -1,0 +1,10 @@
+# fail-405-allow-comma
+why = "405 with `Allow: ,` — every verb trims to empty and is filtered out, so verbs[0] is undefined and the text reads `--method undefined` (R73)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 405
+headers = [["Allow", ","]]

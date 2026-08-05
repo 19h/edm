@@ -1,0 +1,4 @@
+# cli-market-id-unsafe
+why = "parseUnsignedInteger's second message: all digits, but past 2^53-1. A hundred-digit string gets this one, not the first (R11)."
+argv = ["market", "--market-id", "9007199254740993"]
+network = false

@@ -1,0 +1,80 @@
+{
+  "starsystem": {
+    "starsystem": {
+      "name": "Colonia",
+      "systemaddress": 3238296097059,
+      "minorFactions": {
+        "72060832334024995": { "name": "Jaques" },
+        "3416": { "name": "Colonia Council" }
+      }
+    },
+    "polities": {
+      "council": {
+        "controllingMinorFaction": 3416,
+        "markets": {
+          "4400000000000": {
+            "id": 4400000000000,
+            "name": "Beyond 2^32 Terminal",
+            "poiType": "starport",
+            "distFromSystem": 1400.5,
+            "economies": { "0": { "name": "Industrial", "proportion": 0.8 } },
+            "imported": ["a", "b"],
+            "exported": ["c"],
+            "services": { "commodities": "ok", "outfitting": "closed" }
+          },
+          "3229009408": {
+            "id": 0,
+            "name": "Jaques Station",
+            "poiType": "starport",
+            "distFromSystem": 0.9,
+            "economies": { "0": { "name": "Tourism", "proportion": 1 } },
+            "imported": ["a"],
+            "exported": ["b", "c", "d"],
+            "services": { "commodities": "ok" }
+          },
+          "4294967295": {
+            "id": 4294967295,
+            "name": "Two To The Thirty-Two Minus One",
+            "poiType": "outpost",
+            "distFromSystem": 22,
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "128": {
+            "id": 128,
+            "name": "Low Id Outpost",
+            "poiType": "outpost",
+            "distFromSystem": 5,
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "4294967294": {
+            "name": "Two To The Thirty-Two Minus Two",
+            "poiType": "dockableplanetstation",
+            "distFromSystem": 310.25,
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "0012": {
+            "name": "Leading Zero Settlement",
+            "poiType": "onfootsettlement",
+            "distFromSystem": 0,
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          },
+          "9007199254740993": {
+            "name": "Past Two To The Fifty-Three",
+            "poiType": "starport",
+            "imported": ["a"],
+            "exported": ["b"],
+            "services": { "commodities": "ok" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# fail-500-empty
+why = "500 with an empty body: `raw.trim() !== \"\"` is false, so nothing is printed after the failure line (ts:1263)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 500
