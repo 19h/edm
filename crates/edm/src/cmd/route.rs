@@ -37,6 +37,15 @@ use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
 use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
 
+/// How many Ardent market lists are read at once.
+///
+/// Ardent is CDN-fronted, unmetered and undocumented as to limits; sixteen
+/// concurrent requests were measured returning 200 in 0.6 s total against
+/// 330 ms each serially. Sixteen rather than more because this is somebody
+/// else's free service and the gain past it is small — the win is going from
+/// one to sixteen, not from sixteen to sixty-four.
+const ARDENT_CONCURRENCY: usize = 16;
+
 /// Run the command.
 #[expect(
     clippy::too_many_lines,
@@ -76,13 +85,30 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // plan is priced, so the plan's market count is measured rather than
     // extrapolated — `--fast-estimate` is the flag that trades this away.
     note(format!(
-        "{} systems; reading their market lists...",
-        edm_core::js::format_integer(enumeration.systems.len() as f64)
+        "{} systems; reading their market lists ({} at a time)...",
+        edm_core::js::format_integer(enumeration.systems.len() as f64),
+        edm_core::js::format_integer(ARDENT_CONCURRENCY as f64),
     ));
+    // A counter rather than a line per system: eight thousand lines is not a
+    // progress report, it is the output. One line rewritten in place is, and
+    // `Out::progress` already clamps to the terminal width \[R33\].
+    let gather_report = (!config.quiet).then_some(
+        move |done: usize, total: usize, found: usize| {
+            if done.is_multiple_of(64) || done == total {
+                out.progress(&format!(
+                    "  {} / {} systems read, {} stations found",
+                    edm_core::js::format_integer(done as f64),
+                    edm_core::js::format_integer(total as f64),
+                    edm_core::js::format_integer(found as f64),
+                ));
+            }
+        },
+    );
     let (stations, systems_with_markets) = if config.fast_estimate {
         (Vec::new(), enumeration.systems.len())
     } else {
-        gather(&ardent, &enumeration).await
+        gather(&ardent, &enumeration, gather_report.as_ref().map(|f| f as &dyn Fn(_, _, _)))
+            .await
     };
 
     let selection = select::select(stations, config, &centre.coordinates);
@@ -433,19 +459,33 @@ async fn resolve<H: HttpTransport>(
     Ok(ardent.resolve_location(reference, Lookup::Auto).await?.system)
 }
 
-/// One `/markets` per enumerated system.
+/// One `/markets` per enumerated system, concurrently and out loud.
+///
+/// **This is the phase that dominates a wide sweep.** Ardent answers in about
+/// 330 ms, so at radius 100 around Sol — 8,156 systems — a serial loop is
+/// forty-five minutes, and the first version of this function was a serial loop
+/// that printed nothing at all. Sixteen at a time is 0.6 s for sixteen,
+/// measured, which turns the same work into roughly three minutes.
 ///
 /// Free and unmetered, so this is not paced and failures are not retried: a
 /// system whose market list does not answer contributes nothing, and the plan
-/// reports a smaller region rather than a wrong one. Returns the stations and
-/// how many systems answered at all.
+/// reports a smaller region rather than a wrong one. The Companion API is what
+/// the pacer and the spend gate exist for.
+///
+/// Returns the stations and how many systems answered at all.
 async fn gather<H: HttpTransport>(
     ardent: &ArdentClient<'_, H>,
     enumeration: &discover::Enumeration,
+    report: Option<&dyn Fn(usize, usize, usize)>,
 ) -> (Vec<ardent::ArdentStation>, usize) {
-    let mut stations = Vec::new();
-    let mut answered = 0;
-    for system in &enumeration.systems {
+    use futures_util::StreamExt as _;
+
+    let total = enumeration.systems.len();
+    let done = std::cell::Cell::new(0usize);
+    let answered = std::cell::Cell::new(0usize);
+    let found = std::cell::Cell::new(0usize);
+
+    let results = futures_util::stream::iter(enumeration.systems.iter().map(|system| {
         // `system_markets` places the rows at these coordinates itself, which
         // is the only reason a `/markets` row has any position at all.
         let reference = ReferenceSystem {
@@ -453,11 +493,37 @@ async fn gather<H: HttpTransport>(
             address: system.address,
             coordinates: system.coordinates,
         };
-        let Ok(mut found) = ardent.system_markets(&reference).await else { continue };
-        answered += 1;
-        stations.append(&mut found);
+        let (done, answered, found) = (&done, &answered, &found);
+        async move {
+            let stations = ardent.system_markets(&reference).await.ok();
+            done.set(done.get() + 1);
+            if let Some(stations) = &stations {
+                answered.set(answered.get() + 1);
+                found.set(found.get() + stations.len());
+            }
+            // Reported from inside the task, in completion order, so a long
+            // gather visibly moves rather than sitting silent for minutes.
+            if let Some(report) = report {
+                report(done.get(), total, found.get());
+            }
+            stations
+        }
+    }))
+    // `buffered`, not `buffer_unordered`: both run sixteen at once, but this
+    // one yields in *input* order. The station list order reaches the poll
+    // order, the progress lines and the harness's byte diff, and a sweep whose
+    // output depended on which of sixteen requests came back first would not be
+    // reproducible. Ordering the results costs nothing here — every request is
+    // already in flight.
+    .buffered(ARDENT_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut stations = Vec::new();
+    for mut batch in results.into_iter().flatten() {
+        stations.append(&mut batch);
     }
-    (stations, answered)
+    (stations, answered.get())
 }
 
 /// The systems `--verify-systems` reads, with the addresses those reads need.
