@@ -5,7 +5,8 @@
 //!   through the Rust binary, against one mock server, and diffs stdout,
 //!   stderr, the exit code, any `--dump` file and the wire log. It is the
 //!   acceptance gate for the whole port.
-//! * `bless` regenerates the oracle fixtures.
+//! * `bless` regenerates the oracle fixtures, and with `--golden` the
+//!   committed output of the one command that has no oracle.
 //! * `gates` runs the structural checks.
 //! * `mock` serves the scenarios by hand, for poking at with `curl`.
 //! * `ardent-contract` re-executes the real `ardent.ts` and checks the
@@ -31,9 +32,11 @@ cargo xtask <command>
         Run every scenario through both implementations and diff the results.
         `--suite cli` is the subset that makes no requests, and needs no mock.
 
-  bless [--force]
+  bless [--golden] [--force]
         Regenerate the oracle fixtures from the JavaScript engine. Refuses when
         the installed bun differs from the one the fixtures record.
+        `--golden` instead regenerates the committed output of the scenarios
+        that have no oracle (C25), from the Rust side alone.
 
   gates
         Purity of edm-core, tokio's `signal` feature (R96), and a scan for
@@ -87,8 +90,16 @@ fn dispatch() -> Result<()> {
             parity::run(&options)
         }
         Some("bless") => {
-            let force = rest.any(|flag| flag == "--force");
-            bless::run(force)
+            let mut force = false;
+            let mut golden = false;
+            for flag in rest {
+                match flag.as_str() {
+                    "--force" => force = true,
+                    "--golden" => golden = true,
+                    other => bail!("unknown option {other}\n\n{USAGE}"),
+                }
+            }
+            if golden { bless::goldens(force) } else { bless::run(force) }
         }
         Some("gates") => gates::run(),
         Some("mock") => {

@@ -12,6 +12,9 @@ use anyhow::{Context, Result, bail};
 
 const GENERATORS: [&str; 3] = ["bless-js.ts", "bless-id64.ts", "bless-ardent.ts"];
 
+/// Where the goldens record which engine was asked and found to have no answer.
+const GOLDEN_ENGINE: &str = "bun-version.txt";
+
 pub(crate) fn run(force: bool) -> Result<()> {
     let root = crate::repo_root()?;
     let fixtures = root.join("crates").join("edm-core").join("tests").join("fixtures");
@@ -47,6 +50,58 @@ pub(crate) fn run(force: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Regenerates the goldens for the scenarios that have no oracle \[C25\].
+///
+/// The engine check is the same shape as the fixture one above, and for a
+/// related reason. A golden exists *because* the installed engine has no answer
+/// for this argv — `bun --version` is the record of which engine was asked. If
+/// a later engine grew the command, the differential gate would have become
+/// applicable again, and silently regenerating goldens under it would bury
+/// that: the suite would keep asserting the Rust against itself.
+pub(crate) fn goldens(force: bool) -> Result<()> {
+    let root = crate::repo_root()?;
+    let dir = root.join("xtask").join("scenarios").join("golden");
+    let installed = bun_version(&root)?;
+
+    match recorded_engine(&dir) {
+        Some(recorded) if recorded != installed => {
+            if !force {
+                bail!(
+                    "the committed goldens were blessed against bun {recorded} and this is \
+                     bun {installed}.\nA golden stands in for an oracle that had no answer; \
+                     check that bun {installed} still answers `Unknown command \"route\"` \
+                     before replacing them. Re-run with --force once it is, and say so in \
+                     the commit message."
+                );
+            }
+            println!("  bun {recorded} -> {installed} (forced)");
+        }
+        Some(recorded) => println!("  bun {recorded}, unchanged"),
+        None => println!("  no recorded bun version; treating as first generation"),
+    }
+
+    let written = crate::parity::bless_goldens(&root)?;
+    for name in &written {
+        println!("  {name}");
+    }
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join(GOLDEN_ENGINE),
+        format!(
+            "# The engine `cargo xtask bless --golden` found to have no answer for these\n\
+             # scenarios' argv. Rewritten by that command; do not hand-edit.\n\
+             bun {installed}\n"
+        ),
+    )?;
+    Ok(())
+}
+
+/// The engine the committed goldens were blessed against, if any are committed.
+fn recorded_engine(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(GOLDEN_ENGINE)).ok()?;
+    text.lines().find_map(version_in)
 }
 
 /// **[C1]** — the Ardent module is imported at runtime by the TypeScript and

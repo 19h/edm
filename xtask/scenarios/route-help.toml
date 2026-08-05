@@ -1,0 +1,5 @@
+# route-help
+why = "The one command with no oracle (C25). Proves the golden path end to end: no bun run, and the Rust side diffed against xtask/scenarios/golden/route-help/. Re-bless once route_usage() lands and this stops printing the base usage."
+argv = ["route", "--help"]
+oracle = "none"
+network = false

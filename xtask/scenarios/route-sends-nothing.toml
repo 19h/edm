@@ -1,0 +1,5 @@
+# route-sends-nothing
+why = "A route run that reaches no market must be shown to have sent nothing, not assumed to have. The mock is up and reachable and `expect-frontier-requests = 0` counts what arrived — the shape every spend-gate scenario needs, since an empty wire log alone cannot tell a gate that refused from a scenario that stopped reaching the gate."
+argv = ["route", "Sol"]
+oracle = "none"
+expect-frontier-requests = 0

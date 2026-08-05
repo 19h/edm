@@ -1,0 +1,3 @@
+# The engine `cargo xtask bless --golden` found to have no answer for these
+# scenarios' argv. Rewritten by that command; do not hand-edit.
+bun 1.2.3

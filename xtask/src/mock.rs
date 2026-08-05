@@ -20,7 +20,7 @@ use std::fmt::Write as _;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
@@ -66,6 +66,29 @@ struct Record {
     query: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+    /// When the request arrived, relative to the [`Mock::load`] that started
+    /// this side of the run.
+    ///
+    /// Deliberately outside [`render_record`]: the wire log is byte-diffed
+    /// between the two implementations, and a clock reading would make every
+    /// scenario fail for a reason that is not about either program. It travels
+    /// to a separate `timing.txt` instead.
+    arrival: Duration,
+}
+
+/// When one request reached the mock. The whole of `timing.txt`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Arrival {
+    pub(crate) profile: Profile,
+    pub(crate) millis: u128,
+}
+
+/// Everything one side's run left behind at the mock.
+#[derive(Debug, Default)]
+pub(crate) struct Observed {
+    pub(crate) wire: String,
+    pub(crate) arrivals: Vec<Arrival>,
+    pub(crate) problems: Vec<String>,
 }
 
 struct RouteState {
@@ -73,7 +96,6 @@ struct RouteState {
     served: usize,
 }
 
-#[derive(Default)]
 struct State {
     routes: Vec<RouteState>,
     log: Vec<Record>,
@@ -84,6 +106,21 @@ struct State {
     /// Bumped on every reset; a connection parked on a `never` reply notices
     /// and lets go.
     generation: u64,
+    /// The zero of every recorded arrival: the moment the script was installed,
+    /// which is as close to "before the side started" as the harness can get.
+    loaded_at: Instant,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            routes: Vec::new(),
+            log: Vec::new(),
+            problems: Vec::new(),
+            generation: 0,
+            loaded_at: Instant::now(),
+        }
+    }
 }
 
 pub(crate) struct Mock {
@@ -166,10 +203,12 @@ impl Mock {
         state.log.clear();
         state.problems.clear();
         state.generation += 1;
+        state.loaded_at = Instant::now();
     }
 
-    /// The wire log, and anything that went wrong while producing it.
-    pub(crate) fn take_log(&self, ordered: bool) -> (String, Vec<String>) {
+    /// The wire log, the arrival instants, and anything that went wrong while
+    /// producing either.
+    pub(crate) fn observe(&self, ordered: bool) -> Observed {
         let state = self.lock();
         let mut problems = state.problems.clone();
         // A scripted reply nobody asked for is a scenario that has stopped
@@ -188,7 +227,15 @@ impl Mock {
                 }
             }
         }
-        (format_log(&state.log, ordered), problems)
+        let arrivals = state
+            .log
+            .iter()
+            .map(|record| Arrival {
+                profile: record.profile,
+                millis: record.arrival.as_millis(),
+            })
+            .collect();
+        Observed { wire: format_log(&state.log, ordered), arrivals, problems }
     }
 
     pub(crate) fn request_count(&self) -> usize {
@@ -229,6 +276,44 @@ fn format_log(records: &[Record], ordered: bool) -> String {
     out
 }
 
+/// `timing.txt` — when each request arrived, in milliseconds since the script
+/// was installed.
+///
+/// Its own artefact rather than a column in the wire log, because it is a
+/// measurement of the machine the suite is running on: two sides of the same
+/// scenario will never agree on it, and a byte-diff that included it could
+/// never be green.
+pub(crate) fn format_timing(arrivals: &[Arrival]) -> String {
+    let mut out = String::from(
+        "# When each request arrived, in ms since the scenario was installed.\n\
+         # A measurement, not an observable of either program: never diffed\n\
+         # between the two sides, only asserted against `expect-min-gap-ms` and\n\
+         # `expect-frontier-requests`.\n",
+    );
+    for (index, arrival) in arrivals.iter().enumerate() {
+        let _ = writeln!(out, "#{} {} +{} ms", index + 1, arrival.profile, arrival.millis);
+    }
+    out
+}
+
+/// The shortest interval between two consecutive Companion API arrivals.
+///
+/// `None` when fewer than two arrived, which is a scenario with nothing to
+/// measure rather than a scenario that paced perfectly — the caller reports the
+/// difference.
+pub(crate) fn min_frontier_gap(arrivals: &[Arrival]) -> Option<u128> {
+    let instants: Vec<u128> = arrivals
+        .iter()
+        .filter(|arrival| arrival.profile == Profile::Frontier)
+        .map(|arrival| arrival.millis)
+        .collect();
+    instants.windows(2).map(|pair| pair[1].saturating_sub(pair[0])).min()
+}
+
+pub(crate) fn frontier_count(arrivals: &[Arrival]) -> usize {
+    arrivals.iter().filter(|arrival| arrival.profile == Profile::Frontier).count()
+}
+
 fn render_record(record: &Record) -> String {
     let mut out = format!(" {} {} {}\n?{}\n", record.profile, record.method, record.path, record.query);
 
@@ -267,15 +352,19 @@ async fn serve(mut socket: TcpStream, state: Arc<Mutex<State>>) -> Result<()> {
             state.lock().expect("mock state poisoned").problems.push(note);
         }
         if let Some(profile) = profile {
-            let record = Record {
+            let mut state = state.lock().expect("mock state poisoned");
+            // Taken here rather than after the reply is written: the arrival is
+            // what a pacer controls, and the reply's own `delay-ms` is not.
+            let arrival = state.loaded_at.elapsed();
+            state.log.push(Record {
                 profile,
                 method: request.method.clone(),
                 path: request.path.clone(),
                 query: request.query.clone(),
                 headers: request.headers.clone(),
                 body: request.body.clone(),
-            };
-            state.lock().expect("mock state poisoned").log.push(record);
+                arrival,
+            });
         }
 
         let Some(reply) = reply else {
@@ -484,7 +573,45 @@ mod tests {
             query: "abc=".to_owned(),
             headers: headers.iter().map(|(n, v)| ((*n).to_owned(), (*v).to_owned())).collect(),
             body: body.to_vec(),
+            arrival: Duration::from_millis(7),
         }
+    }
+
+    fn arrivals(entries: &[(Profile, u128)]) -> Vec<Arrival> {
+        entries
+            .iter()
+            .map(|(profile, millis)| Arrival { profile: *profile, millis: *millis })
+            .collect()
+    }
+
+    #[test]
+    fn the_wire_log_carries_no_clock_reading() {
+        // If it did, the byte-diff between the two sides could never be green.
+        let text = render_record(&record(Profile::Frontier, &[], b""));
+        assert!(!text.contains('7'), "{text}");
+    }
+
+    #[test]
+    fn the_gap_is_measured_between_companion_api_arrivals_only() {
+        let mixed = arrivals(&[
+            (Profile::Frontier, 0),
+            (Profile::Ardent, 5),
+            (Profile::Frontier, 250),
+            (Profile::Frontier, 500),
+        ]);
+        assert_eq!(min_frontier_gap(&mixed), Some(250));
+        assert_eq!(frontier_count(&mixed), 3);
+        // One arrival is not a gap of zero, it is no gap at all.
+        assert_eq!(min_frontier_gap(&arrivals(&[(Profile::Frontier, 9)])), None);
+        let ardent_only = arrivals(&[(Profile::Ardent, 1), (Profile::Ardent, 2)]);
+        assert_eq!(min_frontier_gap(&ardent_only), None);
+    }
+
+    #[test]
+    fn the_timing_artefact_numbers_arrivals_in_the_order_they_landed() {
+        let text = format_timing(&arrivals(&[(Profile::Frontier, 0), (Profile::Eddn, 120)]));
+        assert!(text.contains("#1 frontier +0 ms\n"), "{text}");
+        assert!(text.contains("#2 eddn +120 ms\n"), "{text}");
     }
 
     #[test]
@@ -566,9 +693,11 @@ mod tests {
         assert!(text.starts_with("HTTP/1.1 200 OK\r\n"), "{text}");
         assert!(text.ends_with("OK"), "{text}");
 
-        let (log, problems) = mock.take_log(true);
-        assert!(problems.is_empty(), "{problems:?}");
-        assert!(log.contains("#1 eddn POST /upload/"), "{log}");
-        assert!(log.ends_with(".3\nabc\n"), "{log}");
+        let observed = mock.observe(true);
+        assert!(observed.problems.is_empty(), "{:?}", observed.problems);
+        assert!(observed.wire.contains("#1 eddn POST /upload/"), "{}", observed.wire);
+        assert!(observed.wire.ends_with(".3\nabc\n"), "{}", observed.wire);
+        assert_eq!(observed.arrivals.len(), 1);
+        assert_eq!(observed.arrivals[0].profile, Profile::Eddn);
     }
 }

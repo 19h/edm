@@ -15,6 +15,11 @@
 //! * the EDDN message timestamp, which `preload.ts` freezes on the Bun side and
 //!   nothing freezes on the Rust side — its *shape* is still checked;
 //! * injected request headers, per **[C19]** and **[C20]**, in `mock.rs`.
+//!
+//! One command has no oracle. `route` does not exist in the TypeScript **[C25]**,
+//! so a `route` scenario declares `oracle = "none"` and is diffed against
+//! committed goldens instead — a strictly weaker test, which is why
+//! `scenario::validate` refuses that declaration on any other command.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -25,8 +30,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
-use crate::mock::Mock;
-use crate::scenario::{Order, Profile, Scenario};
+use crate::mock::{self, Mock};
+use crate::scenario::{Oracle, Order, Profile, Scenario};
 
 /// The credentials both sides run with.
 ///
@@ -60,6 +65,9 @@ fn stamp() -> Vec<(&'static str, String)> {
 /// The instant `preload.ts` freezes `Date` at: 2023-11-14T22:13:20.000Z, the
 /// same moment as `F_TIME`.
 const FROZEN_NOW_MS: &str = "1700000000000";
+
+/// The two sides of the differential diff, as they are named in a report.
+const DIFFERENTIAL: [&str; 2] = ["bun", "rust"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Suite {
@@ -110,9 +118,15 @@ pub(crate) fn run(options: &Options) -> Result<()> {
         return Ok(());
     }
 
-    let bun = which("bun").context(
-        "`bun` is not on PATH — the parity harness has nothing to measure against without it",
-    )?;
+    // A golden-only selection (`--filter route`) has nothing to ask Bun, so it
+    // must not require Bun to be installed.
+    let bun = if selected.iter().any(|scenario| scenario.oracle == Oracle::Bun) {
+        Some(which("bun").context(
+            "`bun` is not on PATH — the parity harness has nothing to measure against without it",
+        )?)
+    } else {
+        None
+    };
     let binary = build_rust_binary(&root)?;
     let mock = if selected.iter().any(|scenario| scenario.network) {
         Some(Mock::start()?)
@@ -131,7 +145,8 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     let mut passes = 0usize;
     for scenario in &selected {
         let started = Instant::now();
-        let mut report = compare(scenario, &root, &work, &bun, &binary, mock.as_ref(), &base)?;
+        let mut report =
+            compare(scenario, &root, &work, bun.as_deref(), &binary, mock.as_ref(), &base)?;
         // A registered divergence is asserted, not ignored: the row in
         // PORTING.md claims the two sides differ here, and a row that has
         // quietly become true again is a row that should be deleted.
@@ -173,73 +188,65 @@ fn compare(
     scenario: &Scenario,
     root: &Path,
     work: &Path,
-    bun: &Path,
+    bun: Option<&Path>,
     binary: &Path,
     mock: Option<&Mock>,
     base: &str,
 ) -> Result<Vec<String>> {
     let ordered_wire = scenario.in_flight == 1 && scenario.order == Order::Ordered;
+    let dir = work.join(&scenario.name);
 
     let mut problems = Vec::new();
-    if let Some(mock) = mock {
-        mock.load(scenario);
-    }
-    let mut bun_command = Command::new(bun);
-    bun_command
-        .arg("--preload")
-        .arg(root.join("xtask").join("oracle").join("preload.ts"))
-        .arg(root.join("market-request.ts"));
-    let bun_side =
-        execute(scenario, root, &work.join(&scenario.name).join("bun"), bun_command, |command| {
-            // The original `import()`s this module at run time (C1). Lossy,
-            // like every other environment read in this program. **[R55]**
-            let ardent = std::env::var_os("ARDENT_MODULE")
-                .map_or_else(
-                    || "/models/dev/edtrade/src/ardent.ts".to_owned(),
-                    |value| value.to_string_lossy().into_owned(),
-                );
-            command
-                .env("EDM_MOCK_BASE", base)
-                .env("EDM_MOCK_NOW", FROZEN_NOW_MS)
-                .env("ARDENT_MODULE", ardent);
-        })?;
-    let (bun_wire, bun_problems) =
-        mock.map_or_else(|| (String::new(), Vec::new()), |mock| mock.take_log(ordered_wire));
-    problems.extend(bun_problems.into_iter().map(|note| format!("mock (bun): {note}")));
+    let bun_side = match scenario.oracle {
+        Oracle::Bun => {
+            let bun = bun.context("this scenario has an oracle but bun was never located")?;
+            let (side, notes) = ask_the_oracle(scenario, root, &dir, bun, mock, base, ordered_wire)?;
+            problems.extend(notes);
+            Some(side)
+        }
+        // Nothing to ask: `route` is not a command the TypeScript has. The
+        // goldens below carry what would otherwise be Bun's half of the diff.
+        Oracle::None => None,
+    };
 
     if let Some(mock) = mock {
         mock.load(scenario);
     }
     let rust_side =
-        execute(scenario, root, &work.join(&scenario.name).join("rust"), Command::new(binary), |command| {
+        execute(scenario, root, &dir.join("rust"), Command::new(binary), |command| {
             command
                 .env("EDM_ORIGIN_OVERRIDE", base)
                 .env("EDM_ARDENT_BASE", format!("{base}/v2"))
                 .env("EDM_EDDN_URL", format!("{base}/upload/"));
         })?;
-    let (rust_wire, rust_problems) =
-        mock.map_or_else(|| (String::new(), Vec::new()), |mock| mock.take_log(ordered_wire));
-    problems.extend(rust_problems.into_iter().map(|note| format!("mock (rust): {note}")));
+    let rust_observed = observe(mock, ordered_wire, &dir.join("rust"))?;
+    problems.extend(rust_observed.problems.into_iter().map(|note| format!("mock (rust): {note}")));
+    // Asserted on the Rust side alone, and deliberately: pacing is C27, a
+    // divergence. The original has no pacer at all, so requiring a minimum gap
+    // of Bun would be asserting the opposite of what the register records.
+    problems.extend(check_timing(
+        scenario.expect_frontier_requests,
+        scenario.expect_min_gap_ms,
+        &rust_observed.arrivals,
+    ));
 
     if !scenario.network && mock.is_some_and(|mock| mock.request_count() > 0) {
         problems.push("declared `network = false` but a request reached the mock".to_owned());
     }
 
-    // Kept on disk beside the captured streams: when a wire diff fires, the
-    // thing a human needs is both logs side by side.
-    let dir = work.join(&scenario.name);
-    std::fs::write(dir.join("bun").join("wire.txt"), &bun_wire)?;
-    std::fs::write(dir.join("rust").join("wire.txt"), &rust_wire)?;
-
-    let bun_side = Capture { wire: bun_wire, ..bun_side };
-    let rust_side = Capture { wire: rust_wire, ..rust_side };
+    let rust_side = Capture { wire: rust_observed.wire, ..rust_side };
 
     let mut report = problems;
-    if bun_side.timed_out {
-        report.push(format!("bun hit the {} s wall-clock limit", scenario.wall_clock_limit));
-    }
     if rust_side.timed_out {
         report.push(format!("rust hit the {} s wall-clock limit", scenario.wall_clock_limit));
+    }
+
+    let Some(bun_side) = bun_side else {
+        report.extend(against_goldens(scenario, root, &rust_side, base)?);
+        return Ok(report);
+    };
+    if bun_side.timed_out {
+        report.push(format!("bun hit the {} s wall-clock limit", scenario.wall_clock_limit));
     }
 
     if scenario.record_r86 {
@@ -256,16 +263,16 @@ fn compare(
         normalise_side_dir(&canonicalise(&rust_side.stdout, base), &rust_side.dir);
     let rust_stderr =
         normalise_side_dir(&canonicalise(&rust_side.stderr, base), &rust_side.dir);
-    if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, multiset) {
+    if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, DIFFERENTIAL, multiset) {
         report.push(diff);
     }
-    if let Some(diff) = compare_stream("stderr", &bun_stderr, &rust_stderr, multiset) {
+    if let Some(diff) = compare_stream("stderr", &bun_stderr, &rust_stderr, DIFFERENTIAL, multiset) {
         report.push(diff);
     }
     match (&bun_side.dump, &rust_side.dump) {
         (Some(left), Some(right)) => {
             let right = canonicalise(right, base);
-            if let Some(diff) = compare_stream("dump", left, &right, false) {
+            if let Some(diff) = compare_stream("dump", left, &right, DIFFERENTIAL, false) {
                 report.push(diff);
             }
         }
@@ -281,10 +288,213 @@ fn compare(
         rust_side.wire.as_bytes(),
         base,
     )));
-    if let Some(diff) = compare_stream("wire", bun_wire.as_bytes(), rust_wire.as_bytes(), multiset) {
+    let wire = compare_stream(
+        "wire",
+        bun_wire.as_bytes(),
+        rust_wire.as_bytes(),
+        DIFFERENTIAL,
+        multiset,
+    );
+    if let Some(diff) = wire {
         report.push(diff);
     }
     Ok(report)
+}
+
+/// Runs the TypeScript under Bun and drains the mock into the Bun artefacts.
+fn ask_the_oracle(
+    scenario: &Scenario,
+    root: &Path,
+    dir: &Path,
+    bun: &Path,
+    mock: Option<&Mock>,
+    base: &str,
+    ordered_wire: bool,
+) -> Result<(Capture, Vec<String>)> {
+    if let Some(mock) = mock {
+        mock.load(scenario);
+    }
+    let mut command = Command::new(bun);
+    command
+        .arg("--preload")
+        .arg(root.join("xtask").join("oracle").join("preload.ts"))
+        .arg(root.join("market-request.ts"));
+    let side = execute(scenario, root, &dir.join("bun"), command, |command| {
+        // The original `import()`s this module at run time (C1). Lossy, like
+        // every other environment read in this program. **[R55]**
+        let ardent = std::env::var_os("ARDENT_MODULE").map_or_else(
+            || "/models/dev/edtrade/src/ardent.ts".to_owned(),
+            |value| value.to_string_lossy().into_owned(),
+        );
+        command
+            .env("EDM_MOCK_BASE", base)
+            .env("EDM_MOCK_NOW", FROZEN_NOW_MS)
+            .env("ARDENT_MODULE", ardent);
+    })?;
+    let observed = observe(mock, ordered_wire, &dir.join("bun"))?;
+    let notes = observed.problems.into_iter().map(|note| format!("mock (bun): {note}")).collect();
+    Ok((Capture { wire: observed.wire, ..side }, notes))
+}
+
+/// Drains the mock into this side's artefacts.
+///
+/// Both files are kept on disk beside the captured streams: when a wire diff
+/// fires, the thing a human needs is the two logs side by side, and when a
+/// pacing assertion fires it is the arrival instants.
+fn observe(mock: Option<&Mock>, ordered: bool, dir: &Path) -> Result<mock::Observed> {
+    let observed = mock.map_or_else(mock::Observed::default, |mock| mock.observe(ordered));
+    std::fs::write(dir.join("wire.txt"), &observed.wire)?;
+    std::fs::write(dir.join("timing.txt"), mock::format_timing(&observed.arrivals))?;
+    Ok(observed)
+}
+
+/// The two assertions the wire log cannot make.
+///
+/// It records *what* was sent, and nothing in it distinguishes four requests
+/// spread over a second from four sent at once, nor an empty log produced by a
+/// spend gate that refused from one produced by a scenario that quietly stopped
+/// reaching the gate at all.
+fn check_timing(
+    expect_requests: Option<usize>,
+    expect_gap_ms: Option<u64>,
+    arrivals: &[mock::Arrival],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let seen = mock::frontier_count(arrivals);
+    if let Some(expected) = expect_requests
+        && seen != expected
+    {
+        out.push(format!(
+            "expected exactly {expected} Companion API request(s); the rust side made {seen}"
+        ));
+    }
+    if let Some(floor) = expect_gap_ms {
+        match mock::min_frontier_gap(arrivals) {
+            Some(gap) if gap < u128::from(floor) => out.push(format!(
+                "expected at least {floor} ms between Companion API requests; the \
+                 closest pair arrived {gap} ms apart"
+            )),
+            Some(_) => {}
+            // A pacing assertion that passes because nothing was sent is the
+            // failure mode this whole key exists to avoid.
+            None => out.push(format!(
+                "`expect-min-gap-ms = {floor}` has no gap to measure: {seen} Companion \
+                 API request(s) arrived"
+            )),
+        }
+    }
+    out
+}
+
+/// Diffs the Rust side against the committed goldens, for the one command with
+/// no oracle \[C25\].
+///
+/// The streams get exactly the normalisation the differential path applies to
+/// this side, so a golden survives a change of ephemeral port and of working
+/// directory. The wire log is written for inspection but not compared:
+/// `expect-frontier-requests` is what makes a route scenario's request count
+/// assertable, and it says so as a number rather than as a blob.
+fn against_goldens(
+    scenario: &Scenario,
+    root: &Path,
+    rust: &Capture,
+    base: &str,
+) -> Result<Vec<String>> {
+    let dir = golden_dir(root, &scenario.name);
+    if !dir.join("exit").exists() {
+        return Ok(vec![format!(
+            "no goldens under {} — run `cargo xtask bless --golden`",
+            dir.display()
+        )]);
+    }
+    let mut report = Vec::new();
+    for (label, actual) in golden_streams(rust, base) {
+        let expected = std::fs::read(dir.join(label))
+            .with_context(|| format!("reading the {label} golden"))?;
+        if let Some(diff) = compare_stream(label, &expected, &actual, ["golden", "rust"], false)
+        {
+            report.push(diff);
+        }
+    }
+    let expected = std::fs::read_to_string(dir.join("exit"))?;
+    let expected: i32 = expected
+        .trim_matches(|c: char| c.is_ascii_whitespace())
+        .parse()
+        .context("the `exit` golden is not an integer")?;
+    if expected != rust.code {
+        report.push(format!("exit code (golden): expected {expected}, got {}", rust.code));
+    }
+    if !report.is_empty() {
+        report.push("re-bless with `cargo xtask bless --golden` if this is intended".to_owned());
+    }
+    Ok(report)
+}
+
+/// Records what the Rust side does now as the goldens for every scenario that
+/// has no oracle.
+///
+/// The engine check that guards this lives in [`crate::bless`]; by the time
+/// this runs, the decision to overwrite has been taken.
+pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
+    let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
+    let selected: Vec<&Scenario> =
+        scenarios.iter().filter(|scenario| scenario.oracle == Oracle::None).collect();
+    if selected.is_empty() {
+        bail!("no scenario declares `oracle = \"none\"`, so there is nothing to bless");
+    }
+
+    let binary = build_rust_binary(root)?;
+    let mock = selected.iter().any(|scenario| scenario.network).then(Mock::start).transpose()?;
+    let base = mock.as_ref().map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
+    let work = root.join("target").join("xtask-golden");
+    let _ = std::fs::remove_dir_all(&work);
+
+    let mut written = Vec::with_capacity(selected.len());
+    for scenario in selected {
+        if let Some(mock) = &mock {
+            mock.load(scenario);
+        }
+        let dir = work.join(&scenario.name);
+        let capture = execute(scenario, root, &dir, Command::new(&binary), |command| {
+            command
+                .env("EDM_ORIGIN_OVERRIDE", &base)
+                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
+                .env("EDM_EDDN_URL", format!("{base}/upload/"));
+        })?;
+        // A killed process has no output worth committing, and a golden made
+        // from one would turn a hang into a green.
+        if capture.timed_out {
+            bail!(
+                "{} hit the {} s wall-clock limit; refusing to bless a killed run",
+                scenario.name,
+                scenario.wall_clock_limit
+            );
+        }
+        let ordered = scenario.in_flight == 1 && scenario.order == Order::Ordered;
+        let _ = observe(mock.as_ref(), ordered, &dir)?;
+
+        let out = golden_dir(root, &scenario.name);
+        std::fs::create_dir_all(&out)?;
+        for (label, bytes) in golden_streams(&capture, &base) {
+            std::fs::write(out.join(label), bytes)?;
+        }
+        std::fs::write(out.join("exit"), format!("{}\n", capture.code))?;
+        written.push(scenario.name.clone());
+    }
+    Ok(written)
+}
+
+/// The streams a golden holds, normalised the way the differential path
+/// normalises this side.
+fn golden_streams(rust: &Capture, base: &str) -> [(&'static str, Vec<u8>); 2] {
+    [
+        ("stdout", normalise_side_dir(&canonicalise(&rust.stdout, base), &rust.dir)),
+        ("stderr", normalise_side_dir(&canonicalise(&rust.stderr, base), &rust.dir)),
+    ]
+}
+
+fn golden_dir(root: &Path, name: &str) -> PathBuf {
+    root.join("xtask").join("scenarios").join("golden").join(name)
 }
 
 /// Spawns one side, with the environment scrubbed down to what the scenario
@@ -427,7 +637,20 @@ fn is_iso_instant(value: &str) -> bool {
         })
 }
 
-fn compare_stream(label: &str, left: &[u8], right: &[u8], multiset: bool) -> Option<String> {
+/// Diffs two streams, naming which side each line came from.
+///
+/// `sides` is a parameter rather than a constant because the left-hand side is
+/// not always Bun: a scenario with no oracle reads it off disk, and a report
+/// that called a golden `bun` would send its reader looking for a Bun run that
+/// never happened.
+fn compare_stream(
+    label: &str,
+    left: &[u8],
+    right: &[u8],
+    sides: [&str; 2],
+    multiset: bool,
+) -> Option<String> {
+    let width = sides[0].len().max(sides[1].len());
     if multiset {
         let bag = |bytes: &[u8]| -> Vec<String> {
             let mut lines: Vec<String> =
@@ -443,10 +666,10 @@ fn compare_stream(label: &str, left: &[u8], right: &[u8], multiset: bool) -> Opt
         let only_right: BTreeSet<&String> = right.iter().filter(|l| !left.contains(l)).collect();
         let mut out = format!("{label} (as a multiset) differs:");
         for line in only_left.iter().take(6) {
-            let _ = write!(out, "\n    bun  only: {line}");
+            let _ = write!(out, "\n    {:<width$} only: {line}", sides[0]);
         }
         for line in only_right.iter().take(6) {
-            let _ = write!(out, "\n    rust only: {line}");
+            let _ = write!(out, "\n    {:<width$} only: {line}", sides[1]);
         }
         return Some(out);
     }
@@ -472,8 +695,15 @@ fn compare_stream(label: &str, left: &[u8], right: &[u8], multiset: bool) -> Opt
         match (left_lines.get(index), right_lines.get(index)) {
             (None, None) => break,
             (left, right) => {
-                let _ = write!(out, "\n    bun  {}| {}", index + 1, left.unwrap_or(&"<eof>"));
-                let _ = write!(out, "\n    rust {}| {}", index + 1, right.unwrap_or(&"<eof>"));
+                let number = index + 1;
+                let _ =
+                    write!(out, "\n    {:<width$} {number}| {}", sides[0], left.unwrap_or(&"<eof>"));
+                let _ = write!(
+                    out,
+                    "\n    {:<width$} {number}| {}",
+                    sides[1],
+                    right.unwrap_or(&"<eof>")
+                );
             }
         }
     }
@@ -583,14 +813,42 @@ mod tests {
 
     #[test]
     fn an_ordered_diff_names_the_first_differing_line() {
-        let report = compare_stream("stdout", b"a\nb\nc\n", b"a\nB\nc\n", false).unwrap();
+        let report =
+            compare_stream("stdout", b"a\nb\nc\n", b"a\nB\nc\n", DIFFERENTIAL, false).unwrap();
         assert!(report.starts_with("stdout differs at line 2"), "{report}");
     }
 
     #[test]
     fn a_multiset_diff_ignores_order_but_not_content() {
-        assert!(compare_stream("stdout", b"a\nb\n", b"b\na\n", true).is_none());
-        assert!(compare_stream("stdout", b"a\nb\n", b"b\nc\n", true).is_some());
+        assert!(compare_stream("stdout", b"a\nb\n", b"b\na\n", DIFFERENTIAL, true).is_none());
+        assert!(compare_stream("stdout", b"a\nb\n", b"b\nc\n", DIFFERENTIAL, true).is_some());
+    }
+
+    fn arrivals(millis: &[u128]) -> Vec<mock::Arrival> {
+        millis
+            .iter()
+            .map(|millis| mock::Arrival { profile: Profile::Frontier, millis: *millis })
+            .collect()
+    }
+
+    #[test]
+    fn an_exact_request_count_reports_both_directions() {
+        assert!(check_timing(Some(0), None, &[]).is_empty());
+        let too_many = check_timing(Some(0), None, &arrivals(&[3])).remove(0);
+        assert!(too_many.contains("exactly 0"), "{too_many}");
+        let too_few = check_timing(Some(2), None, &arrivals(&[3])).remove(0);
+        assert!(too_few.contains("made 1"), "{too_few}");
+    }
+
+    #[test]
+    fn a_pacing_assertion_with_nothing_to_measure_fails() {
+        // The failure this key exists to prevent: a scenario that stops sending
+        // anything at all would otherwise satisfy every minimum gap there is.
+        let empty = check_timing(None, Some(250), &[]).remove(0);
+        assert!(empty.contains("no gap to measure"), "{empty}");
+        assert!(check_timing(None, Some(250), &arrivals(&[0, 250, 600])).is_empty());
+        let tight = check_timing(None, Some(250), &arrivals(&[0, 249])).remove(0);
+        assert!(tight.contains("249 ms apart"), "{tight}");
     }
 
     #[test]

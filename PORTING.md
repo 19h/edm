@@ -20,7 +20,7 @@ so renumbering them is a breaking change to the test suite.
 | 6 | `edm_core::domain` | done — including the batch state machine |
 | 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
 | 11-12 | sweep and commands | sweep done; command entry points pending |
-| 13 | `cargo xtask parity` | **green — 65 of 65 scenarios byte-identical** |
+| 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 2 `route` scenarios diffed against goldens (C25)** |
 
 ## Known gaps
 
