@@ -248,6 +248,23 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     };
     let trace = |event: &views::PaceEvent<'_>| out.line(&views::pace_line(event));
 
+    // `--eddn` relays each market as it is polled, never from the cache: a
+    // cached listing was read earlier, and republishing it would stamp that old
+    // reading with the current time.
+    let eddn_options = config
+        .eddn
+        .then(|| edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials))
+        .transpose()
+        .map_err(|error| error.message().to_owned())?;
+    let relayed_log = crate::route::relay::Relayed::new(cache.root(), config.eddn_max_age_minutes);
+    let eddn = eddn_options.as_ref().map(|options| acquire::Eddn {
+        options,
+        url: &app.overrides.eddn_url,
+        relayed: &relayed_log,
+        stations: &selection.keep,
+    });
+    let relay_tally = std::cell::RefCell::new(crate::route::relay::Tally::default());
+
     let sweep_cx = acquire::Cx {
         http: app.http,
         clock: &app.ports.clock,
@@ -264,6 +281,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         frontier_time_override: stamp_overrides.frontier_time,
         request_time_override: stamp_overrides.request_time,
         cache: &cache,
+        relayed: &relay_tally,
+        eddn: eddn.as_ref(),
         workers: config.workers as usize,
         quiet: config.json,
         verify_systems: config.verify_systems,
@@ -284,6 +303,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         acquired: &acquired,
         enumeration: &enumeration,
         spent: pacer.spent(),
+        eddn: config.eddn,
         priced: ingest::priced(&acquired.listings),
         breaker_tripped: pacer.tripped().is_some(),
         elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
@@ -389,6 +409,9 @@ struct Measured<'a> {
     acquired: &'a acquire::Acquired,
     enumeration: &'a discover::Enumeration,
     spent: crate::route::pacer::Spent,
+    /// Whether this run was relaying at all, which is what decides between "0
+    /// relayed" and no row.
+    eddn: bool,
     /// Counted before ingest consumes the listings.
     priced: usize,
     breaker_tripped: bool,
@@ -408,6 +431,13 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         // were attempted — which is what they are.
         markets_failed: m.acquired.unreached.len() + m.acquired.tally.markets_out_of_time,
         markets_absent: m.acquired.tally.markets_absent,
+        eddn: m.eddn.then_some(edm_core::render::views::EddnCoverage {
+            sent: m.acquired.relayed.sent,
+            failed: m.acquired.relayed.failed,
+            recent: m.acquired.relayed.recent,
+            cached: m.acquired.relayed.cached,
+            unnamed: m.acquired.relayed.unnamed,
+        }),
         cache_hits: m.acquired.cache.fresh,
         requests_sent: m.spent.requests,
         throttled: m.spent.throttled,

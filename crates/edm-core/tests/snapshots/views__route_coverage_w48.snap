@@ -3,20 +3,21 @@ source: crates/edm-core/tests/views.rs
 expression: "emit(blocks, width)"
 ---
 == ROUTE COVERAGE ==============================
-+----------------------+----------------+
-| Field                | Value          |
-+======================+================+
-| systems read         | 116 of 118     |
-| markets polled       | 151 of 157     |
-| markets priced       | 149            |
-| systems failed       | 2              |
-| no market at station | 3 (HTTP 410)   |
-| markets failed       | 6              |
-| from cache           | 22             |
-| requests sent        | 267            |
-| throttled            | 3 (429 or 503) |
-| elapsed              | 71s            |
-+----------------------+----------------+
++----------------------+-----------------------+
+| Field                | Value                 |
++======================+=======================+
+| systems read         | 116 of 118            |
+| markets polled       | 151 of 157            |
+| markets priced       | 149                   |
+| systems failed       | 2                     |
+| no market at station | 3 (HTTP 410)          |
+| markets failed       | 6                     |
+| from cache           | 22                    |
+| relayed to EDDN      | 140   (held back: 6 ~ |
+| requests sent        | 267                   |
+| throttled            | 3 (429 or 503)        |
+| elapsed              | 71s                   |
++----------------------+-----------------------+
    22 of 149 prices came from the cache rather
    than this run; --refresh re-reads them
    3 stations have no commodity market right now

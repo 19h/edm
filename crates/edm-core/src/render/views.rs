@@ -897,6 +897,29 @@ pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
     if coverage.cache_hits > 0 {
         rows.push(field_row("from cache", int(coverage.cache_hits as f64)));
     }
+    if let Some(eddn) = coverage.eddn {
+        let mut held = Vec::new();
+        if eddn.recent > 0 {
+            held.push(format!("{} relayed recently", int(eddn.recent as f64)));
+        }
+        if eddn.cached > 0 {
+            held.push(format!("{} from cache", int(eddn.cached as f64)));
+        }
+        if eddn.unnamed > 0 {
+            held.push(format!("{} unnamed", int(eddn.unnamed as f64)));
+        }
+        if eddn.failed > 0 {
+            held.push(format!("{} rejected", int(eddn.failed as f64)));
+        }
+        rows.push(field_row(
+            "relayed to EDDN",
+            if held.is_empty() {
+                int(eddn.sent as f64)
+            } else {
+                format!("{}   (held back: {})", int(eddn.sent as f64), held.join(", "))
+            },
+        ));
+    }
     rows.push(field_row("requests sent", int(coverage.requests_sent as f64)));
     if coverage.throttled > 0 {
         rows.push(field_row("throttled", format!("{} (429 or 503)", int(coverage.throttled as f64))));
@@ -913,6 +936,26 @@ pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
         blocks.push(Block::Note(note));
     }
     blocks
+}
+
+/// What a run relayed to EDDN, and what it did not.
+///
+/// Reported because relaying is an outward-facing side effect on a shared
+/// service: a run that publishes to a firehose other people consume should say
+/// how much it published, and a suppression nobody sees is indistinguishable
+/// from a relay that silently failed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EddnCoverage {
+    pub sent: usize,
+    pub failed: usize,
+    /// Held back because this machine relayed the same market recently.
+    pub recent: usize,
+    /// Held back because the listing came from the price cache, so there was
+    /// nothing new to say.
+    pub cached: usize,
+    /// Held back because the station could not be named, and EDDN's schema
+    /// requires a system and a station name.
+    pub unnamed: usize,
 }
 
 /// `1 market` / `2 markets`, with the verb to match.
@@ -940,6 +983,8 @@ pub struct RouteCoverage {
     /// A live radius-100 sweep found 40 of 5,089, and reporting them as failures
     /// told the user forty markets had been missed when every one had answered.
     pub markets_absent: usize,
+    /// Listings relayed to EDDN this run, and what was held back.
+    pub eddn: Option<EddnCoverage>,
     pub cache_hits: usize,
     pub requests_sent: usize,
     pub throttled: usize,

@@ -725,6 +725,13 @@ fn sample_coverage() -> views::RouteCoverage {
         markets_priced: 149,
         markets_failed: 6,
         markets_absent: 3,
+        eddn: Some(views::EddnCoverage {
+            sent: 140,
+            failed: 1,
+            recent: 6,
+            cached: 22,
+            unnamed: 0,
+        }),
         cache_hits: 22,
         requests_sent: 267,
         throttled: 3,

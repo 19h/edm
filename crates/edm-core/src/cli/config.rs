@@ -980,6 +980,11 @@ pub struct RouteConfig {
     /// `--include-illegal`. See [`edm_route`'s `RowFloors::allow_illegal`]: a
     /// market that calls a commodity illegal refuses the trade at the counter.
     pub include_illegal: bool,
+    /// `--eddn` / `--eddn-test`: relay every market this run polls live.
+    pub eddn: bool,
+    /// `--eddn-max-age`, in minutes: how long a market stays suppressed after
+    /// this machine relayed it.
+    pub eddn_max_age_minutes: f64,
 
     // Spending.
     /// Workers behind the pacer.
@@ -1043,6 +1048,15 @@ pub const DEFAULT_MAX_AGE_MINUTES: f64 = 30.0;
 pub const DEFAULT_RPS: f64 = 4.0;
 /// An hour. Long enough for a thousand markets at four a second with room for
 /// retries, and short enough that a run nobody is watching ends.
+/// How long a market stays suppressed after this machine relayed it.
+///
+/// EDDN is a shared firehose that other people's tools consume, and a second
+/// copy of an unchanged listing carries a *newer* timestamp — so it looks like
+/// fresh confirmation of a price nobody re-read. Half an hour is the same order
+/// as the price cache's own default, which is what makes the two agree: a run
+/// inside that window mostly reads from cache and so has nothing to relay
+/// anyway.
+pub const DEFAULT_EDDN_MAX_AGE_MINUTES: f64 = 30.0;
 pub const DEFAULT_DEADLINE_SECONDS: f64 = 3_600.0;
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
@@ -1142,6 +1156,10 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         detail: cli.switch_value(Flag::Detail, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
         include_illegal: cli.switch_value(Flag::IncludeIllegal, false)?,
+        eddn: wants_eddn(cli)?,
+        eddn_max_age_minutes: cli
+            .optional_decimal(Flag::EddnMaxAge)?
+            .unwrap_or(DEFAULT_EDDN_MAX_AGE_MINUTES),
         quiet: cli.switch_value(Flag::Json, false)?,
     })
 }

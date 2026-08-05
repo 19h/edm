@@ -1,0 +1,78 @@
+# route-eddn-suppresses-a-repeat
+why = "The rule that keeps a shared firehose clean. The first run relays two markets; the second finds them in the price cache and relays neither, because a cached listing was read at some earlier instant and republishing it would stamp that old reading with the current time — worse than the duplicate the suppression window exists to prevent. `run-twice` diffs only the second run, and the mock proves it on the wire: two /upload/ replies are scripted and the second run consumes none of them."
+argv = ["route", "Sol", "--radius", "10", "--rps", "8", "--concurrency", "1", "--cargo", "784", "--eddn-test"]
+oracle = "none"
+run-twice = true
+expect-frontier-requests = 0
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/nearby"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-nearby-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Alpha%20Centauri/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Barnard's%20Star/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+# Both surviving starports answer with a listing.
+[[route]]
+path = "/2.0/elite/market/list"
+
+# Two replies, for the first run. The second is supposed to need none, and the
+# request counter over that run alone is what says so.
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-source.json"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-sink.json"
+
+# EDDN accepts both of the first run's markets. The second run must consume
+# neither, which is what leaves them unused.
+[[route]]
+path = "/upload/"
+
+[[route.reply]]
+status = 200
+payload = "OK"
+
+[[route.reply]]
+status = 200
+payload = "OK"

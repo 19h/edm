@@ -78,6 +78,15 @@ Spending
   --fast-estimate          skip the free pre-count and extrapolate instead
   --dry-run                print the plan and stop
 
+Sharing what it reads
+  --eddn                   relay every market this run polls to EDDN, as it is
+                           polled. --eddn-test uses the gateway's test schema
+  --eddn-max-age <m>       suppress a repeat relay of the same market for this
+                           long, default {eddn_age}. A listing served from the
+                           local price cache is never relayed at any age: it was
+                           read earlier, and republishing it would stamp that old
+                           reading with the current time
+
 Output
   One line per market as it lands, unless --json. The sweep is minutes long on a
   wide radius, and silence is indistinguishable from a stall. The search after
@@ -108,6 +117,7 @@ Examples
         rps = n(config::DEFAULT_RPS),
         deadline = n(config::DEFAULT_DEADLINE_SECONDS),
         max_age = n(config::DEFAULT_MAX_AGE_MINUTES),
+        eddn_age = n(config::DEFAULT_EDDN_MAX_AGE_MINUTES),
         ardent = n(config::DEFAULT_ARDENT_QUERIES),
     )
 }

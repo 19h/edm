@@ -20,3 +20,4 @@ pub mod ingest;
 pub mod pacer;
 pub mod plan;
 pub mod pool;
+pub mod relay;

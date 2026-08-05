@@ -24,6 +24,7 @@ use crate::net::HttpTransport;
 use crate::out::Out;
 use crate::ports::{Clock, Entropy, Fs, Timer};
 use crate::route::cache::{Cache, Hits};
+use crate::route::relay::{self, Relayed};
 use crate::route::pacer::Pacer;
 use crate::route::pool::{self, Abandoned, Job, Outcome, Pool};
 use crate::sweep::next_stamp;
@@ -57,6 +58,23 @@ impl Listing {
     }
 }
 
+/// Everything the EDDN relay needs.
+pub struct Eddn<'a> {
+    pub options: &'a edm_core::domain::eddn::EddnOptions,
+    pub url: &'a str,
+    /// What this machine has already relayed, and when.
+    pub relayed: &'a Relayed,
+    /// The stations Ardent named, for the system and station names EDDN's
+    /// schema requires and the market payload does not carry.
+    pub stations: &'a [ArdentStation],
+}
+
+impl std::fmt::Debug for Eddn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Eddn").field("url", &self.url).finish_non_exhaustive()
+    }
+}
+
 /// What a sweep reached, and what it did not.
 #[derive(Debug, Default)]
 pub struct Acquired {
@@ -65,6 +83,7 @@ pub struct Acquired {
     pub unreached: Vec<Abandoned>,
     pub cache: Hits,
     pub tally: pool::Tally,
+    pub relayed: relay::Tally,
 }
 
 /// Everything the sweep needs that it cannot decide for itself.
@@ -87,6 +106,8 @@ pub struct Cx<'a, H, C, E, F> {
     pub frontier_time_override: Option<f64>,
     pub request_time_override: Option<u32>,
     pub cache: &'a Cache,
+    /// Counters the relay writes as it goes.
+    pub relayed: &'a RefCell<relay::Tally>,
     pub workers: usize,
     pub quiet: bool,
     /// One line per market as it lands. `None` under `--json`.
@@ -106,6 +127,8 @@ pub struct Cx<'a, H, C, E, F> {
     pub verify_systems: bool,
     /// The language the `starsystem` read asks for, when it happens at all.
     pub language: &'a str,
+    /// Set by `--eddn` / `--eddn-test`: relay every market polled live.
+    pub eddn: Option<&'a Eddn<'a>>,
 }
 
 impl<H, C, E, F> std::fmt::Debug for Cx<'_, H, C, E, F> {
@@ -185,6 +208,13 @@ where
 {
     let Prepared { cached: mut listings, mut to_poll, hits } = prepared;
 
+    // A cached listing is never relayed — it was read at some earlier instant,
+    // and republishing it would stamp that old reading with the current time.
+    // Counted so the coverage line's numbers add up to the markets it saw.
+    if cx.eddn.is_some() {
+        cx.relayed.borrow_mut().cached += listings.len();
+    }
+
     // The cached ones first, and *said* first: a run that resolves entirely
     // from disk should still show its work, or it looks like it did nothing.
     if let Some(report) = cx.report {
@@ -241,7 +271,7 @@ where
         .await;
         let mut found = fresh.into_inner();
         found.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
-        return Acquired { listings: found, unreached, cache: hits, tally };
+        return Acquired { listings: found, unreached, cache: hits, tally, relayed: *cx.relayed.borrow() };
     }
 
     let fresh = RefCell::new(Vec::<Listing>::new());
@@ -271,7 +301,7 @@ where
     // runs over the same region rank identically.
     listings.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
 
-    Acquired { listings, unreached, cache: hits, tally }
+    Acquired { listings, unreached, cache: hits, tally, relayed: *cx.relayed.borrow() }
 }
 
 /// One `starsystem` read, whose market list becomes the pool's next stage.
@@ -409,6 +439,9 @@ where
 
     let now = cx.clock.now_ms();
     cx.cache.put(cx.fs, market_id, &document, now);
+    if let Some(eddn) = cx.eddn {
+        publish(cx, eddn, market_id, &document, now).await;
+    }
     fresh.borrow_mut().push(Listing {
         market_id,
         station_name: station.to_owned(),
@@ -425,6 +458,73 @@ where
         absent: false,
         tradable,
         follow_on: Vec::new(),
+    }
+}
+
+/// Relay one freshly-read listing to EDDN.
+///
+/// Only ever called from the live-poll path. A listing served from the price
+/// cache is **never** relayed: it was read at some earlier instant, and
+/// republishing it would stamp that old reading with the current time, which is
+/// worse than the duplicate the suppression window exists to prevent.
+async fn publish<H, C, E, F>(
+    cx: &Cx<'_, H, C, E, F>,
+    eddn: &Eddn<'_>,
+    market_id: f64,
+    document: &JsValue,
+    now_ms: f64,
+) where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+{
+    let mut tally = cx.relayed.borrow_mut();
+
+    if !eddn.relayed.may_relay(cx.fs, market_id, now_ms) {
+        tally.recent += 1;
+        return;
+    }
+    // EDDN's schema requires a system and a station name, and the market
+    // payload carries neither — they come from the Ardent row that put this
+    // market in the sweep. Without one there is nothing well-formed to send.
+    let Some(station) = eddn.stations.iter().find(|s| s.market_id == market_id) else {
+        tally.unnamed += 1;
+        return;
+    };
+    let Some(snapshot) = edm_core::domain::parse_market_snapshot(document) else {
+        tally.unnamed += 1;
+        return;
+    };
+
+    let target = edm_core::domain::eddn::EddnStation {
+        system_name: station.system_name.clone(),
+        station_name: station.station_name.clone(),
+        station_type: station.station_type.clone(),
+        economies: None,
+    };
+    // The instant of *publication*, as the ported sweep does it.
+    let timestamp = edm_core::js::time::iso8601_from_ms(now_ms).unwrap_or_default();
+    let message = edm_core::domain::eddn::build_message(
+        &target,
+        market_id,
+        &snapshot.commodities,
+        &timestamp,
+        eddn.options,
+    );
+    drop(tally);
+
+    let body = message.payload.stringify_compact();
+    let result = crate::eddn::submit(cx.http, eddn.url, body.as_bytes(), message.count).await;
+
+    let mut tally = cx.relayed.borrow_mut();
+    if result.ok {
+        tally.sent += 1;
+        // Recorded only on success, so a rejected message is retried next run
+        // rather than suppressed for half an hour.
+        eddn.relayed.record(cx.fs, market_id, now_ms);
+    } else {
+        tally.failed += 1;
     }
 }
 

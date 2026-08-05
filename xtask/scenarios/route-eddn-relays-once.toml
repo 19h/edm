@@ -1,0 +1,77 @@
+# route-eddn-relays-once
+why = "`--eddn-test` on a region sweep: every market polled live is relayed as it lands, and the coverage block says how many — relaying is an outward-facing side effect on a shared service other people's tools consume, so a run that publishes to it says how much it published. The posted bodies are on the wire, which is where R3 (integral doubles with no `.0`) is decided for these messages too."
+argv = ["route", "Sol", "--radius", "10", "--rps", "8", "--concurrency", "1", "--cargo", "784", "--eddn-test"]
+oracle = "none"
+expect-frontier-requests = 2
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/nearby"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-nearby-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Alpha%20Centauri/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Barnard's%20Star/markets"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-markets-empty.json"
+headers = [["Content-Type", "application/json"]]
+
+# Both surviving starports answer with a listing.
+[[route]]
+path = "/2.0/elite/market/list"
+
+# Two replies, for the first run. The second is supposed to need none, and the
+# request counter over that run alone is what says so.
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-source.json"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-gold-sink.json"
+
+# EDDN accepts both of the first run's markets. The second run must consume
+# neither, which is what leaves them unused.
+[[route]]
+path = "/upload/"
+
+[[route.reply]]
+status = 200
+payload = "OK"
+
+[[route.reply]]
+status = 200
+payload = "OK"

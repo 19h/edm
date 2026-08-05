@@ -79,6 +79,10 @@ pub enum Flag {
     Deadline,
     ArdentQueries,
     CacheDir,
+    /// `--eddn-max-age <minutes>`: how long to suppress a repeat relay of the
+    /// same market. A value flag, so it lives before `DryRun` — `takes_value`
+    /// is a discriminant compare against it.
+    EddnMaxAge,
 
     // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -139,7 +143,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 81] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -193,6 +197,7 @@ impl Flag {
         Self::Deadline,
         Self::ArdentQueries,
         Self::CacheDir,
+        Self::EddnMaxAge,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -279,6 +284,7 @@ impl Flag {
             "deadline" => Self::Deadline,
             "ardentqueries" => Self::ArdentQueries,
             "cachedir" => Self::CacheDir,
+            "eddnmaxage" => Self::EddnMaxAge,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -347,6 +353,7 @@ impl Flag {
             Self::Deadline => "--deadline",
             Self::ArdentQueries => "--ardent-queries",
             Self::CacheDir => "--cache-dir",
+            Self::EddnMaxAge => "--eddn-max-age",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",
