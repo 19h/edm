@@ -1,0 +1,38 @@
+why = "The Ardent resolution path: a bare name goes to /v2/system/name/{name} first (ts:2488) and only falls through to the station search when that misses. The URL is built with encodeURIComponent's unreserved set (R80), which is what the space in the name is here to show."
+argv = ["markets", "Jaques Station"]
+
+# The system lookup misses. Its rejection is the one Ardent error the original
+# swallows (R81), so the run continues to the station search.
+[[route]]
+path = "/v2/system/name/Jaques%20Station"
+
+[[route.reply]]
+status = 404
+payload = "{}"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/search/station/name/Jaques%20Station"
+
+[[route.reply]]
+status = 200
+payload = """
+[{"stationName":"Jaques Station","systemName":"Colonia","stationType":"Coriolis","maxLandingPadSize":3}]
+"""
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Colonia"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-system.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"

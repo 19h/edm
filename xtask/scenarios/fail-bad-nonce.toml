@@ -1,0 +1,13 @@
+# fail-bad-nonce
+why = "200 whose Nonce header is not twelve hex characters: the message interpolates it through JSON.stringify, so it arrives quoted (R72)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+omit-nonce = true
+headers = [["Nonce", "abc"]]

@@ -1,0 +1,4 @@
+# cli-help-beats-unknown-command
+why = "`--help` is checked before the known-command set, so an unknown command with --help still exits 0 (R48)."
+argv = ["bogus", "--help"]
+network = false

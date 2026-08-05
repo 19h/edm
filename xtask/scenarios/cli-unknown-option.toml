@@ -1,0 +1,4 @@
+# cli-unknown-option
+why = "An unrecognised option is a parse error: exit 2, blank line, USAGE on stdout."
+argv = ["market", "--nope"]
+network = false

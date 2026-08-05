@@ -1,0 +1,131 @@
+# The sweep pool under load: seven markets, three workers, one requeue ladder,
+# one hard failure, one stall.
+why = "Seven markets at --concurrency 3: one wired 500 -> 500 -> 200 to walk the requeue ladder (R84, R85), one 405 that is not transient and retires immediately, and one that never answers so the per-attempt timeout is the only thing that ends it (R69, R86)."
+argv = ["market", "Colonia", "--concurrency", "3", "--timeout", "2", "--requeue", "3"]
+
+# C21. The queue drains while three jobs are still outstanding — Charlie Hub is
+# requeued twice and Delta Ring holds a worker for four two-second attempts — so
+# the workers that come free race for the tail of the queue. The original resolves
+# that race with a 25 ms poll and this port resolves it by parking in `recv()`,
+# which is the one observable difference C21 registers. The *set* of lines is
+# still fully determined; only their interleaving is not.
+order = "multiset"
+because = "the queue empties while three jobs are outstanding, which is exactly the ordering C21 gives up"
+wall-clock-limit = 90
+
+[[route]]
+path = "/v2/system/name/Colonia"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-system.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-sweep.json"
+
+# Alpha Dock — the ordinary case.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009401&"
+
+[[route.reply]]
+status = 200
+delay-ms = 30
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+# Bravo Port — a 405 is the request being wrong, not the server being busy, so
+# isTransientStatus refuses to requeue it (ts:1580).
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009402&"
+
+[[route.reply]]
+status = 405
+delay-ms = 40
+
+# Charlie Hub — 500, 500, then 200: two requeues, and `Try` reads 3.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009403&"
+
+[[route.reply]]
+status = 500
+delay-ms = 50
+
+[[route.reply]]
+status = 500
+delay-ms = 60
+
+[[route.reply]]
+status = 200
+delay-ms = 70
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+# Delta Ring — twelve seconds against a two-second deadline, four times over.
+# Requeues share a route, so they may share a delay: two attempts at the same
+# market are never outstanding together.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009404&"
+
+[[route.reply]]
+status = 200
+delay-ms = 12000
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route.reply]]
+status = 200
+delay-ms = 12000
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route.reply]]
+status = 200
+delay-ms = 12000
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route.reply]]
+status = 200
+delay-ms = 12000
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009405&"
+
+[[route.reply]]
+status = 200
+delay-ms = 80
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009406&"
+
+[[route.reply]]
+status = 200
+delay-ms = 90
+encode = "capi"
+payload-file = "payloads/market-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009407&"
+
+[[route.reply]]
+status = 200
+delay-ms = 100
+encode = "capi"
+payload-file = "payloads/market-small.json"

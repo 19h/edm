@@ -1,0 +1,582 @@
+//! The differential runner: the same argv through both implementations, against
+//! the same mock, byte-diffed.
+//!
+//! This is the definition of done for the port. Every other test in this
+//! repository asserts that a function does what its author believed the
+//! TypeScript does; only this one asks the TypeScript.
+//!
+//! Five things are compared: stdout, stderr, the exit code, any `--dump` file,
+//! and the wire log. Nothing is normalised except three named things, each of
+//! which is a registered divergence or a harness artefact:
+//!
+//! * the mock's origin is mapped back to the production origin on the Rust
+//!   side, because the TypeScript prints `API_ORIGIN` (ts:1181) while its
+//!   `fetch` is redirected, and the Rust prints `EDM_ORIGIN_OVERRIDE` **[C24]**;
+//! * the EDDN message timestamp, which `preload.ts` freezes on the Bun side and
+//!   nothing freezes on the Rust side — its *shape* is still checked;
+//! * injected request headers, per **[C19]** and **[C20]**, in `mock.rs`.
+
+use std::collections::BTreeSet;
+use std::ffi::OsString;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail};
+
+use crate::mock::Mock;
+use crate::scenario::{Order, Profile, Scenario};
+
+/// The credentials both sides run with.
+///
+/// Built here rather than stored in a scenario file on purpose: an 80- and a
+/// 2024-character printable run committed to the tree is exactly what
+/// `cargo xtask gates` scans for, and a harness that trips its own secret gate
+/// teaches everyone to ignore it.
+fn credentials() -> Vec<(&'static str, String)> {
+    vec![
+        ("COMMANDER_ID", "1234567".to_owned()),
+        ("MACHINE_ID", "0123456789abcdef".to_owned()),
+        ("MACHINE_TOKEN", "m".repeat(80)),
+        ("AUTH_TOKEN", "a".repeat(2024)),
+    ]
+}
+
+/// The stamp, pinned through the original's own environment fallbacks so that
+/// argv stays exactly what the scenario declared.
+///
+/// With these three fixed the envelope plaintext is identical on both sides, so
+/// the sealed query is identical, so the request line is comparable byte for
+/// byte. **[R64]**
+fn stamp() -> Vec<(&'static str, String)> {
+    vec![
+        ("NONCE", "0123456789ab".to_owned()),
+        ("F_TIME", "1700000000".to_owned()),
+        ("REQUEST_TIME", "86400000".to_owned()),
+    ]
+}
+
+/// The instant `preload.ts` freezes `Date` at: 2023-11-14T22:13:20.000Z, the
+/// same moment as `F_TIME`.
+const FROZEN_NOW_MS: &str = "1700000000000";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Suite {
+    All,
+    /// Scenarios that make no requests — fast, and needs no server.
+    Cli,
+}
+
+#[derive(Debug)]
+pub(crate) struct Options {
+    pub(crate) suite: Suite,
+    pub(crate) filter: Option<String>,
+    pub(crate) list: bool,
+}
+
+#[derive(Debug)]
+struct Capture {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: i32,
+    dump: Option<Vec<u8>>,
+    wire: String,
+    timed_out: bool,
+}
+
+pub(crate) fn run(options: &Options) -> Result<()> {
+    let root = crate::repo_root()?;
+    let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
+
+    let selected: Vec<&Scenario> = scenarios
+        .iter()
+        .filter(|scenario| options.suite != Suite::Cli || !scenario.network)
+        .filter(|scenario| {
+            options.filter.as_ref().is_none_or(|needle| scenario.name.contains(needle.as_str()))
+        })
+        .collect();
+    if selected.is_empty() {
+        bail!("no scenarios matched");
+    }
+    if options.list {
+        for scenario in &selected {
+            println!("{:<34} {}", scenario.name, scenario.why);
+        }
+        return Ok(());
+    }
+
+    let bun = which("bun").context(
+        "`bun` is not on PATH — the parity harness has nothing to measure against without it",
+    )?;
+    let binary = build_rust_binary(&root)?;
+    let mock = if selected.iter().any(|scenario| scenario.network) {
+        Some(Mock::start()?)
+    } else {
+        None
+    };
+    // A port nothing is listening on: the `cli` suite must not reach a socket,
+    // and if a scenario is mis-declared the connection failure will say so.
+    let base = mock.as_ref().map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
+
+    let work = root.join("target").join("xtask-parity");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work)?;
+
+    let mut failures = Vec::new();
+    let mut passes = 0usize;
+    for scenario in &selected {
+        let started = Instant::now();
+        let mut report = compare(scenario, &root, &work, &bun, &binary, mock.as_ref(), &base)?;
+        // A registered divergence is asserted, not ignored: the row in
+        // PORTING.md claims the two sides differ here, and a row that has
+        // quietly become true again is a row that should be deleted.
+        if let Some(row) = &scenario.divergence {
+            report = if report.is_empty() {
+                vec![format!(
+                    "{row} says this scenario diverges, and the two sides now agree — \
+                     the register row is stale"
+                )]
+            } else {
+                println!("        {row} holds: {}", report.join(" / ").replace('\n', " "));
+                Vec::new()
+            };
+        }
+        let elapsed = started.elapsed().as_millis();
+        if report.is_empty() {
+            passes += 1;
+            println!("  pass  {:<34} {elapsed:>6} ms", scenario.name);
+        } else {
+            println!("  FAIL  {:<34} {elapsed:>6} ms", scenario.name);
+            failures.push((scenario.file.clone(), report));
+        }
+    }
+
+    println!();
+    for (file, report) in &failures {
+        println!("─── {} ───", file.display());
+        for line in report {
+            println!("{line}");
+        }
+        println!();
+    }
+    println!("{passes} passed, {} failed, {} total", failures.len(), selected.len());
+    if failures.is_empty() { Ok(()) } else { bail!("{} scenarios diverged", failures.len()) }
+}
+
+/// Runs one scenario on both sides and returns the differences, empty on parity.
+fn compare(
+    scenario: &Scenario,
+    root: &Path,
+    work: &Path,
+    bun: &Path,
+    binary: &Path,
+    mock: Option<&Mock>,
+    base: &str,
+) -> Result<Vec<String>> {
+    let ordered_wire = scenario.in_flight == 1 && scenario.order == Order::Ordered;
+
+    let mut problems = Vec::new();
+    if let Some(mock) = mock {
+        mock.load(scenario);
+    }
+    let mut bun_command = Command::new(bun);
+    bun_command
+        .arg("--preload")
+        .arg(root.join("xtask").join("oracle").join("preload.ts"))
+        .arg(root.join("market-request.ts"));
+    let bun_side =
+        execute(scenario, root, &work.join(&scenario.name).join("bun"), bun_command, |command| {
+            // The original `import()`s this module at run time (C1). Lossy,
+            // like every other environment read in this program. **[R55]**
+            let ardent = std::env::var_os("ARDENT_MODULE")
+                .map_or_else(
+                    || "/models/dev/edtrade/src/ardent.ts".to_owned(),
+                    |value| value.to_string_lossy().into_owned(),
+                );
+            command
+                .env("EDM_MOCK_BASE", base)
+                .env("EDM_MOCK_NOW", FROZEN_NOW_MS)
+                .env("ARDENT_MODULE", ardent);
+        })?;
+    let (bun_wire, bun_problems) =
+        mock.map_or_else(|| (String::new(), Vec::new()), |mock| mock.take_log(ordered_wire));
+    problems.extend(bun_problems.into_iter().map(|note| format!("mock (bun): {note}")));
+
+    if let Some(mock) = mock {
+        mock.load(scenario);
+    }
+    let rust_side =
+        execute(scenario, root, &work.join(&scenario.name).join("rust"), Command::new(binary), |command| {
+            command
+                .env("EDM_ORIGIN_OVERRIDE", base)
+                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
+                .env("EDM_EDDN_URL", format!("{base}/upload/"));
+        })?;
+    let (rust_wire, rust_problems) =
+        mock.map_or_else(|| (String::new(), Vec::new()), |mock| mock.take_log(ordered_wire));
+    problems.extend(rust_problems.into_iter().map(|note| format!("mock (rust): {note}")));
+
+    if !scenario.network && mock.is_some_and(|mock| mock.request_count() > 0) {
+        problems.push("declared `network = false` but a request reached the mock".to_owned());
+    }
+
+    // Kept on disk beside the captured streams: when a wire diff fires, the
+    // thing a human needs is both logs side by side.
+    let dir = work.join(&scenario.name);
+    std::fs::write(dir.join("bun").join("wire.txt"), &bun_wire)?;
+    std::fs::write(dir.join("rust").join("wire.txt"), &rust_wire)?;
+
+    let bun_side = Capture { wire: bun_wire, ..bun_side };
+    let rust_side = Capture { wire: rust_wire, ..rust_side };
+
+    let mut report = problems;
+    if bun_side.timed_out {
+        report.push(format!("bun hit the {} s wall-clock limit", scenario.wall_clock_limit));
+    }
+    if rust_side.timed_out {
+        report.push(format!("rust hit the {} s wall-clock limit", scenario.wall_clock_limit));
+    }
+
+    if scenario.record_r86 {
+        record_r86(root, &bun_side)?;
+    }
+
+    let multiset = scenario.order == Order::Multiset;
+    if bun_side.code != rust_side.code {
+        report.push(format!("exit code: bun {} vs rust {}", bun_side.code, rust_side.code));
+    }
+    let rust_stdout = canonicalise(&rust_side.stdout, base);
+    let rust_stderr = canonicalise(&rust_side.stderr, base);
+    if let Some(diff) = compare_stream("stdout", &bun_side.stdout, &rust_stdout, multiset) {
+        report.push(diff);
+    }
+    if let Some(diff) = compare_stream("stderr", &bun_side.stderr, &rust_stderr, multiset) {
+        report.push(diff);
+    }
+    match (&bun_side.dump, &rust_side.dump) {
+        (Some(left), Some(right)) => {
+            let right = canonicalise(right, base);
+            if let Some(diff) = compare_stream("dump", left, &right, false) {
+                report.push(diff);
+            }
+        }
+        (None, None) => {}
+        (left, right) => report.push(format!(
+            "dump file: bun {} vs rust {}",
+            if left.is_some() { "written" } else { "absent" },
+            if right.is_some() { "written" } else { "absent" },
+        )),
+    }
+    let bun_wire = normalise_timestamps(&bun_side.wire);
+    let rust_wire = normalise_timestamps(&String::from_utf8_lossy(&canonicalise(
+        rust_side.wire.as_bytes(),
+        base,
+    )));
+    if let Some(diff) = compare_stream("wire", bun_wire.as_bytes(), rust_wire.as_bytes(), multiset) {
+        report.push(diff);
+    }
+    Ok(report)
+}
+
+/// Spawns one side, with the environment scrubbed down to what the scenario
+/// declares.
+///
+/// `env_clear` is not caution, it is correctness: `MARKET_ID` or `AUTH_TOKEN`
+/// in the developer's shell would silently change what the program does, and
+/// **[R55]** makes the environment snapshot observable.
+fn execute(
+    scenario: &Scenario,
+    root: &Path,
+    dir: &Path,
+    mut command: Command,
+    configure: impl FnOnce(&mut Command),
+) -> Result<Capture> {
+    std::fs::create_dir_all(dir)?;
+    let dump_path = dir.join("dump.out");
+    let stdout_path = dir.join("stdout");
+    let stderr_path = dir.join("stderr");
+
+    for token in &scenario.argv {
+        let token = if token == "{dump}" { dump_path.as_os_str().to_owned() } else { OsString::from(token) };
+        command.arg(token);
+    }
+
+    command.current_dir(root).env_clear();
+    for name in ["PATH", "HOME", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command.env("COLUMNS", &scenario.columns);
+    for (name, value) in credentials().into_iter().chain(stamp()) {
+        command.env(name, value);
+    }
+    configure(&mut command);
+    for (name, value) in &scenario.env {
+        command.env(name, value);
+    }
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(std::fs::File::create(&stdout_path)?))
+        .stderr(Stdio::from(std::fs::File::create(&stderr_path)?));
+
+    let mut child = command.spawn().context("spawning a side of the comparison")?;
+    let deadline = Instant::now() + Duration::from_secs(scenario.wall_clock_limit);
+    let (code, timed_out) = loop {
+        if let Some(status) = child.try_wait()? {
+            break (status.code().unwrap_or(-1), false);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break (-1, true);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+
+    Ok(Capture {
+        stdout: std::fs::read(&stdout_path)?,
+        stderr: std::fs::read(&stderr_path)?,
+        code,
+        dump: scenario.dump.then(|| std::fs::read(&dump_path).ok()).flatten(),
+        wire: String::new(),
+        timed_out,
+    })
+}
+
+/// Maps the mock back onto the origins the production build would have used.
+///
+/// The TypeScript prints `API_ORIGIN` while fetching somewhere else, so its
+/// output already reads as production. The Rust takes its origin from the
+/// environment **[C24]** and prints what it was given. Rewriting the Rust side
+/// is a narrower change than rewriting the TypeScript's constants would be, and
+/// it is unambiguous: the three profiles occupy disjoint path prefixes.
+fn canonicalise(bytes: &[u8], base: &str) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find(base) {
+        out.push_str(&rest[..index]);
+        let tail = &rest[index + base.len()..];
+        match Profile::of_path(tail) {
+            Some(profile) => out.push_str(profile.production_origin()),
+            // Not a path we route: leave the text exactly as it was rather than
+            // inventing an origin for it.
+            None => out.push_str(base),
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
+/// Replaces a well-formed EDDN message timestamp with a placeholder.
+///
+/// `preload.ts` freezes `Date` on the Bun side; nothing freezes the Rust side's
+/// clock, because the program exposes no override for it. The *shape* is still
+/// asserted — anything that is not `YYYY-MM-DDTHH:MM:SS.mmmZ` is left in place
+/// and will diff, which keeps **[R20]** under test.
+fn normalise_timestamps(text: &str) -> String {
+    const KEY: &str = "\"timestamp\":\"";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find(KEY) {
+        out.push_str(&rest[..index + KEY.len()]);
+        rest = &rest[index + KEY.len()..];
+        let Some(end) = rest.find('"') else { break };
+        let value = &rest[..end];
+        if is_iso_instant(value) {
+            out.push_str("<TIMESTAMP>");
+        } else {
+            out.push_str(value);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_iso_instant(value: &str) -> bool {
+    let shape = b"0000-00-00T00:00:00.000Z";
+    value.len() == shape.len()
+        && value.bytes().zip(shape).all(|(byte, pattern)| match pattern {
+            b'0' => byte.is_ascii_digit(),
+            other => byte == *other,
+        })
+}
+
+fn compare_stream(label: &str, left: &[u8], right: &[u8], multiset: bool) -> Option<String> {
+    if multiset {
+        let bag = |bytes: &[u8]| -> Vec<String> {
+            let mut lines: Vec<String> =
+                String::from_utf8_lossy(bytes).lines().map(str::to_owned).collect();
+            lines.sort();
+            lines
+        };
+        let (left, right) = (bag(left), bag(right));
+        if left == right {
+            return None;
+        }
+        let only_left: BTreeSet<&String> = left.iter().filter(|l| !right.contains(l)).collect();
+        let only_right: BTreeSet<&String> = right.iter().filter(|l| !left.contains(l)).collect();
+        let mut out = format!("{label} (as a multiset) differs:");
+        for line in only_left.iter().take(6) {
+            let _ = write!(out, "\n    bun  only: {line}");
+        }
+        for line in only_right.iter().take(6) {
+            let _ = write!(out, "\n    rust only: {line}");
+        }
+        return Some(out);
+    }
+    if left == right {
+        return None;
+    }
+    let left_lines: Vec<&str> = std::str::from_utf8(left).unwrap_or("<non-UTF-8>").lines().collect();
+    let right_lines: Vec<&str> =
+        std::str::from_utf8(right).unwrap_or("<non-UTF-8>").lines().collect();
+    let first = left_lines
+        .iter()
+        .zip(&right_lines)
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| left_lines.len().min(right_lines.len()));
+    let mut out = format!(
+        "{label} differs at line {} ({} vs {} lines):",
+        first + 1,
+        left_lines.len(),
+        right_lines.len()
+    );
+    for offset in 0..4 {
+        let index = first + offset;
+        match (left_lines.get(index), right_lines.get(index)) {
+            (None, None) => break,
+            (left, right) => {
+                let _ = write!(out, "\n    bun  {}| {}", index + 1, left.unwrap_or(&"<eof>"));
+                let _ = write!(out, "\n    rust {}| {}", index + 1, right.unwrap_or(&"<eof>"));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// **[R86]** — the one row in the register that is a measurement rather than a
+/// transcription.
+///
+/// `withTimeout` (ts:1442) aborts the controller and *then* rejects with
+/// `timed out after {n} ms`, and the fetch it aborted rejects with an
+/// `AbortError` that `describeFailure` renders as `aborted (timeout)`. Which of
+/// the two wins `Promise.race` is a question about microtask ordering that no
+/// amount of reading settles. So we ask.
+fn record_r86(root: &Path, bun: &Capture) -> Result<()> {
+    let text = String::from_utf8_lossy(&bun.stdout);
+    let observed = text
+        .lines()
+        .chain(String::from_utf8_lossy(&bun.stderr).lines().collect::<Vec<_>>())
+        .find_map(|line| {
+            if line.contains("aborted (timeout)") {
+                Some("aborted (timeout)")
+            } else if line.contains("timed out after") {
+                Some("timed out after {n} ms")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("<neither wording appeared>");
+
+    let path = root.join("xtask").join("fixtures").join("r86-timeout-wording.txt");
+    std::fs::create_dir_all(path.parent().unwrap_or(root))?;
+    std::fs::write(
+        &path,
+        format!(
+            "# R86 — which wording a sweep prints when an attempt times out.\n\
+             # Measured by `cargo xtask parity --filter r86`; do not hand-edit.\n\
+             # `edm::sweep::timeout_failure` must produce this.\n\
+             {observed}\n"
+        ),
+    )?;
+    Ok(())
+}
+
+fn build_rust_binary(root: &Path) -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("EDM_BIN") {
+        return Ok(PathBuf::from(path));
+    }
+    let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .args(["build", "-p", "edm"])
+        .current_dir(root)
+        .status()
+        .context("running cargo build -p edm")?;
+    if !status.success() {
+        bail!("cargo build -p edm failed");
+    }
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| root.join("target"), PathBuf::from);
+    let binary = target.join("debug").join("edm");
+    if !binary.exists() {
+        bail!("built, but {} is missing", binary.display());
+    }
+    Ok(binary)
+}
+
+fn which(program: &str) -> Result<PathBuf> {
+    let path = std::env::var_os("PATH").context("PATH is unset")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(program);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    bail!("{program} not found on PATH")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mock_origin_maps_back_to_the_three_production_origins() {
+        let base = "http://127.0.0.1:4321";
+        let input = format!(
+            "endpoint {base}/2.0/elite/market/list?abc\nardent {base}/v2/system/name/Sol\n\
+             eddn {base}/upload/\nunrouted {base}/nope\n"
+        );
+        let out = String::from_utf8(canonicalise(input.as_bytes(), base)).unwrap();
+        assert!(out.contains("https://api.orerve.net/2.0/elite/market/list?abc"), "{out}");
+        assert!(out.contains("https://api.ardent-insight.com/v2/system/name/Sol"), "{out}");
+        assert!(out.contains("https://eddn.edcd.io:4430/upload/"), "{out}");
+        assert!(out.contains("unrouted http://127.0.0.1:4321/nope"), "{out}");
+    }
+
+    #[test]
+    fn only_well_formed_timestamps_are_normalised() {
+        assert_eq!(
+            normalise_timestamps(r#"{"timestamp":"2023-11-14T22:13:20.000Z"}"#),
+            r#"{"timestamp":"<TIMESTAMP>"}"#
+        );
+        // A malformed instant is left alone so that it diffs; R20 stays live.
+        assert_eq!(
+            normalise_timestamps(r#"{"timestamp":"2023-11-14T22:13:20Z"}"#),
+            r#"{"timestamp":"2023-11-14T22:13:20Z"}"#
+        );
+    }
+
+    #[test]
+    fn an_ordered_diff_names_the_first_differing_line() {
+        let report = compare_stream("stdout", b"a\nb\nc\n", b"a\nB\nc\n", false).unwrap();
+        assert!(report.starts_with("stdout differs at line 2"), "{report}");
+    }
+
+    #[test]
+    fn a_multiset_diff_ignores_order_but_not_content() {
+        assert!(compare_stream("stdout", b"a\nb\n", b"b\na\n", true).is_none());
+        assert!(compare_stream("stdout", b"a\nb\n", b"b\nc\n", true).is_some());
+    }
+
+    #[test]
+    fn the_credentials_are_the_lengths_the_original_validates() {
+        let all = credentials();
+        assert_eq!(all[2].1.len(), 80);
+        assert_eq!(all[3].1.len(), 2024);
+    }
+}

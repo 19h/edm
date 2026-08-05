@@ -1,0 +1,36 @@
+{
+  "id": 3229009408,
+  "commodities": {
+    "128049204": {
+      "id": 128049204,
+      "name": "Gold",
+      "categoryname": "Metals",
+      "stock": 1250,
+      "stockBracket": 2,
+      "buyPrice": 9500,
+      "sellPrice": 9400,
+      "demand": 0,
+      "demandBracket": 0,
+      "meanPrice": 9012,
+      "consumer": 0,
+      "producer": 1,
+      "rare": 0
+    },
+    "128049202": {
+      "id": 128049202,
+      "name": "Silver",
+      "categoryname": "Metals",
+      "stock": 0,
+      "stockBracket": 0,
+      "buyPrice": 0,
+      "sellPrice": 4812,
+      "demand": 8400,
+      "demandBracket": 3,
+      "meanPrice": 4775,
+      "consumer": 1,
+      "producer": 0,
+      "rare": 0
+    }
+  },
+  "inventory": []
+}

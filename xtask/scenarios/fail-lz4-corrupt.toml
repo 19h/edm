@@ -1,0 +1,11 @@
+# fail-lz4-corrupt
+why = "200 whose block claims a literal run that is not there: `Invalid LZ4 literal length`, one of the six strings R61 pins."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi-corrupt-block"
+payload-file = "payloads/market-small.json"

@@ -1,0 +1,54 @@
+# R86 is the one register row that is a measurement rather than a transcription.
+why = "A route that never answers, against --timeout 0.2. withTimeout (ts:1442) aborts the controller and then rejects with `timed out after {n} ms`; the abort makes fetch reject with an AbortError that describeFailure renders as `aborted (timeout)`. Which of the two wins Promise.race is a microtask-ordering question, so this scenario asks instead of guessing, and writes the answer to xtask/fixtures/r86-timeout-wording.txt."
+argv = ["market", "Colonia", "--concurrency", "1", "--timeout", "0.2", "--requeue", "0"]
+record = "r86"
+wall-clock-limit = 30
+
+[[route]]
+path = "/v2/system/name/Colonia"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-system.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-sweep.json"
+
+# Seven markets, one worker, no requeues: seven attempts, each ending at the
+# deadline and nowhere else.
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true
+
+[[route.reply]]
+status = 200
+never = true

@@ -1,0 +1,10 @@
+why = "`markets --dump <file>` writes the decoded starsystem payload and reports its length in UTF-16 code units while calling them bytes (R37). The dump file itself is compared byte for byte."
+argv = ["markets", "--address", "3238296097059", "--dump", "{dump}"]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"

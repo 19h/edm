@@ -1,0 +1,66 @@
+# Scenario files
+
+One file, one scenario. The file stem is the scenario name; `cargo xtask parity
+--list` prints every name with its `why`.
+
+A scenario is argv plus the exact bytes the mock will answer with. Both
+implementations see the same script, and their stdout, stderr, exit code,
+`--dump` file and wire log are compared byte for byte.
+
+## Keys
+
+| key | default | meaning |
+|---|---|---|
+| `why` | *required* | what this scenario is for. A scenario nobody can explain is a scenario nobody will maintain. |
+| `argv` | `[]` | the arguments, verbatim. The token `{dump}` is replaced with a per-side path and the resulting files are compared. |
+| `columns` | `"100"` | `COLUMNS`, which pins `TERMINAL_WIDTH` on both sides (R31). |
+| `network` | `true` | `false` puts the scenario in the `cli` suite: no server is started, and a request reaching one is reported as a failure. |
+| `order` | `"ordered"` | `"multiset"` compares stdout as a bag of lines (C21). Requires `because`. |
+| `because` | | why this scenario cannot be ordered. C21 requires the justification to live here. |
+| `record` | | `"r86"` writes the measured timeout wording to `xtask/fixtures/`. |
+| `divergence` | | a row from `PORTING.md`'s CORRECT table, e.g. `"C11"`. Inverts the assertion: the two sides *must* differ, and agreeing means the row is stale. |
+| `wall-clock-limit` | `60` | seconds before a side is killed. |
+| `[env]` | | extra environment, on both sides. |
+
+## Routes
+
+```toml
+[[route]]
+path = "/2.0/elite/market/list"   # exact, and must be under /2.0/elite/, /v2/ or /upload/
+envelope = "marketId=3229009401&" # substring of the DECRYPTED request envelope
+body-contains = "3229009401"      # substring of the request body
+
+[[route.reply]]
+status = 200
+reason = "OK"          # must be the canonical phrase (C3)
+delay-ms = 30
+never = true           # accept, log, and never answer
+encode = "capi"        # raw | capi | capi-unframed | capi-corrupt-block
+payload = """…"""      # or payload-file = "payloads/market.json"
+nonce = "0123456789ab"
+omit-nonce = true      # suppress the automatic Nonce header
+omit-size = true       # suppress the automatic uncompressedsize header
+size-header = "twelve" # override its value
+gzip = true            # Content-Encoding: gzip
+headers = [["Allow", "PUT, OPTIONS"]]   # ordered, duplicates preserved
+```
+
+Replies are consumed in order. A route that runs out, or a path nothing routes,
+is reported as a mock problem — never silently answered.
+
+`envelope` exists because the market id travels inside the encrypted query, so
+it is the only thing that tells one market poll from another. The mock decrypts
+the query with the request's own `Nonce` header.
+
+## Determinism
+
+The nonce, `fTime` and `Request-Time` come from the original's own environment
+fallbacks (`NONCE`, `F_TIME`, `REQUEST_TIME`), so the sealed query is identical
+on both sides. `preload.ts` freezes `Date` on the Bun side.
+
+When more than one request can be outstanding — a sweep at `--concurrency > 1` —
+no two *targets* may complete at the same instant: ties resolve by promise
+settlement in Bun and by worker index here, so the line order would be a coin
+flip rather than a measurement. Stagger the delays, or say `order = "multiset"`
+and justify it. Two replies on the same route are two attempts at the same
+market and may share a delay.

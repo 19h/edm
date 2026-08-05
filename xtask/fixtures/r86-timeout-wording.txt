@@ -1,0 +1,4 @@
+# R86 — which wording a sweep prints when an attempt times out.
+# Measured by `cargo xtask parity --filter r86`; do not hand-edit.
+# `edm::sweep::timeout_failure` must produce this.
+timed out after {n} ms

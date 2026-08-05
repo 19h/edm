@@ -1,0 +1,11 @@
+# endpoint-trade-live-tables-override
+why = "PUT /2.0/elite/market/trade, one buy with no price lookup — sent, table output, verb overridden to GET (R66)."
+argv = ["trade", "--market-id", "3229009408", "--type", "buy", "--item", "128049204", "--qty", "10", "--unit-price", "9500", "--no-resolve", "--method", "GET"]
+
+[[route]]
+path = "/2.0/elite/market/trade"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/trade.json"

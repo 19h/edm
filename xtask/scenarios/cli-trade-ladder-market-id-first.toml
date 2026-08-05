@@ -1,0 +1,4 @@
+# cli-trade-ladder-market-id-first
+why = "R94's ladder starts three steps earlier than the register says: --type is a requireValue that can throw, but the missing market id is reported first."
+argv = ["trade", "--type", "nonsense", "--qty", "0"]
+network = false

@@ -1,0 +1,24 @@
+# fail-duplicate-size
+#
+# MEASURED, and it contradicts R71. The register says `Headers.get` joins
+# duplicates with ", ", so two `uncompressedsize` headers should give NaN and a
+# rejection. Under bun 1.2.3 they do not: with `512` then `4096` on the wire,
+# `response.headers.get("uncompressedsize")` returns `4096` — the last value —
+# and the RESPONSE table shows a single row reading `4096`. The body is then
+# decrypted with 4096 and refused by the LZ4 length check instead.
+#
+# This scenario is the record of that measurement. A port that implements R71
+# as written will print `Missing or invalid uncompressedSize header: 512, 4096`
+# here, and the diff will say so.
+why = "Two uncompressedsize headers with different values. Measures how a duplicated response header actually reaches Headers.get under bun 1.2.3 — R71 claims a \", \" join and the answer is last-wins. A mock built on hyper could not produce this response at all."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+omit-size = true
+headers = [["uncompressedsize", "512"], ["uncompressedsize", "4096"]]

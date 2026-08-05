@@ -1,0 +1,4 @@
+# cli-unknown-command
+why = "An unrecognised command writes to stderr with a trailing blank line, prints USAGE to stdout, and exits 2 (R49)."
+argv = ["bogus"]
+network = false

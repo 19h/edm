@@ -1,0 +1,12 @@
+# fail-missing-nonce
+why = "200 with no Nonce header at all: the same message, and JSON.stringify(null) renders unquoted (R72)."
+argv = ["market", "--market-id", "3229009408"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market-small.json"
+omit-nonce = true

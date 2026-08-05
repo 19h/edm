@@ -1,0 +1,7 @@
+# endpoint-market-dry-tables-override
+why = "GET /2.0/elite/market/list, one market's commodity listing — resolved but not sent (--dry-run), table output, verb overridden to POST (R66)."
+argv = ["market", "--market-id", "3229009408", "--dry-run", "--method", "POST"]
+
+# --dry-run returns before `fetch` (ts:1228), so this one belongs to
+# the `cli` suite: it runs without a server at all.
+network = false

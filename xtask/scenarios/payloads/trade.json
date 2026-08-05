@@ -1,0 +1,23 @@
+{
+  "credits": 41250000,
+  "debt": 0,
+  "lastModified": { "sec": 1700000000, "usec": 0 },
+  "commodities": {
+    "128049204": {
+      "id": 128049204,
+      "name": "Gold",
+      "categoryname": "Metals",
+      "stock": 1226,
+      "stockBracket": 2,
+      "buyPrice": 9500,
+      "sellPrice": 9400,
+      "demand": 0,
+      "demandBracket": 0,
+      "meanPrice": 9012,
+      "consumer": 0,
+      "producer": 1,
+      "rare": 0
+    }
+  },
+  "inventory": [{ "name": "Gold", "id": 128049204, "quantity": 24, "value": 228000, "stolen": 0 }]
+}

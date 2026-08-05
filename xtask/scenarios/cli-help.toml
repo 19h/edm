@@ -1,0 +1,4 @@
+# cli-help
+why = "The help command prints USAGE to stdout and exits 0 (ts:3149). USAGE interpolates six constants, so this also pins them."
+argv = ["help"]
+network = false

@@ -1,0 +1,4 @@
+# cli-no-json-works
+why = "The other half of R40: `--no-json` is accepted and turns the switch off. It gets as far as the missing market id."
+argv = ["market", "--no-json"]
+network = false

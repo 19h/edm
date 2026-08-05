@@ -1,0 +1,4 @@
+# cli-empty-token
+why = "An empty argv token does not fill the command slot, so the next word does (R45)."
+argv = ["", "Colonia"]
+network = false

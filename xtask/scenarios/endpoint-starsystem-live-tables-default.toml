@@ -1,0 +1,11 @@
+# endpoint-starsystem-live-tables-default
+why = "GET /2.0/elite/starsystem, the market listing for one address — sent, table output."
+argv = ["markets", "--address", "3238296097059"]
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"

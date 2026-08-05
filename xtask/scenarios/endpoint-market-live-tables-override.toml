@@ -1,0 +1,11 @@
+# endpoint-market-live-tables-override
+why = "GET /2.0/elite/market/list, one market's commodity listing — sent, table output, verb overridden to POST (R66)."
+argv = ["market", "--market-id", "3229009408", "--method", "POST"]
+
+[[route]]
+path = "/2.0/elite/market/list"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/market.json"

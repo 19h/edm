@@ -1,0 +1,4 @@
+# cli-poison-boolean-literal
+why = "BOOLEAN_LITERALS[\"constructor\"] resolves through Object.prototype, so the token is consumed, the flag holds a function, and openSession's switchValue throws — exit 1, not the exit 2 a naive port would give (R47)."
+argv = ["market", "--json", "constructor"]
+network = false

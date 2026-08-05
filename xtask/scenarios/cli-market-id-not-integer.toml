@@ -1,0 +1,4 @@
+# cli-market-id-not-integer
+why = "parseUnsignedInteger's first message: not ASCII digits. Credentials are loaded before this, for every command (R50)."
+argv = ["market", "--market-id", "abc"]
+network = false

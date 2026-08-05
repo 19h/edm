@@ -1,0 +1,4 @@
+# cli-no-underscore-alias
+why = "`--no-` is matched on the raw name before separators are stripped, so `--no_json` is an unknown option where `--no-json` works (R40)."
+argv = ["market", "--no_json", "Colonia"]
+network = false

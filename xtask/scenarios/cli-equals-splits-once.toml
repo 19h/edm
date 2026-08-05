@@ -1,0 +1,4 @@
+# cli-equals-splits-once
+why = "Only the first = splits a flag from its value (R42), and --qty= stores the empty string, which falls through to the environment (R43)."
+argv = ["trade", "--item=a=b", "--qty=", "--type", "buy"]
+network = false

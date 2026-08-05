@@ -1,0 +1,11 @@
+why = "The same F1 payload through `markets`, wide enough that no column is dropped. The table is banded by POI type, and within each band the enumeration order of the `markets` object shows through — Jaques Station (an array-index key) before Beyond 2^32 Terminal (an insertion-order one). The 2^53 key is filtered out by isSafeInteger (ts:2735)."
+argv = ["markets", "--address", "3238296097059"]
+columns = "160"
+
+[[route]]
+path = "/2.0/elite/starsystem"
+
+[[route.reply]]
+status = 200
+encode = "capi"
+payload-file = "payloads/starsystem-f1.json"
