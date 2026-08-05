@@ -1,0 +1,25 @@
+---
+source: crates/edm-core/tests/batch.rs
+expression: run.trace
+---
+[
+    Skip {
+        reason: "Gold: no stock",
+    },
+    Progress(
+        "[1] waiting 1.5s — cargo 0  (Gold: no stock)",
+    ),
+    Sleep {
+        millis: 1500.0,
+    },
+    Refresh,
+    Skip {
+        reason: "Gold: no stock",
+    },
+    Done(
+        Outcome {
+            reason: "stopped after 2 rounds",
+            rounds: 2,
+        },
+    ),
+]

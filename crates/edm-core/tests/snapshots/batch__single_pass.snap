@@ -1,0 +1,44 @@
+---
+source: crates/edm-core/tests/batch.rs
+expression: run.trace
+---
+[
+    Trade(
+        TradePlan {
+            market_id: "3223343616",
+            kind: Buy,
+            commodity_id: 101.0,
+            commodity_name: "Gold",
+            black_market: false,
+            stolen: false,
+            unit_price: 100.0,
+            qty: 10.0,
+            final_qty: 10.0,
+        },
+    ),
+    Progress(
+        "[1] buy 10 x Gold @ 100 = 1,000 cr  HTTP 200  cargo 0  credits 1,000,000",
+    ),
+    Trade(
+        TradePlan {
+            market_id: "3223343616",
+            kind: Buy,
+            commodity_id: 102.0,
+            commodity_name: "Silver",
+            black_market: false,
+            stolen: false,
+            unit_price: 30.0,
+            qty: 10.0,
+            final_qty: 10.0,
+        },
+    ),
+    Progress(
+        "[1] buy 10 x Silver @ 30 = 300 cr  HTTP 200  cargo 0  credits 1,000,000",
+    ),
+    Done(
+        Outcome {
+            reason: "single pass complete",
+            rounds: 1,
+        },
+    ),
+]

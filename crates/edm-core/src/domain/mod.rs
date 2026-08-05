@@ -1,5 +1,6 @@
 //! The market model: what a Companion API payload means once it has been read.
 
+pub mod batch;
 pub mod eddn;
 pub mod id64;
 pub mod read;

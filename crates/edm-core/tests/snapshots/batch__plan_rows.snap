@@ -1,0 +1,36 @@
+---
+source: crates/edm-core/tests/batch.rs
+expression: run.batch.plan_rows()
+---
+[
+    Data(
+        [
+            "market",
+            "3223343616",
+        ],
+    ),
+    Data(
+        [
+            "action",
+            "buy up to --qty each",
+        ],
+    ),
+    Data(
+        [
+            "order",
+            "Gold -> Silver",
+        ],
+    ),
+    Data(
+        [
+            "per item max",
+            "10",
+        ],
+    ),
+    Data(
+        [
+            "retry",
+            "single pass",
+        ],
+    ),
+]
