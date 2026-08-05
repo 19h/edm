@@ -24,11 +24,13 @@ pub mod access;
 pub mod config;
 pub mod flag;
 pub mod parse;
+pub mod route_usage;
 pub mod usage;
 
 pub use access::{Cli, CliError, EnvSnapshot, POISON_TYPE_ERROR};
 pub use flag::{Flag, Literal, Table, boolean_literal, normalize};
 pub use parse::{ArgError, Args, Value, parse, parse_with};
+pub use route_usage::route_usage;
 pub use usage::usage;
 
 /// The commands `main` will dispatch on (`market-request.ts:3148`).
