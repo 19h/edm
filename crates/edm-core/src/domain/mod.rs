@@ -4,6 +4,7 @@ pub mod eddn;
 pub mod id64;
 pub mod read;
 pub mod starsystem;
+pub mod trade;
 
 use crate::js::json::{JsObject, JsValue};
 use crate::js::{self, text};
