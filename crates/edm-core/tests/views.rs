@@ -749,6 +749,19 @@ fn unreached_markets_are_named_as_unreached() {
     assert!(joined.contains("2 systems failed"), "{joined}");
 }
 
+/// "1 markets were not reached" is the sentence a reader stops trusting.
+#[test]
+fn the_coverage_notes_agree_with_themselves_in_number() {
+    let one = views::RouteCoverage {
+        markets_failed: 1,
+        systems_failed: 1,
+        ..views::RouteCoverage::default()
+    };
+    let joined = one.notes().join("\n");
+    assert!(joined.contains("1 market in radius was not reached and is absent"), "{joined}");
+    assert!(joined.contains("1 system failed, so any market in it is unknown"), "{joined}");
+}
+
 /// A clean sweep says only the one thing that is true of it.
 #[test]
 fn a_complete_sweep_carries_no_warnings() {

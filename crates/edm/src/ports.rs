@@ -130,6 +130,33 @@ impl Fs for RealFs {
     }
 }
 
+/// Entropy with its jitter fraction pinned, and its nonces untouched.
+///
+/// `EDM_JITTER=0` \[C29\]. Backoff jitter is the one random quantity a recorded
+/// run cannot reproduce — a nonce is already overridable through `--nonce`,
+/// but the delay a retry waits is not, and it decides how many attempts fit
+/// inside a wall-clock budget. Pinning it makes a retry scenario's *attempt
+/// count* deterministic, which is the thing such a scenario exists to assert.
+///
+/// It does not touch `nonce_bytes`: a pinned nonce is a separate decision with
+/// a separate flag, and folding them together would let one scenario's choice
+/// silently reuse a keystream.
+#[derive(Clone, Copy, Debug)]
+pub struct PinnedJitter<'a, E> {
+    pub inner: &'a E,
+    pub unit: f64,
+}
+
+impl<E: Entropy> Entropy for PinnedJitter<'_, E> {
+    fn nonce_bytes(&self) -> [u8; 6] {
+        self.inner.nonce_bytes()
+    }
+
+    fn jitter_unit(&self) -> f64 {
+        self.unit
+    }
+}
+
 /// Everything ambient, in one place to thread through the command functions.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Ports<C, E, F> {

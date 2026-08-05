@@ -42,6 +42,9 @@ Spending
   --max-requests <n>       ceiling, default 2,000; nothing is sent above it
   --yes                    required above 250 requests
   --rps <n>                requests per second, default 4
+  --deadline <s>           how long the whole sweep may take, default 3,600.
+                           It bounds one market's retries too: a market may not
+                           be retried for longer than the run has left
   --max-age <minutes>      reuse cached prices younger than this, default 30
   --no-cache               ignore the cache entirely   --refresh   re-poll everything
   --cache-dir <path>       default $XDG_CACHE_HOME/edm/route

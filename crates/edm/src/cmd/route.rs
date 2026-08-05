@@ -103,11 +103,19 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     )
     .map_err(|error| error.message().to_owned())?;
     let started_ms = app.ports.clock.now_ms();
-    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &app.ports.entropy);
+    // `EDM_JITTER` pins the backoff fraction so a retry scenario's attempt
+    // count is reproducible \[C29\]. Unset, this is the real entropy.
+    let entropy = crate::ports::PinnedJitter {
+        inner: &app.ports.entropy,
+        unit: app.overrides.jitter.unwrap_or(f64::NAN),
+    };
+    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
     let sweep_cx = acquire::Cx {
         http: app.http,
         clock: &app.ports.clock,
-        entropy: &app.ports.entropy,
+        // The pinned wrapper, which delegates `nonce_bytes` untouched — so the
+        // nonces are still the real thing and only the jitter is fixed.
+        entropy: &entropy,
         fs: &app.ports.fs,
         out,
         origin: &app.overrides.origin,
@@ -167,7 +175,17 @@ fn pacing(config: &RouteConfig) -> Pacing {
             burst: 1.0,
             min_rate: edm_core::js::js_min(config.rate_per_second, 0.5),
         },
-        budget: Budget::default(),
+        budget: Budget {
+            // A job may not keep being retried for longer than the run it
+            // belongs to has in total. Without this, `--deadline 5` would
+            // still let one market burn two minutes of retries.
+            per_job_ms: edm_core::js::js_min(
+                Budget::default().per_job_ms,
+                config.deadline_seconds * 1000.0,
+            ),
+            run_deadline_ms: config.deadline_seconds * 1000.0,
+            ..Budget::default()
+        },
         ..Pacing::default()
     }
 }

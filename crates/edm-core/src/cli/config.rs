@@ -988,6 +988,12 @@ pub struct RouteConfig {
     /// second.
     pub workers: u32,
     pub rate_per_second: f64,
+    /// `--deadline`, in seconds: how long the whole sweep may take.
+    ///
+    /// It also bounds one job, because a market may not keep being retried for
+    /// longer than the run it is part of has left. That is the rule that
+    /// replaces R98's unbounded attempt count: wall clock, not attempts.
+    pub deadline_seconds: f64,
     pub max_requests: f64,
     pub confirmed: bool,
     pub max_age_minutes: f64,
@@ -1014,6 +1020,9 @@ pub const DEFAULT_TOP: f64 = 20.0;
 pub const DEFAULT_MIN_PROFIT: f64 = 1_000.0;
 pub const DEFAULT_MAX_AGE_MINUTES: f64 = 30.0;
 pub const DEFAULT_RPS: f64 = 4.0;
+/// An hour. Long enough for a thousand markets at four a second with room for
+/// retries, and short enough that a run nobody is watching ends.
+pub const DEFAULT_DEADLINE_SECONDS: f64 = 3_600.0;
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
 /// Builds the configuration for `route`.
@@ -1081,6 +1090,7 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
             js::js_max(1.0, js::js_min(f64::from(MAX_CONCURRENCY), declared)) as u32
         },
         rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
+        deadline_seconds: cli.optional_decimal(Flag::Deadline)?.unwrap_or(DEFAULT_DEADLINE_SECONDS),
         max_requests: cli
             .optional_number(Flag::MaxRequests)?
             .unwrap_or(crate::spend::DEFAULT_MAX_REQUESTS),

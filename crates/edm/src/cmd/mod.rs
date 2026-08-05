@@ -66,7 +66,9 @@ pub type CmdResult = Result<(), CmdError>;
 ///
 /// Unset, every field holds the constant the TypeScript compiles in, so a
 /// default run is byte-identical.
-#[derive(Clone, Debug, PartialEq, Eq)]
+// No `Eq`: `jitter` is a fraction, and a float has no total equality. Nothing
+// needs it.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Overrides {
     /// `EDM_ORIGIN_OVERRIDE` — replaces `API_ORIGIN` in both the sent URL and
     /// the printed `endpoint` row.
@@ -81,6 +83,12 @@ pub struct Overrides {
     pub strict_json: bool,
     /// `EDM_WIDTH=display` — the `unicode-width` cell metric.
     pub metric: Metric,
+    /// `EDM_JITTER` — pins backoff jitter to a fixed fraction of the window,
+    /// so a retry scenario's attempt count is reproducible \[C29\].
+    ///
+    /// Read here rather than in `route` because every ambient override lives
+    /// in one place; nothing else uses it yet.
+    pub jitter: Option<f64>,
 }
 
 impl Overrides {
@@ -96,6 +104,12 @@ impl Overrides {
             } else {
                 Metric::Utf16
             },
+            // Clamped into `[0, 1]` because it is a fraction of the backoff
+            // window; anything else is ignored rather than half-honoured.
+            jitter: env
+                .get("EDM_JITTER")
+                .and_then(|raw| raw.parse::<f64>().ok())
+                .filter(|unit| (0.0..=1.0).contains(unit)),
         }
     }
 }

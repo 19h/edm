@@ -1,0 +1,4 @@
+Estimated 2 Companion API requests, above the 1 ceiling.
+Narrow the sweep (--radius, --pad, --max-star-distance) or raise it with
+--max-requests 3. Nothing has been sent.
+

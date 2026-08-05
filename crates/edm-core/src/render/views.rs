@@ -909,6 +909,15 @@ pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
     blocks
 }
 
+/// `1 market` / `2 markets`, with the verb to match.
+///
+/// Worth the four lines: these notes exist to make a partial answer legible,
+/// and "1 markets were not reached" is the sentence a reader stops trusting.
+fn plural(count: usize, noun: &str, one: &'static str, many: &'static str) -> (String, &'static str) {
+    let word = if count == 1 { noun.to_owned() } else { format!("{noun}s") };
+    (format!("{} {word}", crate::js::format_integer(count as f64)), if count == 1 { one } else { many })
+}
+
 /// What a sweep reached, and what it did not.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RouteCoverage {
@@ -935,7 +944,6 @@ impl RouteCoverage {
     /// complete one.
     #[must_use]
     pub fn notes(&self) -> Vec<String> {
-        use crate::js::format_integer as int;
         let mut notes = Vec::new();
 
         if self.markets_priced > 0 {
@@ -944,15 +952,17 @@ impl RouteCoverage {
             );
         }
         if self.markets_failed > 0 {
+            let (count, verb) = plural(self.markets_failed, "market", "was", "were");
             notes.push(format!(
-                "{} markets in radius were not reached and are absent from the ranking, not ranked low",
-                int(self.markets_failed as f64)
+                "{count} in radius {verb} not reached and {} absent from the ranking, not ranked low",
+                if self.markets_failed == 1 { "is" } else { "are" },
             ));
         }
         if self.systems_failed > 0 {
+            let (count, verb) = plural(self.systems_failed, "system", "failed", "failed");
             notes.push(format!(
-                "{} systems failed, so any market in them is unknown to this run",
-                int(self.systems_failed as f64)
+                "{count} {verb}, so any market in {} is unknown to this run",
+                if self.systems_failed == 1 { "it" } else { "them" },
             ));
         }
         if let Some(limit) = self.truncated_to_ly {

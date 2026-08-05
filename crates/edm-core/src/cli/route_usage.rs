@@ -59,6 +59,9 @@ Spending
   --max-requests <n>       ceiling, default {max_requests}; nothing is sent above it
   --yes                    required above {confirm} requests
   --rps <n>                requests per second, default {rps}
+  --deadline <s>           how long the whole sweep may take, default {deadline}.
+                           It bounds one market's retries too: a market may not
+                           be retried for longer than the run has left
   --max-age <minutes>      reuse cached prices younger than this, default {max_age}
   --no-cache               ignore the cache entirely   --refresh   re-poll everything
   --cache-dir <path>       default $XDG_CACHE_HOME/edm/route
@@ -85,6 +88,7 @@ Examples
         max_requests = n(spend::DEFAULT_MAX_REQUESTS),
         confirm = n(spend::CONFIRM_THRESHOLD),
         rps = n(config::DEFAULT_RPS),
+        deadline = n(config::DEFAULT_DEADLINE_SECONDS),
         max_age = n(config::DEFAULT_MAX_AGE_MINUTES),
         ardent = n(config::DEFAULT_ARDENT_QUERIES),
     )

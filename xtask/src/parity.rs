@@ -497,10 +497,65 @@ pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
 /// The streams a golden holds, normalised the way the differential path
 /// normalises this side.
 fn golden_streams(rust: &Capture, base: &str) -> [(&'static str, Vec<u8>); 2] {
-    [
-        ("stdout", normalise_side_dir(&canonicalise(&rust.stdout, base), &rust.dir)),
-        ("stderr", normalise_side_dir(&canonicalise(&rust.stderr, base), &rust.dir)),
-    ]
+    let clean = |bytes: &[u8]| {
+        normalise_elapsed(&normalise_side_dir(&canonicalise(bytes, base), &rust.dir))
+    };
+    [("stdout", clean(&rust.stdout)), ("stderr", clean(&rust.stderr))]
+}
+
+/// Masks the coverage table's `elapsed` value.
+///
+/// It is a wall-clock measurement of the run itself, so it is the one cell in
+/// that table that a byte-identical rerun can legitimately change — a retry
+/// scenario that lands on either side of a second flips it. The *row* is still
+/// asserted, and so is the shape of its value: anything that is not a duration
+/// this program formats is left in place and will diff, which keeps the
+/// rendering under test while the number is not.
+fn normalise_elapsed(bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let mut out = String::with_capacity(text.len());
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        if index > 0 {
+            // `split_inclusive` keeps the terminator, so nothing is re-added.
+        }
+        match elapsed_cell(line) {
+            Some((head, value, tail)) => {
+                out.push_str(head);
+                out.push_str("<ELAPSED>");
+                // Keep the column width, so the frame still diffs if it moves.
+                for _ in 0..value.len().saturating_sub("<ELAPSED>".len()) {
+                    out.push(' ');
+                }
+                out.push_str(tail);
+            }
+            None => out.push_str(line),
+        }
+    }
+    out.into_bytes()
+}
+
+/// `| elapsed        | 4s           |` split into the parts around its value.
+fn elapsed_cell(line: &str) -> Option<(&str, &str, &str)> {
+    let trimmed = line.trim_end_matches(['\n', '\r']);
+    let open = trimmed.find('|')?;
+    let middle = trimmed[open + 1..].find('|')? + open + 1;
+    // The whole label cell, not a prefix: `| elapsed since |` is a different
+    // row and must diff like any other.
+    if trimmed[open + 1..middle].trim_matches(' ') != "elapsed" {
+        return None;
+    }
+    let close = trimmed[middle + 1..].find('|')? + middle + 1;
+    let cell = &trimmed[middle + 1..close];
+    let value = cell.trim_matches(' ');
+    // Only a duration this program formats: `4s`, `2m 5s`, `1h 30m`.
+    let formatted = value
+        .split(' ')
+        .all(|part| part.ends_with(['s', 'm', 'h']) && part[..part.len() - 1].chars().all(|c| c.is_ascii_digit() || c == ','));
+    if value.is_empty() || !formatted {
+        return None;
+    }
+    let head_len = middle + 2;
+    Some((&line[..head_len], &line[head_len..close], &line[close..]))
 }
 
 fn golden_dir(root: &Path, name: &str) -> PathBuf {
@@ -866,5 +921,44 @@ mod tests {
         let all = credentials();
         assert_eq!(all[2].1.len(), 80);
         assert_eq!(all[3].1.len(), 2024);
+    }
+}
+
+#[cfg(test)]
+mod elapsed_tests {
+    use super::*;
+
+    /// The one cell a byte-identical rerun may legitimately change.
+    #[test]
+    fn the_elapsed_value_is_masked_and_the_column_keeps_its_width() {
+        let before = "| elapsed        | 4s           |\n";
+        let after = String::from_utf8(normalise_elapsed(before.as_bytes())).expect("utf8");
+        assert_eq!(after, "| elapsed        | <ELAPSED>    |\n");
+        assert_eq!(after.len(), before.len(), "the frame must not move");
+    }
+
+    /// Only a duration this program formats. Anything else stays and diffs, so
+    /// the rendering itself is still under test.
+    #[test]
+    fn a_value_that_is_not_a_duration_is_left_alone() {
+        for line in [
+            "| elapsed        | tomorrow     |\n",
+            "| elapsed        |              |\n",
+            "| elapsed since  | 4s           |\n",
+            "| markets polled | 2 of 2       |\n",
+        ] {
+            let after = String::from_utf8(normalise_elapsed(line.as_bytes())).expect("utf8");
+            assert_eq!(after, line, "{line}");
+        }
+    }
+
+    /// Every duration shape `duration_estimate` produces.
+    #[test]
+    fn every_formatted_duration_is_recognised() {
+        for value in ["4s", "59s", "2m 5s", "1h 30m", "1,200s"] {
+            let line = format!("| elapsed        | {value:<12} |\n");
+            let after = String::from_utf8(normalise_elapsed(line.as_bytes())).expect("utf8");
+            assert!(after.contains("<ELAPSED>"), "{value}: {after}");
+        }
     }
 }
