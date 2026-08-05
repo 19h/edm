@@ -45,6 +45,7 @@ fn ring() -> Vec<Market> {
                     stock_bracket: 3,
                     demand: 0,
                     demand_bracket: 0,
+                    illegal: false,
                 },
                 RawCommodity {
                     name: format!("c{wanted}"),
@@ -54,6 +55,7 @@ fn ring() -> Vec<Market> {
                     stock_bracket: 0,
                     demand: 500,
                     demand_bracket: 3,
+                    illegal: false,
                 },
             ];
             Market::from_rows(

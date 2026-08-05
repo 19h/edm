@@ -151,11 +151,27 @@ pub struct RawCommodity {
     pub demand: i64,
     /// Demand bracket, 0–3.
     pub demand_bracket: i64,
+    /// Whether this market's own `legality` field marks the commodity illegal
+    /// **here**.
+    ///
+    /// Per market, not per commodity: Slaves are illegal in most jurisdictions
+    /// and legal in Imperial space, and the Companion API says which by leaving
+    /// `legality` empty. A market that calls a commodity illegal will refuse an
+    /// ordinary trade in it — measured 2026-08-05, HTTP 401 "Cannot sell
+    /// illegal goods" — and can only take it across a black market, which is a
+    /// station service the market payload does not report and which that same
+    /// station turned out not to have (HTTP 410 "blackmarket not currently
+    /// available at this market"). Both doors shut, on a row that published a
+    /// demand of 68,433 and a price of 16,571.
+    pub illegal: bool,
 }
 
 /// Why a row was not ingested, or was ingested under protest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IngestCounts {
+    /// Rows the market itself marks illegal at that market. See
+    /// [`RawCommodity::illegal`].
+    pub illegal_here: u32,
     /// Rows offering no stock, or a non-positive ask.
     pub no_supply: u32,
     /// Rows wanting nothing, and not merely wanting an unstated amount.
@@ -193,6 +209,16 @@ impl Market {
 
         for row in rows {
             let id = commodities.intern(&row.name);
+
+            // A market that calls a commodity illegal will not trade it over
+            // the counter, and the black-market path needs a station service
+            // the payload does not report. Ranking such a row produces a route
+            // that stops working when you arrive, so the row is dropped and
+            // counted rather than priced.
+            if row.illegal && !floors.allow_illegal {
+                counts.illegal_here += 1;
+                continue;
+            }
 
             if row.buy_price > 0 && row.sell_price > 0 && row.sell_price >= row.buy_price {
                 counts.bid_not_below_ask += 1;
@@ -276,11 +302,18 @@ pub struct RowFloors {
     /// Published demand below this is not worth a station visit. Not applied to
     /// unpublished demand, which has no quantity to compare.
     pub min_demand: Tons,
+    /// Whether to rank a commodity at a market that calls it illegal.
+    ///
+    /// Off by default, because such a trade cannot be completed at the counter:
+    /// the ordinary path is refused outright and the black-market path needs a
+    /// service the payload does not report. A route through one is not a
+    /// riskier route, it is a route that stops working when you get there.
+    pub allow_illegal: bool,
 }
 
 impl Default for RowFloors {
     fn default() -> Self {
-        Self { min_stock: Tons(1), min_demand: Tons(1) }
+        Self { min_stock: Tons(1), min_demand: Tons(1), allow_illegal: false }
     }
 }
 
@@ -402,6 +435,7 @@ mod tests {
             stock_bracket: if stock > 0 { 2 } else { 0 },
             demand,
             demand_bracket: bracket,
+            illegal: false,
         }
     }
 
@@ -461,10 +495,90 @@ mod tests {
         let mut commodities = Commodities::new();
         let mut counts = IngestCounts::default();
         let rows = [row("gold", 0, 59_759, 0, 0, 2), row("silver", 0, 4_000, 0, 5, 1)];
-        let floors = RowFloors { min_stock: Tons(1), min_demand: Tons(100) };
+        let floors = RowFloors { min_stock: Tons(1), min_demand: Tons(100), allow_illegal: false };
         let market =
             Market::from_rows(identity(), &rows, &mut commodities, floors, &mut counts);
         assert_eq!(market.demand.len(), 1);
         assert_eq!(market.demand[0].qty, DemandQty::Unpublished);
+    }
+}
+
+#[cfg(test)]
+mod legality_tests {
+    use super::*;
+
+    /// The row that sent a commander to a station which then refused the trade
+    /// twice, taken verbatim from Isherwood Works (FF Andromedae) on
+    /// 2026-08-05: a published demand of 68,433 at 16,571 a ton, and a
+    /// `legality` field saying the goods are illegal there.
+    ///
+    /// Selling it the ordinary way answered HTTP 401 "Cannot sell illegal
+    /// goods"; selling it across the black market answered HTTP 410
+    /// "blackmarket not currently available at this market". Both doors shut,
+    /// on a row the optimiser had ranked as one of the best legs in the region
+    /// — because the demand and the price are real and the field that says the
+    /// trade cannot happen was being dropped at the boundary.
+    fn slaves_at_a_market_that_forbids_them() -> RawCommodity {
+        RawCommodity {
+            name: "Slaves".to_owned(),
+            buy_price: 0,
+            sell_price: 16_571,
+            stock: 0,
+            stock_bracket: 0,
+            demand: 68_433,
+            demand_bracket: 3,
+            illegal: true,
+        }
+    }
+
+    fn ingest(rows: &[RawCommodity], floors: RowFloors) -> (Market, IngestCounts) {
+        let mut commodities = Commodities::new();
+        let mut counts = IngestCounts::default();
+        let market = Market::from_rows(
+            MarketIdentity {
+                market_id: 3_510_766_080,
+                station: "Isherwood Works".to_owned(),
+                system: "FF Andromedae".to_owned(),
+                system_address: 1,
+                coords: edm_core::domain::id64::Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+                arrival_ls: 0.0,
+            },
+            rows,
+            &mut commodities,
+            floors,
+            &mut counts,
+        );
+        (market, counts)
+    }
+
+    #[test]
+    fn a_market_that_calls_a_commodity_illegal_is_not_a_place_to_sell_it() {
+        let (market, counts) =
+            ingest(&[slaves_at_a_market_that_forbids_them()], RowFloors::default());
+
+        assert!(market.demand.is_empty(), "68,433 tons of demand that cannot be sold into");
+        assert_eq!(counts.illegal_here, 1, "and it is counted, not silently gone");
+    }
+
+    /// The same commodity at a market that does not forbid it — Slaves are
+    /// legal in Imperial space, and the Companion API says so by leaving
+    /// `legality` empty. Six stations within 37 Ly of that one take them.
+    #[test]
+    fn the_same_commodity_is_tradable_where_it_is_legal() {
+        let legal = RawCommodity { illegal: false, ..slaves_at_a_market_that_forbids_them() };
+        let (market, counts) = ingest(&[legal], RowFloors::default());
+
+        assert_eq!(market.demand.len(), 1, "legal here, so it ranks");
+        assert_eq!(counts.illegal_here, 0);
+    }
+
+    /// `--include-illegal` puts it back, for a commander who knows their
+    /// destination has a black market.
+    #[test]
+    fn include_illegal_opts_back_in() {
+        let floors = RowFloors { allow_illegal: true, ..RowFloors::default() };
+        let (market, _) = ingest(&[slaves_at_a_market_that_forbids_them()], floors);
+
+        assert_eq!(market.demand.len(), 1);
     }
 }

@@ -977,6 +977,9 @@ pub struct RouteConfig {
     pub min_profit: f64,
     pub min_supply: f64,
     pub min_demand: f64,
+    /// `--include-illegal`. See [`edm_route`'s `RowFloors::allow_illegal`]: a
+    /// market that calls a commodity illegal refuses the trade at the counter.
+    pub include_illegal: bool,
 
     // Spending.
     /// Workers behind the pacer.
@@ -1138,6 +1141,7 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         json: cli.switch_value(Flag::Json, false)?,
         detail: cli.switch_value(Flag::Detail, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
+        include_illegal: cli.switch_value(Flag::IncludeIllegal, false)?,
         quiet: cli.switch_value(Flag::Json, false)?,
     })
 }

@@ -39,6 +39,7 @@ fn ring() -> Vec<Market> {
                 stock_bracket: 3,
                 demand: 0,
                 demand_bracket: 0,
+                illegal: false,
             }];
             rows.extend((0..N).filter(|c| *c != i).map(|c| RawCommodity {
                 name: format!("c{c}"),
@@ -48,6 +49,7 @@ fn ring() -> Vec<Market> {
                 stock_bracket: 0,
                 demand: 500,
                 demand_bracket: 3,
+                illegal: false,
             }));
             Market::from_rows(
                 MarketIdentity {

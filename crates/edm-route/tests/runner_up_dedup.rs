@@ -53,6 +53,7 @@ fn market(id: i64) -> Market {
                 stock_bracket: 3,
                 demand: 5_000,
                 demand_bracket: 3,
+                illegal: false,
             }
         })
         .collect();

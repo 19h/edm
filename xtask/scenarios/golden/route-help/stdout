@@ -30,6 +30,12 @@ Which markets (all of these prune before anything is sent)
   --settlements            Odyssey settlements are excluded by default; they
                            cannot berth a large ship at all
   --min-supply <n>         default 1        --min-demand <n>   default 1
+  --include-illegal        rank commodities a market marks illegal *there*.
+                           Off by default: such a trade is refused at the
+                           counter (HTTP 401) and the black-market path needs a
+                           station service the market payload does not report,
+                           which is how a route once ended at a station
+                           publishing 68,433 tons of demand it could not accept
   --verify-systems         read each system's own market list from the Companion
                            API instead of trusting Ardent's. Authoritative, and
                            about 25x the transfer: a starsystem payload is

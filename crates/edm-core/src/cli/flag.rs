@@ -114,6 +114,8 @@ pub enum Flag {
     FastEstimate,
     /// `--verbose`: say what the sweep is doing while it does it.
     Verbose,
+    /// `--include-illegal`: rank commodities a market marks illegal there.
+    IncludeIllegal,
     /// `--verify-systems`: read each system's Companion API `starsystem`
     /// payload rather than trusting Ardent's market list.
     ///
@@ -137,7 +139,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 79] = [
+    pub const ALL: [Self; 80] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -216,6 +218,7 @@ impl Flag {
         Self::Refresh,
         Self::FastEstimate,
         Self::Verbose,
+        Self::IncludeIllegal,
         Self::VerifySystems,
     ];
 
@@ -282,6 +285,7 @@ impl Flag {
             "refresh" => Self::Refresh,
             "fastestimate" => Self::FastEstimate,
             "verbose" | "v" => Self::Verbose,
+            "includeillegal" => Self::IncludeIllegal,
             "verifysystems" => Self::VerifySystems,
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
@@ -349,6 +353,7 @@ impl Flag {
             Self::Refresh => "--refresh",
             Self::FastEstimate => "--fast-estimate",
             Self::Verbose => "--verbose",
+            Self::IncludeIllegal => "--include-illegal",
             Self::VerifySystems => "--verify-systems",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the
