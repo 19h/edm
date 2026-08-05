@@ -1,0 +1,7 @@
+/target
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+*.profraw
+.cache/
+*.pending-snap

@@ -1,0 +1,24 @@
+# Guardrails that stop a "harmless" refactor from silently breaking parity with
+# market-request.ts. Every entry here corresponds to a row in PORTING.md.
+
+disallowed-methods = [
+    { path = "serde_json::to_string", reason = "use JsValue::stringify_compact — serde_json prints integral f64 as `1.0` [F2/R3]" },
+    { path = "serde_json::to_string_pretty", reason = "use JsValue::stringify(2) [F1/F2]" },
+    { path = "serde_json::to_vec", reason = "use JsValue::stringify_compact [F2/R3]" },
+    { path = "f64::round", reason = "use js::js_round — Math.round is half toward +inf and preserves -0 [R12]" },
+    { path = "f64::min", reason = "use js::js_min — Math.min propagates NaN and specifies +-0 [R13]" },
+    { path = "f64::max", reason = "use js::js_max — Math.max propagates NaN and specifies +-0 [R13]" },
+    { path = "str::trim", reason = "use js::text::js_trim (White_Space + U+FEFF) or str_white_space_trim [R25]" },
+    { path = "str::trim_start", reason = "see str::trim [R25]" },
+    { path = "str::trim_end", reason = "see str::trim [R25]" },
+    { path = "core::iter::Iterator::max_by_key", reason = "returns the LAST maximum; JS `reduce` with `>` keeps the FIRST [R27]" },
+    { path = "core::iter::Iterator::max_by", reason = "see max_by_key [R27]" },
+    { path = "reqwest::Response::text", reason = "use net::read_body — fetch's Response.text() is unconditional lossy UTF-8 + BOM strip [R62]" },
+    { path = "std::env::args", reason = "panics on non-UTF-8; JS decodes argv lossily — use args_os + to_string_lossy [R55]" },
+    { path = "std::env::var", reason = "use var_os + to_string_lossy [R55]" },
+    { path = "std::process::exit", reason = "the TS assigns process.exitCode and runs to completion — return ExitCode from main [R75]" },
+]
+
+disallowed-types = [
+    { path = "std::collections::BTreeMap", reason = "lexicographic key order is never correct here; see JsObject [F1/R5]" },
+]

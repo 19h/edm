@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned to a toolchain already installed on this machine so no rustup fetch is
+# needed. The declared MSRV (workspace.package.rust-version) is 1.90; this is
+# only the toolchain the workspace is developed and gated against.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

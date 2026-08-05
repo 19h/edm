@@ -1,0 +1,93 @@
+[workspace]
+resolver = "3"
+members = ["crates/edm-core", "crates/edm", "xtask"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.90"
+version = "1.0.0"
+license = "MIT"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+disallowed_methods = "deny"
+disallowed_types = "deny"
+# The port mirrors a JavaScript program; these fire constantly on faithful code
+# and their advice would change behaviour.
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[workspace.dependencies]
+edm-core = { path = "crates/edm-core" }
+
+# --- pure (edm-core) ---------------------------------------------------------
+serde = { version = "1", features = ["derive"] }
+# Lexer only. NO `preserve_order`: it yields *document* order, and F1 requires
+# ECMAScript enumeration order. `float_roundtrip` makes the f64 conversion exact.
+serde_json = { version = "1", default-features = false, features = ["std", "float_roundtrip"] }
+ryu = "1"
+chacha20 = { version = "0.10", default-features = false, features = ["cipher", "zeroize"] }
+cipher = { version = "0.5", default-features = false }
+base64 = "0.23"
+zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
+thiserror = "2"
+unicode-width = "0.2"
+# Real CLDR root collation. Hand-rolling a subset was tried and abandoned:
+# `ß` expands to `ss`, `þ` sorts after `z`, `ø` is a secondary variant of `o`
+# and `½` falls between `1` and `2`. JS engines use ICU, so we use ICU.
+icu_collator = "2.2"
+icu_locale_core = "2.2"
+
+# --- impure (edm) ------------------------------------------------------------
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "net", "io-util"] }
+# `http2` is deliberately absent, not merely disabled at runtime: EDDN's
+# Developers.md is explicit that HTTP/2 is unsupported, and Bun's fetch is
+# HTTP/1.1. Leaving the feature off means the h2 code is never compiled and
+# ALPN never offers it, so R68 cannot regress by someone dropping a builder
+# call. `charset` is absent because Response.text() must be an unconditional
+# lossy UTF-8 decode (R62), and `json` because our serializer is the only one
+# allowed to touch a payload (F2).
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "gzip",
+    "brotli",
+    "deflate",
+] }
+http = "1"
+async-channel = "2.5"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+percent-encoding = "2.3"
+getrandom = "0.3"
+rustix = { version = "1", features = ["process", "system", "termios", "stdio", "fs"] }
+anyhow = "1"
+
+# --- dev ---------------------------------------------------------------------
+lz4_flex = { version = "0.14", default-features = false, features = ["std"] }
+proptest = "1"
+insta = "1.48"
+regex = "1"
+jsonschema = "0.49"
+hex-literal = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# BufWriter::drop must still flush on the way out.
+panic = "unwind"
+strip = "debuginfo"
+
+# Property tests and the differential harness are unusably slow in a debug build.
+[profile.dev.package."*"]
+opt-level = 2
