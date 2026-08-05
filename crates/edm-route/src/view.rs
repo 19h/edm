@@ -18,6 +18,7 @@ use crate::model::{Commodities, Market};
 
 use crate::num::Ratio;
 use crate::report::{Caveat, Guarantee, Route, RouteKind};
+use crate::watch::Event;
 use crate::weight::Limiter;
 
 /// The header a shape's table carries.
@@ -118,6 +119,47 @@ pub fn legs(route: &Route, markets: &[Market], commodities: &Commodities) -> Vec
         rows,
     }]
 }
+
+/// One line of search progress.
+///
+/// Returned, not printed: this crate writes to nothing. The caller decides
+/// whether a line is worth showing, which is also where the throttling has to
+/// live, because only the caller knows how long the run has been silent.
+///
+/// The rate is the point of the round line. A search that will take five
+/// minutes is bearable if the number in front of you is climbing and unbearable
+/// if it is a spinner, and the number is real: every rate reported is a rate
+/// some cycle in the data actually earns.
+#[must_use]
+pub fn progress(event: Event) -> String {
+    let n = |value: usize| js::format_integer(value as f64);
+    match event {
+        Event::Building { done, total, edges } => format!(
+            "  building the trade graph: {} / {} commodities, {} legs",
+            n(done),
+            n(total),
+            n(edges)
+        ),
+        Event::Round { round, stops: 0, .. } => {
+            format!("  loop search round {}: no route yet", n(round as usize))
+        }
+        Event::Round { round, rate, stops } => format!(
+            "  loop search round {}: best so far {} over {} stops",
+            n(round as usize),
+            per_hour(rate),
+            n(stops)
+        ),
+        Event::Expanded { paths, budget } => format!(
+            "  loop search: {} of {} partial routes explored",
+            js::format_integer(paths as f64),
+            js::format_integer(budget as f64)
+        ),
+        Event::Abandoned => {
+            "  the search ran out of time; reporting the best route it had, unproved".to_owned()
+        }
+    }
+}
+
 
 /// The stations in flying order, **station names only**.
 ///
@@ -395,6 +437,28 @@ mod tests {
         assert_eq!(readable("Agronomic Treatment"), "Agronomic Treatment");
         assert_eq!(readable("CMMComposite"), "CMMComposite");
         assert_eq!(readable(""), "");
+    }
+
+    #[test]
+    fn a_progress_line_says_what_was_done_and_never_what_is_coming() {
+        let lines = [
+            progress(Event::Building { done: 47, total: 99, edges: 8_123_456 }),
+            progress(Event::Round { round: 3, rate: Ratio { credits: 1, millis: 1 }, stops: 4 }),
+            progress(Event::Round { round: 1, rate: Ratio::ZERO, stops: 0 }),
+            progress(Event::Expanded { paths: 4_096, budget: 20_000_000 }),
+            progress(Event::Abandoned),
+        ];
+        assert!(lines[0].contains("47 / 99 commodities, 8,123,456 legs"), "{}", lines[0]);
+        assert!(lines[1].contains("round 3") && lines[1].contains("3,600,000/h"), "{}", lines[1]);
+        // A round with no witness has no rate to quote, and must not print one.
+        assert!(!lines[2].contains("/h"), "{}", lines[2]);
+        assert!(lines[3].contains("4,096 of 20,000,000"), "{}", lines[3]);
+        // The abandoned line has to withdraw the claim in words, because the
+        // Claim column only has room for "best found".
+        assert!(lines[4].contains("unproved"), "{}", lines[4]);
+        for line in &lines {
+            assert!(!line.contains("estimated") && !line.contains("remaining"), "{line}");
+        }
     }
 
     #[test]

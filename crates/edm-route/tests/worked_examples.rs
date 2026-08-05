@@ -7,6 +7,7 @@ use edm_route::num::{Credits, Millis, Ratio, Tons};
 use edm_route::report::{Caveat, Guarantee, RouteKind};
 use edm_route::Wanted;
 use edm_route::time::TimeModel;
+use edm_route::watch::Watch;
 use edm_route::{bounded, distinct, model, ratio, round, solve};
 use support::{best_cycle_rate, graph_of, limits, market, ship};
 
@@ -50,7 +51,7 @@ fn three_markets_by_hand() {
         assert_eq!(graph.millis(edge), Millis(155_000));
     }
 
-    let best = ratio::max_ratio_cycle(&graph).expect("the triangle is a cycle");
+    let best = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("the triangle is a cycle");
     assert!(best.proved);
     assert_eq!(best.nodes.len(), 3);
     assert_eq!(best.rate, Ratio::new(Credits(2_400_000), Millis(465_000)));
@@ -64,7 +65,7 @@ fn three_markets_by_hand() {
 #[test]
 fn three_markets_end_to_end() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
+    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all(), Watch::unlimited());
 
     assert!(solution.round_trip.is_empty());
 
@@ -91,7 +92,7 @@ fn three_markets_end_to_end() {
 #[test]
 fn a_full_hold_and_a_full_purse_prove_the_result_outright() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all());
+    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all(), Watch::unlimited());
     for route in solution.loops.iter().chain(&solution.single) {
         // Every route in the list is either proved or explicitly labelled;
         // there is no third state where a rate reads as proved by omission.
@@ -109,7 +110,7 @@ fn a_thinner_purse_says_so_instead() {
     let markets = three_markets();
     // 50,000 credits buys 500 tons at 100 each: the cap binds on every leg.
     let poor = model::ShipConfig { cargo: Tons(1_000), credits: Credits(50_000) };
-    let solution = solve(&markets, TimeModel::default(), &poor, &limits(), Wanted::all());
+    let solution = solve(&markets, TimeModel::default(), &poor, &limits(), Wanted::all(), Watch::unlimited());
     let route = &solution.loops[0];
     assert_eq!(route.legs[0].choice.units, Tons(500));
     assert_eq!(route.rate().guarantee, Guarantee::OptimalForStartingCredits);
@@ -155,7 +156,7 @@ fn the_completion_bound_does_not_prune_a_short_winner() {
     let limits = model::Limits { max_stops: Some(5), min_distinct: Some(3), ..limits() };
     let graph = graph_of(&markets, &limits);
 
-    let free = ratio::max_ratio_cycle(&graph).expect("a cycle");
+    let free = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
     assert_eq!(free.nodes, vec![6, 7], "the unconstrained optimum is the two-stop shuttle");
 
     let winner = Ratio::new(Credits(900_000), Millis(465_000));
@@ -172,7 +173,8 @@ fn the_completion_bound_does_not_prune_a_short_winner() {
     );
     assert!(winner > runner_up, "the winner must actually be the winner");
 
-    let found = distinct::best_with_min_stops(&graph, &limits, 3).expect("a three-stop loop");
+    let found = distinct::best_with_min_stops(&graph, &limits, 3, Watch::unlimited())
+        .expect("a three-stop loop");
     assert_eq!(found.rate, winner);
     assert_eq!(found.nodes, vec![3, 4, 5]);
     assert!(found.proved);
@@ -188,7 +190,8 @@ fn the_shuttle_is_still_found_when_the_floor_allows_it() {
     let markets = two_triangles_and_a_shuttle();
     let limits = model::Limits { max_stops: Some(5), min_distinct: Some(2), ..limits() };
     let graph = graph_of(&markets, &limits);
-    let found = distinct::best_with_min_stops(&graph, &limits, 2).expect("a loop");
+    let found =
+        distinct::best_with_min_stops(&graph, &limits, 2, Watch::unlimited()).expect("a loop");
     assert_eq!(found.nodes, vec![6, 7]);
     assert_eq!(found.rate, Ratio::new(Credits(682_000), Millis(310_000)));
 }
@@ -243,13 +246,17 @@ fn a_maximum_scale_cycle_prices_without_overflow() {
         &edm_route::time::Geometry::new(&markets, TimeModel::default()),
         &ship,
         &limits(),
+        Watch::unlimited(),
     );
-    let best = ratio::max_ratio_cycle(&graph).expect("the ring is a cycle");
+    let best = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("the ring is a cycle");
     assert!(best.proved);
     assert_eq!(best.nodes.len(), stations);
     let (profit, _, _) = round::price_cycle(&graph, &best.nodes).expect("a priced ring");
     assert_eq!(profit, Credits(stations as i64 * (1 << 15) * ((1 << 20) - 1)));
     // The same instance through the bounded solver, which multiplies the
     // largest quantities of the two.
-    assert_eq!(bounded::best_bounded(&graph, stations).map(|b| b.rate), Some(best.rate));
+    assert_eq!(
+        bounded::best_bounded(&graph, stations, Watch::unlimited()).map(|b| b.rate),
+        Some(best.rate)
+    );
 }

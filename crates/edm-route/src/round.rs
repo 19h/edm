@@ -238,6 +238,31 @@ pub fn listing(
     routes
 }
 
+/// Stamp a whole listing with the claim its head carries, when that claim is
+/// that the search did not finish.
+///
+/// **A cut-short search taints the list, not just its head.** The head of an
+/// abandoned run is the warm start — the *worst* loop in the listing — so
+/// re-ranking floats the runners-up above it and `Threading::rethread`'s
+/// `truncate(top_n)` then drops the only route that said the clock ran out.
+/// Every remaining row would read `Heuristic { RunnerUp }`, whose documented
+/// meaning is "only the head of the list's optimality was established" — about
+/// a head no longer in the list. The user would see a route below the optimum
+/// with nothing in the data saying the search stopped early, and under `--json`
+/// there is no progress line to have said it either.
+///
+/// Marking every route is not a hedge: if the search did not finish, no route
+/// can claim its *ranking* is complete, because the one that would have beaten
+/// it may never have been found.
+pub fn taint_unfinished(routes: &mut [Route], proved: bool) {
+    if proved {
+        return;
+    }
+    for route in routes {
+        route.guarantee = Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted };
+    }
+}
+
 struct Enumeration<'a> {
     neighbours: &'a [Vec<u32>],
     rank: &'a [u32],
@@ -288,6 +313,7 @@ mod tests {
     use crate::graph::{Pools, TradeGraph};
     use crate::num::Ratio;
     use crate::report::RouteKind;
+    use crate::watch::Watch;
 
     #[test]
     fn a_round_trip_carries_different_cargo_each_way() {
@@ -297,7 +323,13 @@ mod tests {
         ];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         let routes = solve(&graph, &geometry, &limits());
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].kind, RouteKind::RoundTrip);
@@ -311,7 +343,13 @@ mod tests {
             [market(1, 0.0, &[(0, 100, 500)], &[]), market(2, 5.0, &[], &[(0, 900, 500)])];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         assert!(solve(&graph, &geometry, &limits()).is_empty());
         assert_eq!(best_ratio(&graph), None);
     }
@@ -330,7 +368,13 @@ mod tests {
         let named = |markets: &[crate::model::Market]| {
             let geometry = geometry(markets);
             let graph =
-                TradeGraph::build(&Pools::from_markets(markets), &geometry, &ship(), &limits());
+                TradeGraph::build(
+                    &Pools::from_markets(markets),
+                    &geometry,
+                    &ship(),
+                    &limits(),
+                    Watch::unlimited(),
+                );
             enumerate_cycles(&graph, &geometry, 4, 10_000)
                 .into_iter()
                 .map(|cycle| {
@@ -354,7 +398,13 @@ mod tests {
         ];
         let geometry = geometry(&markets);
         let graph =
-            TradeGraph::build(&Pools::from_markets(&markets), &geometry, &ship(), &limits());
+            TradeGraph::build(
+                &Pools::from_markets(&markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
         let best = best_ratio(&graph).expect("a round trip");
         let (profit, millis, edges) = price_cycle(&graph, &best.nodes).expect("a priced cycle");
         assert_eq!(best.rate, Ratio::new(profit, millis));

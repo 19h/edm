@@ -988,11 +988,17 @@ pub struct RouteConfig {
     /// second.
     pub workers: u32,
     pub rate_per_second: f64,
-    /// `--deadline`, in seconds: how long the whole sweep may take.
+    /// `--deadline`, in seconds: how long the whole run may take.
     ///
-    /// It also bounds one job, because a market may not keep being retried for
+    /// It bounds one job, because a market may not keep being retried for
     /// longer than the run it is part of has left. That is the rule that
     /// replaces R98's unbounded attempt count: wall clock, not attempts.
+    ///
+    /// It bounds the **loop search** for the same reason, and this is the one
+    /// wall clock there is: the search is part of the run, and a second flag
+    /// would let a user set two limits that contradict each other. The
+    /// optimiser is pure and has no clock of its own, so `cmd::route` reads
+    /// this one on its behalf — see `edm_route::watch`.
     pub deadline_seconds: f64,
     pub max_requests: f64,
     pub confirmed: bool,

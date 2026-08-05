@@ -164,7 +164,14 @@ mod tests {
     }
 
     fn solved(ship: ShipConfig, limits: Limits) -> crate::Solution {
-        crate::solve(&instance(), crate::time::TimeModel::default(), &ship, &limits, crate::Wanted::all())
+        crate::solve(
+            &instance(),
+            crate::time::TimeModel::default(),
+            &ship,
+            &limits,
+            crate::Wanted::all(),
+            crate::watch::Watch::unlimited(),
+        )
     }
 
     #[test]

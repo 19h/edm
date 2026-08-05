@@ -56,6 +56,20 @@ const CACHE_NOTE_THRESHOLD: usize = 500;
 /// one to sixteen, not from sixteen to sixty-four.
 const ARDENT_CONCURRENCY: usize = 16;
 
+/// How long the optimiser may work in silence before it starts saying so.
+///
+/// Two seconds. Below it the search is over before a human could read a line,
+/// and printing anyway would put three lines of scaffolding under every small
+/// run — including the parity harness's, whose output is compared byte for
+/// byte. Above it the run is one a user is waiting on.
+const SOLVE_QUIET_MS: f64 = 2_000.0;
+
+/// The floor on the gap between two search progress lines.
+///
+/// The graph build reports every few thousand supply rows, which at five
+/// thousand markets is tens of times a second. A terminal is not a log.
+const SOLVE_LINE_MS: f64 = 500.0;
+
 /// Run the command.
 #[expect(
     clippy::too_many_lines,
@@ -281,8 +295,76 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     }
 
     // Read before `rank` consumes the listings; the ranking cannot change it.
-    let unreached = !acquired.unreached.is_empty();
-    rank(out, config, acquired, &selection.keep, &coverage);
+    let unreached =
+        !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
+
+    // The optimiser has no clock and no output. Both are lent to it here, and
+    // `edm_route::watch` explains why they cannot be anywhere else.
+    //
+    // `--deadline` is the *run's* budget, and the search is part of the run:
+    // "how long the whole sweep may take" already reads as a limit on the
+    // thing the user started, and the phase that turned out to be the long one
+    // is the search. A second wall-clock flag would let two limits contradict
+    // each other and would leave the default answer to "how long may the
+    // search take" at "forever" — which is what it was. Whatever the sweep
+    // left is what the optimiser gets; when that is nothing, the search hands
+    // back the best route it holds and claims nothing about it.
+    let deadline_ms = started_ms + config.deadline_seconds * 1000.0;
+    let clock = &app.ports.clock;
+    let search_expired = || clock.now_ms() >= deadline_ms;
+    // Progress is throttled here rather than in the pure crate, because only
+    // this side owns a clock — and the rule needs one. A line is worth showing
+    // once the search has been silent long enough for the silence to be the
+    // problem, and a radius-10 sweep solves in under a millisecond and would
+    // otherwise gain three lines of noise. Measured 2026-08-06: a radius-100
+    // sweep spends 127 s in the graph build and up to minutes in a single
+    // Dinkelbach round, so this threshold never delays a report anyone is
+    // waiting for.
+    let solving_since = std::cell::Cell::new(f64::NAN);
+    let last_line_ms = std::cell::Cell::new(f64::NEG_INFINITY);
+    // Whether a build counter has been shown, which is the only condition under
+    // which finishing one is worth a line.
+    let build_shown = std::cell::Cell::new(false);
+    let report_progress = |event: edm_route::watch::Event| {
+        let now = clock.now_ms();
+        if solving_since.get().is_nan() {
+            solving_since.set(now);
+        }
+        // Never throttled: `Abandoned` withdraws a claim, and a withdrawn claim
+        // nobody saw is worse than no progress line at all.
+        //
+        // A *completed* build is urgent for the opposite reason — it is the
+        // line that says a counter stopped because the phase ended rather than
+        // because it hung — but only when a counter was shown. The closing
+        // report arrives microseconds after the previous one, so the throttle
+        // suppressed it every time and a real radius-100 run watched the count
+        // stop at 119/154; making it unconditional instead gave a two-market
+        // sweep a build line it had no reason to print.
+        let urgent = match event {
+            edm_route::watch::Event::Abandoned => true,
+            edm_route::watch::Event::Building { done, total, .. } => {
+                done == total && build_shown.get()
+            }
+            _ => false,
+        };
+        if !urgent
+            && (now - solving_since.get() < SOLVE_QUIET_MS
+                || now - last_line_ms.get() < SOLVE_LINE_MS)
+        {
+            return;
+        }
+        last_line_ms.set(now);
+        if matches!(event, edm_route::watch::Event::Building { .. }) {
+            build_shown.set(true);
+        }
+        out.progress(&view::progress(event));
+    };
+    let watch = edm_route::watch::Watch::unlimited().until(&search_expired);
+    // Under `--json` stdout is one document \[C28\], so there is nowhere for a
+    // progress line to go.
+    let watch = if config.quiet { watch } else { watch.reporting(&report_progress) };
+
+    rank(out, config, acquired, &selection.keep, &coverage, watch);
 
     // Set, not merely raised. `exchange::send` assigns exit 1 for every non-2xx
     // it sees, which is R75 and is exactly right for the ported commands — but
@@ -322,7 +404,9 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         markets_found: m.selection.keep.len(),
         markets_polled: m.acquired.listings.len(),
         markets_priced: m.priced,
-        markets_failed: m.acquired.unreached.len(),
+        // The unreached, plus any the run's `--deadline` cut off before they
+        // were attempted — which is what they are.
+        markets_failed: m.acquired.unreached.len() + m.acquired.tally.markets_out_of_time,
         markets_absent: m.acquired.tally.markets_absent,
         cache_hits: m.acquired.cache.fresh,
         requests_sent: m.spent.requests,
@@ -340,6 +424,7 @@ fn rank(
     acquired: acquire::Acquired,
     stations: &[ardent::ArdentStation],
     coverage: &RouteCoverage,
+    watch: edm_route::watch::Watch<'_>,
 ) {
     // By value: `ingest::markets` drops each payload as it builds its `Market`,
     // and at five thousand markets those payloads are ~2.3 GiB that would
@@ -372,6 +457,7 @@ fn rank(
         &ship(config),
         &limits(config),
         edm_route::Wanted::only(kind),
+        watch,
     );
     let routes = match kind {
         RouteKind::SingleHop => &solution.single,

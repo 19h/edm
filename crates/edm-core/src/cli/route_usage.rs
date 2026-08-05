@@ -59,9 +59,12 @@ Spending
   --max-requests <n>       ceiling, default {max_requests}; nothing is sent above it
   --yes                    required above {confirm} requests
   --rps <n>                requests per second, default {rps}
-  --deadline <s>           how long the whole sweep may take, default {deadline}.
-                           It bounds one market's retries too: a market may not
-                           be retried for longer than the run has left
+  --deadline <s>           how long the whole run may take, default {deadline}.
+                           It bounds one market's retries — a market may not be
+                           retried for longer than the run has left — and the
+                           loop search, which gets whatever the sweep did not
+                           spend. A search stopped by it reports the best route
+                           it found and says it did not prove it
   --max-age <minutes>      reuse cached prices younger than this, default {max_age}
   --no-cache               ignore the cache entirely   --refresh   re-poll everything
   --cache-dir <path>       default $XDG_CACHE_HOME/edm/route
@@ -71,7 +74,9 @@ Spending
 
 Output
   One line per market as it lands, unless --json. The sweep is minutes long on a
-  wide radius, and silence is indistinguishable from a stall.
+  wide radius, and silence is indistinguishable from a stall. The search after
+  it says where it has got to and what the best rate so far is, once it has been
+  working for more than a couple of seconds.
   --json                   one document, for piping; silences the progress lines
   --detail                 expand every leg of every route
   --verbose, -v            say what the pacer is doing too: throttles, retries

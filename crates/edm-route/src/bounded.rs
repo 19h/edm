@@ -36,6 +36,7 @@ use crate::ratio::Component;
 use crate::report::{Guarantee, HeuristicReason, Route};
 use crate::round;
 use crate::time::Geometry;
+use crate::watch::{Event, Watch};
 
 /// See `ratio::MAX_ROUNDS`; the same argument applies to this iteration.
 const MAX_ROUNDS: u32 = 4_096;
@@ -57,12 +58,31 @@ pub struct BoundedCycle {
     pub proved: bool,
 }
 
+/// What one sweep over every origin established.
+///
+/// Three outcomes for the same reason `ratio::Probe` has three: `Exhausted` is
+/// the stopping condition and therefore the optimality proof, `Abandoned` is
+/// the absence of one, and an `Option` cannot tell them apart.
+enum Step {
+    /// A simple cycle that beats the rate, and the rate it achieves.
+    Improved(Vec<u32>, Ratio),
+    /// Every origin was searched and nothing beats the rate.
+    Exhausted,
+    /// The caller's budget ran out first.
+    Abandoned,
+}
+
 /// Runs the bounded-length search.
 ///
 /// `k` is a cap on the number of stops, which for a cycle is also the number of
 /// legs. A `k` below two admits nothing: a cycle needs two stations.
+///
+/// The dynamic program is `O(k·m)` per origin and there are `n` origins, so one
+/// round is `O(n·k·m)` — worse than the unbounded solver's probe, not better.
+/// At the 5,049 markets and 24 million legs a radius-100 sweep produces that is
+/// hours, which is what the budget is for; when it fires, `proved` is false.
 #[must_use]
-pub fn best_bounded(graph: &TradeGraph, k: usize) -> Option<BoundedCycle> {
+pub fn best_bounded(graph: &TradeGraph, k: usize, watch: Watch<'_>) -> Option<BoundedCycle> {
     if k < 2 {
         return None;
     }
@@ -76,34 +96,64 @@ pub fn best_bounded(graph: &TradeGraph, k: usize) -> Option<BoundedCycle> {
     let warm = round::best_ratio(graph);
     let mut rate = warm.map_or(Ratio::ZERO, |best| best.rate);
     let mut witness: Option<Vec<u32>> = warm.map(|best| best.nodes.to_vec());
+    // Hoisted out of the round loop; see `Component::reduce_into`.
+    let mut reduced = Vec::new();
 
-    for _ in 0..MAX_ROUNDS {
-        let Some(improved) = improve(graph, &components, rate, k) else {
-            return Some(BoundedCycle { nodes: witness?, rate, proved: true });
-        };
-        debug_assert!(improved.1 > rate, "an improving walk must beat the rate that found it");
-        debug_assert!(improved.0.len() <= k, "decomposition never lengthens a walk");
-        rate = improved.1;
-        witness = Some(improved.0);
+    for round_index in 1..=MAX_ROUNDS {
+        watch.report(Event::Round {
+            round: round_index,
+            rate,
+            stops: witness.as_ref().map_or(0, Vec::len),
+        });
+        match improve(graph, &components, rate, Shape { k, watch }, &mut reduced) {
+            Step::Exhausted => return Some(BoundedCycle { nodes: witness?, rate, proved: true }),
+            Step::Abandoned => {
+                // See `ratio::max_ratio_cycle`: the withdrawal is reported only
+                // when there is a route to withdraw the claim about.
+                let nodes = witness?;
+                watch.report(Event::Abandoned);
+                return Some(BoundedCycle { nodes, rate, proved: false });
+            }
+            Step::Improved(nodes, improved) => {
+                debug_assert!(improved > rate, "an improving walk must beat the rate it found");
+                debug_assert!(nodes.len() <= k, "decomposition never lengthens a walk");
+                rate = improved;
+                witness = Some(nodes);
+            }
+        }
     }
 
     Some(BoundedCycle { nodes: witness?, rate, proved: false })
 }
 
+/// The cap the search runs under, and the budget it runs against.
+#[derive(Clone, Copy)]
+struct Shape<'a> {
+    k: usize,
+    watch: Watch<'a>,
+}
+
 /// Finds a simple cycle of at most `k` stops that beats `rate`, if one exists.
 fn improve(
     graph: &TradeGraph,
-    components: &[Component],
+    components: &[Component<'_>],
     rate: Ratio,
-    k: usize,
-) -> Option<(Vec<u32>, Ratio)> {
+    shape: Shape<'_>,
+    reduced: &mut Vec<i128>,
+) -> Step {
+    let k = shape.k;
     for component in components {
-        let reduced = component.reduced_weights(rate);
+        component.reduce_into(rate, reduced);
         let edges = component.edge_list();
         let n = component.nodes().len();
 
         for origin in 0..n as u32 {
-            let Some(walk) = best_closed_walk(n, edges, &reduced, origin, k) else { continue };
+            // Once per origin: one origin's dynamic program is `O(k·m)`, which
+            // is the smallest unit here whose cost is bounded.
+            if shape.watch.expired() {
+                return Step::Abandoned;
+            }
+            let Some(walk) = best_closed_walk(n, edges, reduced, origin, k) else { continue };
             let global = component.to_global(&walk);
             // The walk beats `rate`; by the mediant inequality one of its
             // simple pieces does too, and no piece is longer than the walk.
@@ -131,12 +181,12 @@ fn improve(
                     "the mediant inequality guarantees a piece at least as good as the walk"
                 );
                 if candidate > rate {
-                    return Some((piece, candidate));
+                    return Step::Improved(piece, candidate);
                 }
             }
         }
     }
-    None
+    Step::Exhausted
 }
 
 /// The best closed walk of at most `k` legs from `origin`, if it is positive.
@@ -231,15 +281,19 @@ pub fn solve(
     geometry: &Geometry<'_>,
     limits: &Limits,
     k: usize,
+    watch: Watch<'_>,
 ) -> Vec<Route> {
-    let Some(best) = best_bounded(graph, k) else { return Vec::new() };
+    let Some(best) = best_bounded(graph, k, watch) else { return Vec::new() };
     let head_guarantee = if best.proved {
         Guarantee::OptimalForStartingCredits
     } else {
         Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
     };
     let Some(head) = round::route_of(graph, geometry, &best.nodes) else { return Vec::new() };
-    round::listing(graph, geometry, limits, head.with_guarantee(head_guarantee), 2..=k)
+    let mut listing =
+        round::listing(graph, geometry, limits, head.with_guarantee(head_guarantee), 2..=k);
+    round::taint_unfinished(&mut listing, best.proved);
+    listing
 }
 
 #[cfg(test)]
@@ -247,7 +301,42 @@ mod tests {
     use super::{best_bounded, decompose};
     use crate::fixture::{geometry, limits, market, ship};
     use crate::graph::{Pools, TradeGraph};
+    use crate::model::Market;
     use crate::ratio;
+    use crate::report::{Guarantee, HeuristicReason};
+    use crate::watch::Watch;
+
+    /// A three-cycle worth more per hour than either two-cycle inside it.
+    fn triangle() -> [Market; 3] {
+        [
+            market(1, 0.0, &[(0, 100, 500)], &[(2, 900, 500)]),
+            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
+            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
+        ]
+    }
+
+    /// The same triangle with the closing leg thinned, so the round-trip warm
+    /// start is *not* the answer and a round of the iteration has to happen for
+    /// the three-cycle to be found. A budget that expires first therefore
+    /// changes the answer as well as the claim, which is what makes the test
+    /// below able to fail.
+    fn improving_triangle() -> [Market; 3] {
+        [
+            market(1, 0.0, &[(0, 100, 500)], &[(2, 400, 500)]),
+            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
+            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
+        ]
+    }
+
+    fn build(markets: &[Market]) -> TradeGraph {
+        TradeGraph::build(
+            &Pools::from_markets(markets),
+            &geometry(markets),
+            &ship(),
+            &limits(),
+            Watch::unlimited(),
+        )
+    }
 
     #[test]
     fn a_walk_that_repeats_a_station_splits_into_two_cycles() {
@@ -274,20 +363,11 @@ mod tests {
 
     #[test]
     fn a_cap_of_two_is_exactly_the_round_trip() {
-        // A three-cycle worth more per hour than either two-cycle in it: under
-        // a cap of two it must not be found, and the two-cycle must be.
-        let markets = [
-            market(1, 0.0, &[(0, 100, 500)], &[(2, 900, 500)]),
-            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
-            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
-        ];
-        let graph = TradeGraph::build(
-            &Pools::from_markets(&markets),
-            &geometry(&markets),
-            &ship(),
-            &limits(),
-        );
-        let two = best_bounded(&graph, 2).expect("a two-cycle");
+        // Under a cap of two the three-cycle must not be found, and the
+        // two-cycle must be.
+        let markets = triangle();
+        let graph = build(&markets);
+        let two = best_bounded(&graph, 2, Watch::unlimited()).expect("a two-cycle");
         assert_eq!(two.nodes.len(), 2);
         assert!(two.proved);
         assert_eq!(two.rate, crate::round::best_ratio(&graph).expect("a round trip").rate);
@@ -295,41 +375,51 @@ mod tests {
 
     #[test]
     fn a_cap_at_the_graph_size_agrees_with_the_unbounded_solver() {
-        let markets = [
-            market(1, 0.0, &[(0, 100, 500)], &[(2, 900, 500)]),
-            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
-            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
-        ];
-        let graph = TradeGraph::build(
-            &Pools::from_markets(&markets),
-            &geometry(&markets),
-            &ship(),
-            &limits(),
-        );
-        let free = ratio::max_ratio_cycle(&graph).expect("a cycle");
-        let capped = best_bounded(&graph, markets.len()).expect("a cycle");
+        let markets = triangle();
+        let graph = build(&markets);
+        let free = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
+        let capped =
+            best_bounded(&graph, markets.len(), Watch::unlimited()).expect("a cycle");
         assert_eq!(free.rate, capped.rate);
     }
 
     #[test]
     fn every_answer_is_a_simple_cycle() {
-        let markets = [
-            market(1, 0.0, &[(0, 100, 500)], &[(2, 900, 500)]),
-            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
-            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
-        ];
-        let graph = TradeGraph::build(
-            &Pools::from_markets(&markets),
-            &geometry(&markets),
-            &ship(),
-            &limits(),
-        );
+        let markets = triangle();
+        let graph = build(&markets);
         for k in 2..=6 {
-            let Some(found) = best_bounded(&graph, k) else { continue };
+            let Some(found) = best_bounded(&graph, k, Watch::unlimited()) else { continue };
             let mut sorted = found.nodes.clone();
             sorted.sort_unstable();
             sorted.dedup();
             assert_eq!(sorted.len(), found.nodes.len(), "{:?} revisits a station", found.nodes);
         }
+    }
+
+    #[test]
+    fn an_exhausted_budget_never_claims_the_bounded_optimum() {
+        let markets = improving_triangle();
+        let graph = build(&markets);
+        let free = best_bounded(&graph, 3, Watch::unlimited()).expect("a cycle");
+        assert!(free.proved, "the same instance is provable with no budget");
+        assert_eq!(free.nodes.len(), 3);
+
+        let spent = || true;
+        let stopped =
+            best_bounded(&graph, 3, Watch::unlimited().until(&spent)).expect("the warm start");
+        assert!(!stopped.proved);
+        assert_eq!(stopped.nodes.len(), 2, "the round-trip warm start, unimproved");
+
+        let routes = super::solve(
+            &graph,
+            &geometry(&markets),
+            &limits(),
+            3,
+            Watch::unlimited().until(&spent),
+        );
+        assert_eq!(
+            routes[0].guarantee,
+            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+        );
     }
 }

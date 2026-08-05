@@ -158,6 +158,21 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
         }
     }
 
+    /// Whether the run's own wall-clock budget is spent.
+    ///
+    /// `--deadline` is documented as how long the whole sweep may take, and the
+    /// retry budget already carries it — but only [`Budget::verdict`] consulted
+    /// it, which is reached solely from a *failed* attempt. A sweep that simply
+    /// took a long time and succeeded at everything ran past the limit
+    /// untouched, and then handed the optimiser a deadline that had already
+    /// expired: every route would come back marked `SearchBudgetExhausted`
+    /// because the search never got a millisecond, which reads as the search
+    /// having been too slow.
+    #[must_use]
+    pub fn past_deadline(&self) -> bool {
+        self.clock.now_ms() - self.started_ms >= self.pacing.budget.run_deadline_ms
+    }
+
     /// Whether the run should keep going at all.
     #[must_use]
     pub fn tripped(&self) -> Option<edm_core::pace::TripReason> {

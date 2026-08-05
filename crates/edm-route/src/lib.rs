@@ -2,6 +2,9 @@
 //!
 //! This crate is pure: it takes markets in and returns data out. It never
 //! renders, never formats, and holds no strings the caller did not give it.
+//! It also has no clock — so a wall-clock budget and a progress report both
+//! arrive from outside, through [`watch::Watch`], and that module explains why
+//! a step counter would not have done instead.
 //!
 //! # What it computes
 //!
@@ -64,12 +67,14 @@ pub mod thread;
 pub mod time;
 pub mod topn;
 pub mod view;
+pub mod watch;
 pub mod weight;
 
 use crate::graph::{Pools, TradeGraph};
 use crate::model::{Limits, Market, ShipConfig};
 use crate::report::{Caveat, Route, RouteKind};
 use crate::time::{Geometry, TimeModel};
+use crate::watch::Watch;
 
 /// Everything the optimiser found, one list per shape.
 #[derive(Clone, Debug, Default)]
@@ -129,6 +134,11 @@ impl Default for Wanted {
 /// The shape of the loop search is taken from [`Limits::max_stops`] and
 /// [`Limits::min_distinct`]: unconstrained, capped in length, or required to
 /// visit a minimum number of distinct stations.
+///
+/// `watch` is where the caller lends its clock and its ears; see [`watch`] for
+/// why a wall-clock budget has to arrive from outside a crate this pure.
+/// [`Watch::unlimited`] is the shape every exact claim in this crate's tests is
+/// made under, and it is what the search did before there was a budget at all.
 #[must_use]
 pub fn solve(
     markets: &[Market],
@@ -136,10 +146,11 @@ pub fn solve(
     ship: &ShipConfig,
     limits: &Limits,
     wanted: Wanted,
+    watch: Watch<'_>,
 ) -> Solution {
     let geometry = Geometry::new(markets, time);
     let pools = Pools::from_markets(markets);
-    let graph = TradeGraph::build(&pools, &geometry, ship, limits);
+    let graph = TradeGraph::build(&pools, &geometry, ship, limits, watch);
 
     let mut single =
         if wanted.single { single::solve(&pools, &geometry, ship, limits) } else { Vec::new() };
@@ -152,11 +163,16 @@ pub fn solve(
     } else {
         Vec::new()
     };
+    // Only the requested shape is searched, which is also what keeps the
+    // budget's withdrawal notice honest: an `Abandoned` event can now only come
+    // from the search whose table is about to be printed. Running all three and
+    // printing one meant a loop search's "reporting the best route it had,
+    // unproved" could be announced over an exhaustively proved round trip.
     let mut loops = if wanted.loops {
         match (limits.min_distinct, limits.max_stops) {
-            (Some(k_min), _) => distinct::solve(&graph, &geometry, limits, k_min),
-            (None, Some(k)) => bounded::solve(&graph, &geometry, limits, k),
-            (None, None) => ratio::solve(&graph, &geometry, limits),
+            (Some(k_min), _) => distinct::solve(&graph, &geometry, limits, k_min, watch),
+            (None, Some(k)) => bounded::solve(&graph, &geometry, limits, k, watch),
+            (None, None) => ratio::solve(&graph, &geometry, limits, watch),
         }
     } else {
         Vec::new()
@@ -215,4 +231,93 @@ mod exactness {
         assert_eq!(named, vec!["edm-core.workspace = true"]);
     }
 
+}
+
+#[cfg(test)]
+mod budget {
+    //! The one rule that has to hold across every solver at once.
+
+    use crate::fixture::{limits, market};
+    use crate::model::{Limits, ShipConfig};
+    use crate::num::{Credits, Tons};
+    use crate::report::{Guarantee, HeuristicReason};
+    use crate::time::TimeModel;
+    use crate::watch::Watch;
+
+    /// Three stations whose best loop is the triangle, plus a ship rich enough
+    /// that the credit cap provably never binds — which is the condition
+    /// [`crate::thread`] upgrades `OptimalForStartingCredits` to
+    /// `ProvedOptimal` on. Every route in this instance is therefore one step
+    /// away from the strongest claim the crate can make.
+    fn instance() -> Vec<crate::model::Market> {
+        vec![
+            market(1, 0.0, &[(0, 100, 500)], &[(2, 400, 500)]),
+            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500)]),
+            market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
+        ]
+    }
+
+    fn solved(limits: &Limits, watch: Watch<'_>) -> crate::Solution {
+        let ship = ShipConfig { cargo: Tons(500), credits: Credits(1_000_000_000) };
+        crate::solve(&instance(), TimeModel::default(), &ship, limits, crate::Wanted::all(), watch)
+    }
+
+    #[test]
+    fn an_unlimited_search_still_proves_this_instance_optimal() {
+        // The control. Without it the test below could pass because nothing
+        // was ever provable here.
+        let solution = solved(&limits(), Watch::unlimited());
+        assert_eq!(solution.loops[0].guarantee, Guarantee::ProvedOptimal);
+        assert_eq!(solution.loops[0].legs.len(), 3);
+    }
+
+    #[test]
+    fn an_exhausted_budget_never_yields_proved_optimal() {
+        // Every loop shape, because the three solvers reach the claim by three
+        // different routes and each one has to withdraw it separately.
+        let spent = || true;
+        let watch = Watch::unlimited().until(&spent);
+        for (limits, answers) in [
+            (limits(), true),
+            (Limits { max_stops: Some(3), ..limits() }, true),
+            // A floor of three stops is a different question, and the warm
+            // start is a two-cycle: it does not answer that question, so an
+            // abandoned `min_distinct` search reports nothing rather than
+            // reporting a route that breaks the constraint it was given.
+            (Limits { min_distinct: Some(3), ..limits() }, false),
+        ] {
+            let solution = solved(&limits, watch);
+            let claims: Vec<Guarantee> =
+                solution.loops.iter().map(|route| route.guarantee).collect();
+            // The abandoned search's own answer is in the list and says so.
+            assert_eq!(
+                claims.contains(&Guarantee::Heuristic {
+                    reason: HeuristicReason::SearchBudgetExhausted
+                }),
+                answers,
+                "{limits:?}: {claims:?}"
+            );
+            // And nothing in the list claims optimality — not the head, and not
+            // a runner-up that out-ranked it once threading re-sorted them.
+            // `rethread` upgrades `OptimalForStartingCredits` to
+            // `ProvedOptimal` whenever the credit cap cannot bind, which it
+            // cannot here, so a solver that returned the wrong guarantee would
+            // arrive at the strongest claim in the crate rather than at a
+            // slightly-too-strong one.
+            for guarantee in &claims {
+                assert!(
+                    !matches!(
+                        guarantee,
+                        Guarantee::ProvedOptimal | Guarantee::OptimalForStartingCredits
+                    ),
+                    "{limits:?}: {claims:?}"
+                );
+            }
+            // A rate is unreadable except through `rate()`, so the claim has to
+            // survive that accessor too.
+            for route in &solution.loops {
+                assert_eq!(route.rate().guarantee, route.guarantee);
+            }
+        }
+    }
 }

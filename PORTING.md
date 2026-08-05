@@ -90,6 +90,43 @@ gets an `XDG_CACHE_HOME` under its own scenario directory.
 
 Recorded when an assumption made while planning turned out to be wrong.
 
+- **The trade graph is dense, and `graph.rs` said the opposite.** Its module
+  comment justified the commodity-major build with "most market pairs share no
+  tradeable commodity at all". The pivot is right and the reason was wrong.
+  Measured 2026-08-06 over the 22 real market payloads the first live run
+  cached: `Σ_c |suppliers| · |buyers|` is **7,038** against a pair-major
+  180,642, so commodity-major is 25× cheaper — but **410 of the 462 ordered
+  pairs, 89%, have a profitable trade between them**, and over a cached
+  5,049-market sweep it is **95%**. Three things follow, and all three were
+  costing whole minutes:
+
+  - the build is quadratic in the market count with no help from the data —
+    **127 s and 24,292,232 legs at 5,049 markets**, in silence, with a
+    transient peak of **4.1 GiB**;
+  - the decomposition is one component holding 5,045 of those 5,049 nodes, so
+    `ratio::Component` was copying the whole edge list to re-index it into
+    something nearly identical;
+  - one Bellman-Ford probe cannot exit early while a positive cycle exists —
+    the early exit *is* the stopping condition — so every Dinkelbach round but
+    the last costs `n·m` relaxations, 1.2e11 of them here. On a comparable
+    5,000-market instance where the iteration did improve, one round took
+    **205 s**.
+
+  Fixed by addressing the graph's edge arrays instead of copying them
+  (556 MiB → 278 MiB of component, and a measured 2,561 → 2,299 MiB peak for
+  the search phase), hoisting the reduced-weight buffer out of the round loop,
+  and giving the search a caller-supplied wall-clock budget and progress sink
+  (`edm_route::watch`). The pure crate has no clock, so the budget is a
+  predicate the caller answers; `edm_route::watch` records why a step counter
+  could not have stood in for one.
+
+  Two claims in the investigation that prompted this did **not** survive
+  measurement. The build was estimated at 10-48 s and is 127 s. And the
+  single-component shortcut it asked for does not fire on real data at all:
+  four of the 5,049 stations trade with nobody, so `sccs()` returns five
+  components, not one. The fix is the general one; the shortcut is kept because
+  it is four bytes an edge cheaper when it does fire.
+
 - **This tree is hand-formatted and there is no `rustfmt.toml`.** `cargo fmt`
   rewrites 68 files and ~4,300 lines, and no simple configuration round-trips
   the committed layout — `use_small_heuristics = "Max"` collapses some
@@ -384,6 +421,7 @@ differs is a bug.
 | C27 | `route` paces its requests, backs off on `Retry-After`, trips a breaker and bounds retries by wall clock. | R84 and R98 continue to describe `edm market` exactly. The original has no pacer at all: `market-request.ts:2988` is a `// Request pacing` header with an empty body, and a 429 is requeued immediately with no delay and no header read — affordable for a seven-market system sweep and not for a thousand-market region. |
 | C28 | `route --json` is one well-formed document. | R76's leak — a diagnostic in the middle of the stream — is faithful for the ported commands and is reproduced for them. `route` has no oracle to be faithful to, and a document a consumer cannot parse is not an output format. `Out::aside` sends the plan and diagnostics to stderr when stdout is a document. |
 | C29 | `EDM_JITTER` pins backoff jitter to a fixed fraction of the window. | Backoff jitter is the one random quantity a recorded run cannot reproduce, and it decides how many attempts fit inside a wall-clock budget. It delegates `nonce_bytes` untouched: a pinned nonce is a separate decision with a separate flag. |
+| C30 | `--deadline` bounds the loop search as well as the sweep, and a search it stops reports `Heuristic { SearchBudgetExhausted }` rather than an optimum. | The search is part of the run, so "how long this may take" already covers it; a second wall-clock flag would let two limits contradict each other and would leave the default answer to "how long may the search take" at *forever*. Measured 2026-08-06: 78 s to build the graph and 205 s per improving Dinkelbach round at 5,000 markets. `edm-route` is pure and has no clock, so the budget arrives as a predicate the caller answers — never as a step count, which does not convert to seconds at any fixed rate. |
 
 **Opt-in fixes, all off by default, each an allowlist row only when set:**
 

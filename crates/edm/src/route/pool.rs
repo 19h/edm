@@ -89,6 +89,8 @@ pub struct Tally {
     pub markets_failed: usize,
     /// Answered, and definitively empty. See [`Outcome::absent`].
     pub markets_absent: usize,
+    /// Never attempted, because the run's `--deadline` had already passed.
+    pub markets_out_of_time: usize,
     /// Set when the breaker stopped the run before the queue drained.
     pub abandoned: usize,
 }
@@ -211,6 +213,13 @@ where
                 // The breaker is checked on the way *in*, not on the way out:
                 // a tripped run must stop issuing requests, and every job still
                 // in the queue is then abandoned rather than tried.
+                // The run's own clock, checked where the time is actually
+                // spent. See `Pacer::past_deadline`.
+                if pool.pacer.past_deadline() {
+                    tally.borrow_mut().markets_out_of_time += 1;
+                    retire(outstanding, tx);
+                    continue;
+                }
                 if let Some(reason) = pool.pacer.tripped() {
                     if let (Some(trace), 0) = (pool.trace, tally.borrow().abandoned) {
                         // Once, on the first job to find the breaker open.
@@ -567,5 +576,84 @@ mod tests {
         assert_eq!(tally, Tally::default());
         assert!(abandoned.is_empty());
         assert_eq!(pacer.spent().requests, 0);
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use crate::ports::CountingEntropy;
+    use crate::route::pacer::Pacing;
+    use edm_core::js::text::Metric;
+    use edm_core::pace::{Breaker, Budget, Bucket};
+
+    /// A clock that advances only when the timer sleeps, so the run's own
+    /// deadline is reached by pacing rather than by wall time.
+    #[derive(Debug, Default)]
+    struct Bed {
+        now: std::cell::Cell<f64>,
+    }
+
+    impl Clock for Bed {
+        fn now_ms(&self) -> f64 {
+            self.now.get()
+        }
+        fn uptime_seconds(&self) -> f64 {
+            0.0
+        }
+    }
+
+    impl Timer for Bed {
+        async fn sleep_ms(&self, millis: f64) {
+            self.now.set(self.now.get() + millis);
+        }
+    }
+
+    /// `--deadline` is documented as how long the whole sweep may take, and
+    /// only the *retry* budget consulted it — which is reached solely from a
+    /// failed attempt. A sweep that simply took a long time and succeeded at
+    /// everything ran past its limit untouched, and then handed the optimiser a
+    /// deadline that had already expired, so every route came back marked
+    /// `SearchBudgetExhausted` as though the search had been the slow part.
+    #[test]
+    fn a_sweep_stops_at_the_run_deadline_even_when_nothing_fails() {
+        let bed = Bed::default();
+        let entropy = CountingEntropy::default();
+        let out = Out::capturing(200, Metric::Utf16, false);
+        let pacing = Pacing {
+            // One request per second, and two seconds to spend.
+            bucket: Bucket { rate: 1.0, burst: 1.0, min_rate: 0.5 },
+            budget: Budget { per_job_ms: 1e9, hard_attempts: 8, run_deadline_ms: 2_000.0 },
+            breaker: Breaker { window: 100, threshold: 1.1, ..Breaker::default() },
+            ..Pacing::default()
+        };
+        let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
+        let pool =
+            Pool { pacer: &pacer, out: &out, workers: 1, quiet: true, report: None, trace: None };
+
+        let jobs: Vec<Job> = (0..20)
+            .map(|n| Job::Market {
+                market_id: f64::from(n),
+                station: format!("S{n}"),
+                system: "Sol".to_owned(),
+            })
+            .collect();
+
+        let (tally, abandoned) = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("a current-thread runtime")
+            .block_on(run(&pool, jobs, |_| async {
+                Outcome { status: Some(200), ok: true, ..Outcome::default() }
+            }));
+
+        assert!(tally.markets_out_of_time > 0, "the deadline must cut the run short: {tally:?}");
+        assert!(tally.markets_polled < 20, "and some markets must be left unpolled: {tally:?}");
+        assert_eq!(
+            tally.markets_polled + tally.markets_out_of_time,
+            20,
+            "every job is accounted for: {tally:?}"
+        );
+        assert!(abandoned.is_empty(), "nothing failed, so nothing was given up on");
     }
 }

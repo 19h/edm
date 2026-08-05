@@ -28,6 +28,7 @@ use edm_route::model::{
 };
 use edm_route::Wanted;
 use edm_route::time::TimeModel;
+use edm_route::watch::Watch;
 
 /// The ceiling. See the module docs: this is a quadratic detector, not a
 /// benchmark.
@@ -80,7 +81,14 @@ fn the_runner_up_listing_does_not_rescan_everything_it_has_seen() {
 
     let started = Instant::now();
     let solution =
-        edm_route::solve(&markets, TimeModel::default(), &ShipConfig::default(), &Limits::default(), Wanted::all());
+        edm_route::solve(
+            &markets,
+            TimeModel::default(),
+            &ShipConfig::default(),
+            &Limits::default(),
+            Wanted::all(),
+            Watch::unlimited(),
+        );
     let elapsed = started.elapsed();
 
     // The instance has to actually reach the listing, or the timing proves
@@ -106,7 +114,14 @@ fn the_runner_up_listing_does_not_rescan_everything_it_has_seen() {
 fn runners_up_are_distinct_routes() {
     let markets: Vec<Market> = (0..40).map(market).collect();
     let solution =
-        edm_route::solve(&markets, TimeModel::default(), &ShipConfig::default(), &Limits::default(), Wanted::all());
+        edm_route::solve(
+            &markets,
+            TimeModel::default(),
+            &ShipConfig::default(),
+            &Limits::default(),
+            Wanted::all(),
+            Watch::unlimited(),
+        );
 
     let mut seen: Vec<&[i64]> = Vec::new();
     for route in &solution.round_trip {

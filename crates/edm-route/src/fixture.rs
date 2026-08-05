@@ -91,6 +91,7 @@ pub(crate) fn proved_round_trip() -> crate::report::Route {
         &ship(),
         &limits(),
         Wanted::all(),
+        crate::watch::Watch::unlimited(),
     );
     solution.round_trip.into_iter().next().expect("these two markets trade both ways")
 }
