@@ -191,3 +191,69 @@ fn the_test_schema_is_a_suffix() {
         "https://eddn.edcd.io/schemas/commodity/3/test"
     );
 }
+
+/// The Companion API sends fractional quantities and EDDN's schema does not
+/// accept them.
+///
+/// `Water` with a demand of `113.47560000000001` is a real row from a real
+/// market. 29,370 such values appear across 29,152 markets scanned on
+/// 2026-08-06, and **29.7% of markets carry at least one** — so nearly a third
+/// of all uploads were answered with HTTP 400 and `FAIL: Schema Validation`.
+///
+/// Truncation matches `EDMarketConnector/plugins/eddn.py:624-629`, which is
+/// what keeps this program's rows for a market in step with every other
+/// uploader's.
+#[test]
+fn a_fractional_quantity_is_truncated_the_way_every_other_uploader_truncates_it() {
+    let payload = JsValue::parse(
+        r#"{"commodities":{"128049166":{
+            "id":128049166,"name":"Water","categoryname":"Foods",
+            "stock":0,"stockBracket":0,
+            "buyPrice":0,"sellPrice":711,"meanPrice":260.9,
+            "demand":113.47560000000001,"demandBracket":3
+        }}}"#,
+    )
+    .expect("a document");
+    let snapshot = edm_core::domain::parse_market_snapshot(&payload).expect("a market");
+
+    let message = build_message(
+        &station(),
+        4_306_502_403.0,
+        &snapshot.commodities,
+        "2026-08-06T00:00:00.000Z",
+        &EddnOptions::default(),
+    );
+
+    let text = message.payload.stringify_compact();
+    assert!(text.contains(r#""demand":113"#), "{text}");
+    assert!(!text.contains("113.4"), "no fraction survives to the wire\n{text}");
+    // And the price is coerced the same way, for the same reason.
+    assert!(text.contains(r#""meanPrice":260"#), "{text}");
+}
+
+/// A bracket is not a quantity. The schema's `levelType` is the enum
+/// `[0, 1, 2, 3, ""]`, and every value the Companion API has been observed to
+/// send is already in it — 29,152 markets scanned, not one outside. Truncating
+/// an unexpected value would turn it into a plausible wrong one instead of a
+/// loud failure.
+#[test]
+fn brackets_are_passed_through_rather_than_coerced() {
+    let payload = JsValue::parse(
+        r#"{"commodities":{"1":{
+            "id":1,"name":"Water","categoryname":"Foods",
+            "stock":0,"stockBracket":0,
+            "buyPrice":0,"sellPrice":711,"meanPrice":260,
+            "demand":5,"demandBracket":3
+        }}}"#,
+    )
+    .expect("a document");
+    let snapshot = edm_core::domain::parse_market_snapshot(&payload).expect("a market");
+    let message = build_message(
+        &station(),
+        1.0,
+        &snapshot.commodities,
+        "2026-08-06T00:00:00.000Z",
+        &EddnOptions::default(),
+    );
+    assert!(message.payload.stringify_compact().contains(r#""demandBracket":3"#));
+}

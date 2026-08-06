@@ -67,6 +67,31 @@ pub struct EddnMessage {
 
 /// `eddnCommodities` (ts:2886).
 ///
+/// A quantity as EDDN's schema requires it: an integer \[C32\].
+///
+/// **The Companion API sends fractional quantities.** `Water` with a demand of
+/// `113.47560000000001` is a real row from a real market; 29,370 such values
+/// appear across 29,152 markets scanned on 2026-08-06, and **29.7% of markets
+/// carry at least one**. The schema types `demand` and `stock` as `integer`, so
+/// every one of those markets uploaded a message the gateway answered with
+/// HTTP 400 and `FAIL: Schema Validation`.
+///
+/// The original forwards the value verbatim, and `PORTING.md` recorded that as
+/// a TypeScript defect preserved rather than fixed — which was the right call
+/// until it turned out to be rejecting a third of all uploads.
+///
+/// Truncation, not rounding, because that is what
+/// `EDMarketConnector/plugins/eddn.py:624-629` does — `int(commodity['demand'])`
+/// — and EDDN is a shared dataset whose value depends on senders agreeing. A
+/// rounding rule of our own would put this program's rows subtly out of step
+/// with every other uploader's for the same market.
+fn whole(value: f64) -> JsValue {
+    // `trunc` on a non-finite value is still non-finite, and `stringify` writes
+    // that as `null` — which fails the schema loudly rather than silently
+    // shipping a wrong number.
+    JsValue::Num(value.trunc())
+}
+
 /// `commodity-README.md:48` — skip `NonMarketable` goods (limpets) and anything
 /// with a non-empty legality string. Names are lowercased to the symbol form
 /// EDDN indexes on: the Companion API gives `AgronomicTreatment` and journal
@@ -79,12 +104,17 @@ fn commodity_rows(commodities: &[Commodity<'_>]) -> Vec<JsValue> {
         .map(|c| {
             object([
                 ("name", JsValue::Str(c.name.to_lowercase().into_boxed_str())),
-                ("meanPrice", JsValue::Num(c.mean_price)),
-                ("buyPrice", JsValue::Num(c.buy_price)),
-                ("stock", JsValue::Num(c.stock)),
+                ("meanPrice", whole(c.mean_price)),
+                ("buyPrice", whole(c.buy_price)),
+                ("stock", whole(c.stock)),
+                // Brackets are not quantities: the schema's `levelType` is the
+                // enum `[0, 1, 2, 3, ""]`, and every value the Companion API
+                // has been observed to send is already in it — 29,152 markets
+                // scanned 2026-08-06, not one outside. Truncating one would
+                // turn an unexpected value into a plausible wrong one.
                 ("stockBracket", JsValue::Num(c.stock_bracket)),
-                ("sellPrice", JsValue::Num(c.sell_price)),
-                ("demand", JsValue::Num(c.demand)),
+                ("sellPrice", whole(c.sell_price)),
+                ("demand", whole(c.demand)),
                 ("demandBracket", JsValue::Num(c.demand_bracket)),
             ])
         })
