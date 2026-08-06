@@ -91,6 +91,8 @@ Spending
 Sharing what it reads
   --eddn                   relay every market this run polls to EDDN, as it is
                            polled. --eddn-test uses the gateway's test schema
+  --eddn-rps <n>           messages per second to EDDN, default {eddn_rps}, paced
+                           separately from --rps
   --eddn-max-age <m>       suppress a repeat relay of the same market for this
                            long, default {eddn_age}. A listing served from the
                            local price cache is never relayed at any age: it was
@@ -128,6 +130,7 @@ Examples
         deadline = n(config::DEFAULT_DEADLINE_SECONDS),
         max_age = n(config::DEFAULT_MAX_AGE_MINUTES),
         eddn_age = n(config::DEFAULT_EDDN_MAX_AGE_MINUTES),
+        eddn_rps = n(config::DEFAULT_EDDN_RPS),
         ardent = n(config::DEFAULT_ARDENT_QUERIES),
     )
 }

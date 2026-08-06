@@ -718,6 +718,7 @@ fn an_incomplete_enumeration_is_stated_next_to_the_radius() {
 fn sample_coverage() -> views::RouteCoverage {
     views::RouteCoverage {
         ranked: true,
+        eddn_refusal: None,
         systems_total: 118,
         systems_read: 116,
         systems_failed: 2,
@@ -732,6 +733,7 @@ fn sample_coverage() -> views::RouteCoverage {
             recent: 6,
             cached: 22,
             unnamed: 0,
+            abandoned: 0,
         }),
         cache_hits: 22,
         requests_sent: 267,

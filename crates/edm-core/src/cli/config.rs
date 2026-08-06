@@ -1003,6 +1003,10 @@ pub struct RouteConfig {
     /// `--eddn-max-age`, in minutes: how long a market stays suppressed after
     /// this machine relayed it.
     pub eddn_max_age_minutes: f64,
+    /// `--eddn-rps`: messages per second to EDDN, paced apart from the
+    /// Companion API. They ride inside the market poll, so before this existed
+    /// `--rps` set both.
+    pub eddn_rate_per_second: f64,
 
     // Spending.
     /// Workers behind the pacer.
@@ -1075,6 +1079,17 @@ pub const DEFAULT_RPS: f64 = 4.0;
 /// inside that window mostly reads from cache and so has nothing to relay
 /// anyway.
 pub const DEFAULT_EDDN_MAX_AGE_MINUTES: f64 = 30.0;
+
+/// Messages per second to EDDN, **paced apart from the Companion API**.
+///
+/// They ride inside the market poll, so before this existed `--rps 40` set the
+/// EDDN rate too — and a 565-market import at forty a second got this host a
+/// `403 Forbidden` from the gateway's proxy. EDDN publishes no documented
+/// limit; what it has is a community expectation that a client sends roughly
+/// what one commander generates. A bulk importer cannot honour that literally,
+/// so this is the politeness number: two a second is still thousands an hour,
+/// and the refusal breaker is the real protection.
+pub const DEFAULT_EDDN_RPS: f64 = 2.0;
 pub const DEFAULT_DEADLINE_SECONDS: f64 = 3_600.0;
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
@@ -1183,6 +1198,9 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
         eddn_max_age_minutes: cli
             .optional_decimal(Flag::EddnMaxAge)?
             .unwrap_or(DEFAULT_EDDN_MAX_AGE_MINUTES),
+        eddn_rate_per_second: cli
+            .optional_decimal(Flag::EddnRps)?
+            .unwrap_or(DEFAULT_EDDN_RPS),
         quiet: cli.switch_value(Flag::Json, false)?,
     })
 }

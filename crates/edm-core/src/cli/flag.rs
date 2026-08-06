@@ -87,6 +87,9 @@ pub enum Flag {
     Category,
     /// `--from-file <path>`: one system name or market id per line.
     FromFile,
+    /// `--eddn-rps <n>`: messages per second to EDDN, paced apart from the
+    /// Companion API.
+    EddnRps,
 
     // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -147,7 +150,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 84] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -204,6 +207,7 @@ impl Flag {
         Self::EddnMaxAge,
         Self::Category,
         Self::FromFile,
+        Self::EddnRps,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -293,6 +297,7 @@ impl Flag {
             "eddnmaxage" => Self::EddnMaxAge,
             "category" | "categories" => Self::Category,
             "fromfile" | "file" => Self::FromFile,
+            "eddnrps" => Self::EddnRps,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -364,6 +369,7 @@ impl Flag {
             Self::EddnMaxAge => "--eddn-max-age",
             Self::Category => "--category",
             Self::FromFile => "--from-file",
+            Self::EddnRps => "--eddn-rps",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

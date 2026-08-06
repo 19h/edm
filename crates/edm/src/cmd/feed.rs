@@ -195,15 +195,29 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         out.line(&edm_core::render::views::pace_line(event));
     };
 
+    // EDDN's own bucket. A burst that is fine for Frontier is not fine for a
+    // shared community service, and before this the two shared one rate.
+    let eddn_bucket = edm_core::pace::Bucket {
+        rate: config.eddn_rate_per_second,
+        burst: 1.0,
+        min_rate: edm_core::js::js_min(config.eddn_rate_per_second, 0.5),
+    };
+    let eddn_tokens = std::cell::RefCell::new(edm_core::pace::BucketState::new(
+        eddn_bucket,
+        app.ports.clock.now_ms(),
+    ));
     let eddn = acquire::Eddn {
         options: &options,
         url: &app.overrides.eddn_url,
         relayed: &relayed,
         stations: &stations,
+        bucket: eddn_bucket,
+        tokens: &eddn_tokens,
     };
     let cx = acquire::Cx {
         http: app.http,
         clock: &app.ports.clock,
+        timer,
         entropy: &entropy,
         fs: &app.ports.fs,
         out,
@@ -259,6 +273,7 @@ fn summary(
 
     let mut blocks = edm_core::render::views::coverage_titled("EDDN IMPORT", &RouteCoverage {
         ranked: false,
+        eddn_refusal: acquired.relayed.first_refusal.clone(),
         markets_found: acquired.listings.len() + acquired.unreached.len() + acquired.tally.markets_absent,
         markets_polled: acquired.listings.len(),
         markets_priced: acquired.listings.len(),
@@ -270,6 +285,7 @@ fn summary(
             recent: acquired.relayed.recent,
             cached: acquired.relayed.cached,
             unnamed: acquired.relayed.unnamed,
+            abandoned: acquired.relayed.abandoned,
         }),
         requests_sent: spent.requests,
         throttled: spent.throttled,

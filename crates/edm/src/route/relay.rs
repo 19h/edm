@@ -31,6 +31,16 @@ use crate::ports::Fs;
 /// Bumped when the stored shape changes; an older entry reads as absent.
 const FORMAT_VERSION: u32 = 1;
 
+/// How many refusals in a row before a run stops relaying.
+///
+/// **Relaying is an outward-facing side effect on somebody else's free
+/// service.** When the gateway starts refusing, continuing to send is both
+/// pointless and rude — and the way it refuses is a 403 from a proxy, which is
+/// what happens to a host that has just sent hundreds of messages in a burst.
+/// Five is enough to rule out a single bad message and few enough that a
+/// blocked host stops almost immediately.
+pub const GIVE_UP_AFTER: usize = 5;
+
 /// The record of what this machine has relayed.
 #[derive(Clone, Debug)]
 pub struct Relayed {
@@ -39,10 +49,20 @@ pub struct Relayed {
 }
 
 /// What a run relayed, and what it held back.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Tally {
     pub sent: usize,
     pub failed: usize,
+    /// What the gateway said the first time it refused.
+    ///
+    /// **Five hundred and one rejections once reported no reason at all.** The
+    /// answer was `403 Forbidden` — a proxy refusing the host outright, not a
+    /// schema complaint — and nothing in the output said so, which turned a
+    /// one-line diagnosis into an investigation.
+    pub first_refusal: Option<String>,
+    /// Not attempted, because the gateway had already refused enough times to
+    /// stop. See [`GIVE_UP_AFTER`].
+    pub abandoned: usize,
     /// Suppressed because this machine relayed the same market recently.
     pub recent: usize,
     /// Suppressed because the listing came from the price cache, so there was

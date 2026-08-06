@@ -62,6 +62,14 @@ impl Listing {
 pub struct Eddn<'a> {
     pub options: &'a edm_core::domain::eddn::EddnOptions,
     pub url: &'a str,
+    /// EDDN's own token bucket, **separate from the Companion API's**.
+    ///
+    /// Relays ride inside the market poll, so before this the `--rps` meant for
+    /// Frontier set the rate at which a shared community service was written
+    /// to as well: a 565-market import at forty a second earned this host a
+    /// `403 Forbidden` from the gateway's proxy.
+    pub bucket: edm_core::pace::Bucket,
+    pub tokens: &'a std::cell::RefCell<edm_core::pace::BucketState>,
     /// What this machine has already relayed, and when.
     pub relayed: &'a Relayed,
     /// The stations Ardent named, for the system and station names EDDN's
@@ -87,9 +95,12 @@ pub struct Acquired {
 }
 
 /// Everything the sweep needs that it cannot decide for itself.
-pub struct Cx<'a, H, C, E, F> {
+pub struct Cx<'a, H, C, E, F, T> {
     pub http: &'a H,
     pub clock: &'a C,
+    /// Waiting, for EDDN's own pacing. The Companion API's waiting is the
+    /// pool's.
+    pub timer: &'a T,
     pub entropy: &'a E,
     pub fs: &'a F,
     pub out: &'a Out,
@@ -131,7 +142,7 @@ pub struct Cx<'a, H, C, E, F> {
     pub eddn: Option<&'a Eddn<'a>>,
 }
 
-impl<H, C, E, F> std::fmt::Debug for Cx<'_, H, C, E, F> {
+impl<H, C, E, F, T> std::fmt::Debug for Cx<'_, H, C, E, F, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cx")
             .field("origin", &self.origin)
@@ -194,7 +205,7 @@ pub fn prepare<F: Fs>(
 /// stage one, so the pool stays saturated rather than idling while the last few
 /// systems trickle in.
 pub async fn sweep<H, C, E, F, T>(
-    cx: &Cx<'_, H, C, E, F>,
+    cx: &Cx<'_, H, C, E, F, T>,
     pacer: &Pacer<'_, C, T, E>,
     prepared: Prepared,
     systems: &[(String, f64)],
@@ -271,7 +282,7 @@ where
         .await;
         let mut found = fresh.into_inner();
         found.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
-        return Acquired { listings: found, unreached, cache: hits, tally, relayed: *cx.relayed.borrow() };
+        return Acquired { listings: found, unreached, cache: hits, tally, relayed: cx.relayed.borrow().clone() };
     }
 
     let fresh = RefCell::new(Vec::<Listing>::new());
@@ -301,16 +312,21 @@ where
     // runs over the same region rank identically.
     listings.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
 
-    Acquired { listings, unreached, cache: hits, tally, relayed: *cx.relayed.borrow() }
+    Acquired { listings, unreached, cache: hits, tally, relayed: cx.relayed.borrow().clone() }
 }
 
 /// One `starsystem` read, whose market list becomes the pool's next stage.
-async fn read_system<H, C, E, F>(cx: &Cx<'_, H, C, E, F>, name: &str, address: f64) -> Outcome
+async fn read_system<H, C, E, F, T>(
+    cx: &Cx<'_, H, C, E, F, T>,
+    name: &str,
+    address: f64,
+) -> Outcome
 where
     H: HttpTransport,
     C: Clock,
     E: Entropy,
     F: Fs,
+    T: Timer,
 {
     let stamp: Stamp = next_stamp(
         cx.clock,
@@ -359,8 +375,8 @@ where
 }
 
 /// One market poll.
-async fn poll<H, C, E, F>(
-    cx: &Cx<'_, H, C, E, F>,
+async fn poll<H, C, E, F, T>(
+    cx: &Cx<'_, H, C, E, F, T>,
     market_id: f64,
     station: &str,
     system: &str,
@@ -371,6 +387,7 @@ where
     C: Clock,
     E: Entropy,
     F: Fs,
+    T: Timer,
 {
     let stamp: Stamp = next_stamp(
         cx.clock,
@@ -467,8 +484,8 @@ where
 /// cache is **never** relayed: it was read at some earlier instant, and
 /// republishing it would stamp that old reading with the current time, which is
 /// worse than the duplicate the suppression window exists to prevent.
-async fn publish<H, C, E, F>(
-    cx: &Cx<'_, H, C, E, F>,
+async fn publish<H, C, E, F, T>(
+    cx: &Cx<'_, H, C, E, F, T>,
     eddn: &Eddn<'_>,
     market_id: f64,
     document: &JsValue,
@@ -478,41 +495,67 @@ async fn publish<H, C, E, F>(
     C: Clock,
     E: Entropy,
     F: Fs,
+    T: Timer,
 {
-    let mut tally = cx.relayed.borrow_mut();
+    // Every decision that reads or writes the tally happens inside this block,
+    // so no borrow can span the awaits below. `drop()` before an await is not
+    // enough to say that clearly — and with sixteen workers sharing one cell,
+    // a borrow that outlived its scope would not be a lint, it would be a
+    // panic mid-sweep.
+    let message = {
+        let mut tally = cx.relayed.borrow_mut();
 
-    if !eddn.relayed.may_relay(cx.fs, market_id, now_ms) {
-        tally.recent += 1;
-        return;
+        // Stop sending once the gateway has refused enough times in a row that
+        // the refusals are clearly about us rather than about one message.
+        if tally.failed >= relay::GIVE_UP_AFTER && tally.sent == 0 {
+            tally.abandoned += 1;
+            return;
+        }
+
+        if !eddn.relayed.may_relay(cx.fs, market_id, now_ms) {
+            tally.recent += 1;
+            return;
+        }
+        // EDDN's schema requires a system and a station name, and the market
+        // payload carries neither — they come from the Ardent row that put this
+        // market in the sweep. Without one there is nothing well-formed to send.
+        let Some(station) = eddn.stations.iter().find(|s| s.market_id == market_id) else {
+            tally.unnamed += 1;
+            return;
+        };
+        let Some(snapshot) = edm_core::domain::parse_market_snapshot(document) else {
+            tally.unnamed += 1;
+            return;
+        };
+
+        let target = edm_core::domain::eddn::EddnStation {
+            system_name: station.system_name.clone(),
+            station_name: station.station_name.clone(),
+            station_type: station.station_type.clone(),
+            economies: None,
+        };
+        // The instant of *publication*, as the ported sweep does it.
+        let timestamp = edm_core::js::time::iso8601_from_ms(now_ms).unwrap_or_default();
+        edm_core::domain::eddn::build_message(
+            &target,
+            market_id,
+            &snapshot.commodities,
+            &timestamp,
+            eddn.options,
+        )
+    };
+
+
+    // Wait for EDDN's own bucket, reserved then released before the await —
+    // the same discipline `Pacer::acquire` uses and for the same reason.
+    let at_ms = {
+        let mut tokens = eddn.tokens.borrow_mut();
+        eddn.bucket.reserve(&mut tokens, cx.clock.now_ms())
+    };
+    let wait = edm_core::js::js_max(at_ms - cx.clock.now_ms(), 0.0);
+    if wait > 0.0 {
+        cx.timer.sleep_ms(wait).await;
     }
-    // EDDN's schema requires a system and a station name, and the market
-    // payload carries neither — they come from the Ardent row that put this
-    // market in the sweep. Without one there is nothing well-formed to send.
-    let Some(station) = eddn.stations.iter().find(|s| s.market_id == market_id) else {
-        tally.unnamed += 1;
-        return;
-    };
-    let Some(snapshot) = edm_core::domain::parse_market_snapshot(document) else {
-        tally.unnamed += 1;
-        return;
-    };
-
-    let target = edm_core::domain::eddn::EddnStation {
-        system_name: station.system_name.clone(),
-        station_name: station.station_name.clone(),
-        station_type: station.station_type.clone(),
-        economies: None,
-    };
-    // The instant of *publication*, as the ported sweep does it.
-    let timestamp = edm_core::js::time::iso8601_from_ms(now_ms).unwrap_or_default();
-    let message = edm_core::domain::eddn::build_message(
-        &target,
-        market_id,
-        &snapshot.commodities,
-        &timestamp,
-        eddn.options,
-    );
-    drop(tally);
 
     let body = message.payload.stringify_compact();
     let result = crate::eddn::submit(cx.http, eddn.url, body.as_bytes(), message.count).await;
@@ -525,6 +568,9 @@ async fn publish<H, C, E, F>(
         eddn.relayed.record(cx.fs, market_id, now_ms);
     } else {
         tally.failed += 1;
+        if tally.first_refusal.is_none() {
+            tally.first_refusal = Some(result.detail.clone());
+        }
     }
 }
 

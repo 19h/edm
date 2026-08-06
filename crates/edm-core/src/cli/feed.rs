@@ -54,6 +54,8 @@ pub struct FeedConfig {
     pub test: bool,
     /// How long a market stays suppressed after this machine relayed it.
     pub eddn_max_age_minutes: f64,
+    /// Messages per second to EDDN, paced apart from the Companion API.
+    pub eddn_rate_per_second: f64,
     pub rate_per_second: f64,
     pub workers: u32,
     pub deadline_seconds: f64,
@@ -103,7 +105,11 @@ Sending
   --eddn-test              the gateway accepts these and does not relay them on
   --eddn-max-age <m>       suppress a repeat of the same market for this long,
                            default {eddn_age}
-  --rps <n>                requests per second, default {rps}
+  --rps <n>                Companion API requests per second, default {rps}
+  --eddn-rps <n>           messages per second to EDDN, default {eddn_rps}, and
+                           paced separately: they ride inside the market poll,
+                           so --rps used to set this too. A 565-market import at
+                           40/s earned this host a 403 from the gateway's proxy
   --concurrency <n>        workers behind the pacer, default 5
   --deadline <s>           how long the whole run may take
   --max-requests <n>       ceiling; above it nothing is sent
@@ -117,6 +123,7 @@ Examples
 ",
         eddn_age = js::format_integer(DEFAULT_EDDN_MAX_AGE_MINUTES),
         rps = js::format_integer(DEFAULT_RPS),
+        eddn_rps = js::format_integer(super::config::DEFAULT_EDDN_RPS),
     )
 }
 
@@ -177,7 +184,7 @@ pub fn parse_list(text: &str) -> Vec<Target> {
 /// filesystem.
 pub fn feed_config(cli: &Cli<'_>, file_contents: Option<&str>) -> Result<FeedConfig, CliError> {
     use super::config::{
-        DEFAULT_DEADLINE_SECONDS, DEFAULT_EDDN_MAX_AGE_MINUTES, DEFAULT_RPS,
+        DEFAULT_DEADLINE_SECONDS, DEFAULT_EDDN_MAX_AGE_MINUTES, DEFAULT_EDDN_RPS, DEFAULT_RPS,
     };
     use crate::consts::{DEFAULT_CONCURRENCY, MAX_CONCURRENCY};
     use crate::spend::DEFAULT_MAX_REQUESTS;
@@ -233,6 +240,9 @@ pub fn feed_config(cli: &Cli<'_>, file_contents: Option<&str>) -> Result<FeedCon
         eddn_max_age_minutes: cli
             .optional_decimal(Flag::EddnMaxAge)?
             .unwrap_or(DEFAULT_EDDN_MAX_AGE_MINUTES),
+        eddn_rate_per_second: cli
+            .optional_decimal(Flag::EddnRps)?
+            .unwrap_or(DEFAULT_EDDN_RPS),
         rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
         workers: {
             let declared =

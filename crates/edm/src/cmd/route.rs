@@ -290,17 +290,31 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         .transpose()
         .map_err(|error| error.message().to_owned())?;
     let relayed_log = crate::route::relay::Relayed::new(cache.root(), config.eddn_max_age_minutes);
+    // EDDN's own bucket. A burst that is fine for Frontier is not fine for a
+    // shared community service, and before this the two shared one rate.
+    let eddn_bucket = edm_core::pace::Bucket {
+        rate: config.eddn_rate_per_second,
+        burst: 1.0,
+        min_rate: edm_core::js::js_min(config.eddn_rate_per_second, 0.5),
+    };
+    let eddn_tokens = std::cell::RefCell::new(edm_core::pace::BucketState::new(
+        eddn_bucket,
+        app.ports.clock.now_ms(),
+    ));
     let eddn = eddn_options.as_ref().map(|options| acquire::Eddn {
         options,
         url: &app.overrides.eddn_url,
         relayed: &relayed_log,
         stations: &selection.keep,
+        bucket: eddn_bucket,
+        tokens: &eddn_tokens,
     });
     let relay_tally = std::cell::RefCell::new(crate::route::relay::Tally::default());
 
     let sweep_cx = acquire::Cx {
         http: app.http,
         clock: &app.ports.clock,
+        timer,
         // The pinned wrapper, which delegates `nonce_bytes` untouched — so the
         // nonces are still the real thing and only the jitter is fixed.
         entropy: &entropy,
@@ -470,6 +484,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
             recent: m.acquired.relayed.recent,
             cached: m.acquired.relayed.cached,
             unnamed: m.acquired.relayed.unnamed,
+            abandoned: m.acquired.relayed.abandoned,
         }),
         cache_hits: m.acquired.cache.fresh,
         requests_sent: m.spent.requests,
@@ -478,6 +493,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         truncated_to_ly: m.enumeration.truncated.then_some(m.enumeration.complete_to_ly),
         breaker_tripped: m.breaker_tripped,
         ranked: true,
+        eddn_refusal: m.acquired.relayed.first_refusal.clone(),
     }
 }
 

@@ -917,6 +917,9 @@ pub fn coverage_titled(title: &str, coverage: &RouteCoverage) -> Vec<Block<'stat
         if eddn.failed > 0 {
             held.push(format!("{} rejected", int(eddn.failed as f64)));
         }
+        if eddn.abandoned > 0 {
+            held.push(format!("{} not sent after that", int(eddn.abandoned as f64)));
+        }
         rows.push(field_row(
             "relayed to EDDN",
             if held.is_empty() {
@@ -962,7 +965,19 @@ pub struct EddnCoverage {
     /// Held back because the station could not be named, and EDDN's schema
     /// requires a system and a station name.
     pub unnamed: usize,
+    /// Not attempted, because the gateway had already refused enough times in
+    /// a row that a run should stop sending.
+    pub abandoned: usize,
 }
+
+/// What the gateway said the first time it refused, if it did.
+///
+/// **Five hundred and one rejections once reported no reason at all.** The
+/// answer was `403 Forbidden` — a proxy refusing the host outright after a
+/// burst, not a schema complaint — and nothing in the output said so, which
+/// turned a one-line diagnosis into an investigation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EddnRefusal(pub Option<String>);
 
 /// `1 market` / `2 markets`, with the verb to match.
 ///
@@ -998,6 +1013,9 @@ pub struct RouteCoverage {
     pub markets_absent: usize,
     /// Listings relayed to EDDN this run, and what was held back.
     pub eddn: Option<EddnCoverage>,
+    /// What the gateway said the first time it refused. Printed, because a
+    /// count of rejections with no reason is not a diagnosis.
+    pub eddn_refusal: Option<String>,
     pub cache_hits: usize,
     pub requests_sent: usize,
     pub throttled: usize,
@@ -1068,6 +1086,13 @@ impl RouteCoverage {
             notes.push(format!(
                 "enumeration is complete only to {} Ly; beyond that this run does not know what exists",
                 js_number(limit)
+            ));
+        }
+        if let Some(refusal) = &self.eddn_refusal {
+            notes.push(format!(
+                "EDDN refused with: {refusal}. A 403 there is the gateway's proxy turning this \
+                 host away, which is what follows a burst — not a problem with the data. Wait, \
+                 and send more slowly with --eddn-rps"
             ));
         }
         if self.breaker_tripped {
