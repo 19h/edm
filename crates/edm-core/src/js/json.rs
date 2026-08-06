@@ -234,7 +234,7 @@ impl JsValue {
 ///
 /// Two shapes are accepted by JavaScript and rejected here, both recorded as
 /// C15: a lone surrogate escape (`"\uD800"`), and a numeric literal that
-/// overflows to infinity (`1e999`). Neither occurs in Companion API data, and
+/// overflows to infinity (`1e999`). Neither occurs in game-internal API data, and
 /// both route into the same "could not decode, print it raw" path the
 /// TypeScript uses for any other unparseable body, so the degradation is
 /// identical even though the cause differs.

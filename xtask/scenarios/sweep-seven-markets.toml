@@ -26,7 +26,7 @@ path = "/2.0/elite/starsystem"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/starsystem-sweep.json"
 
 # Alpha Dock — the ordinary case.
@@ -37,7 +37,7 @@ envelope = "marketId=3229009401&"
 [[route.reply]]
 status = 200
 delay-ms = 30
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 # Bravo Port — a 405 is the request being wrong, not the server being busy, so
@@ -66,7 +66,7 @@ delay-ms = 60
 [[route.reply]]
 status = 200
 delay-ms = 70
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 # Delta Ring — twelve seconds against a two-second deadline, four times over.
@@ -79,25 +79,25 @@ envelope = "marketId=3229009404&"
 [[route.reply]]
 status = 200
 delay-ms = 12000
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route.reply]]
 status = 200
 delay-ms = 12000
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route.reply]]
 status = 200
 delay-ms = 12000
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route.reply]]
 status = 200
 delay-ms = 12000
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -107,7 +107,7 @@ envelope = "marketId=3229009405&"
 [[route.reply]]
 status = 200
 delay-ms = 80
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -117,7 +117,7 @@ envelope = "marketId=3229009406&"
 [[route.reply]]
 status = 200
 delay-ms = 90
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -127,5 +127,5 @@ envelope = "marketId=3229009407&"
 [[route.reply]]
 status = 200
 delay-ms = 100
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"

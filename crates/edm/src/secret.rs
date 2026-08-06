@@ -26,7 +26,7 @@ impl Secret {
 
     /// The bytes. Crate-private on purpose: every call site should be one
     /// `rg 'expose\(' ` away.
-    #[allow(dead_code, reason = "the envelope builder is the only caller and lands with capi.rs")]
+    #[allow(dead_code, reason = "the envelope builder is the only caller and lands with game_api.rs")]
     pub(crate) fn expose(&self) -> &str {
         &self.0
     }

@@ -323,7 +323,7 @@ fn ask_the_oracle(
         .arg(root.join("xtask").join("oracle").join("empty.env"))
         .arg("--preload")
         .arg(root.join("xtask").join("oracle").join("preload.ts"))
-        .arg(root.join("market-request.ts"));
+        .arg(root.join("game-internal-api.ts"));
     let side = execute(scenario, root, &dir.join("bun"), command, |command| {
         // The original `import()`s this module at run time (C1). Lossy, like
         // every other environment read in this program. **[R55]**
@@ -370,13 +370,13 @@ fn check_timing(
         && seen != expected
     {
         out.push(format!(
-            "expected exactly {expected} Companion API request(s); the rust side made {seen}"
+            "expected exactly {expected} game-internal API request(s); the rust side made {seen}"
         ));
     }
     if let Some(floor) = expect_gap_ms {
         match mock::min_frontier_gap(arrivals) {
             Some(gap) if gap < u128::from(floor) => out.push(format!(
-                "expected at least {floor} ms between Companion API requests; the \
+                "expected at least {floor} ms between game-internal API requests; the \
                  closest pair arrived {gap} ms apart"
             )),
             Some(_) => {}

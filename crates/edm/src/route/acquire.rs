@@ -18,7 +18,7 @@ use edm_core::domain::starsystem::read_market_points;
 use edm_core::js;
 use edm_core::js::json::JsValue;
 
-use crate::capi::{self, Credentials, HeaderConfig, Stamp};
+use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::exchange::SendOptions;
 use crate::net::HttpTransport;
 use crate::out::Out;
@@ -65,7 +65,7 @@ impl Listing {
 pub struct Eddn<'a> {
     pub options: &'a edm_core::domain::eddn::EddnOptions,
     pub url: &'a str,
-    /// EDDN's own token bucket, **separate from the Companion API's**.
+    /// EDDN's own token bucket, **separate from the game-internal API's**.
     ///
     /// Relays ride inside the market poll, so before this the `--rps` meant for
     /// Frontier set the rate at which a shared community service was written
@@ -101,13 +101,13 @@ pub struct Acquired {
 pub struct Cx<'a, H, C, E, F, T> {
     pub http: &'a H,
     pub clock: &'a C,
-    /// Waiting, for EDDN's own pacing. The Companion API's waiting is the
+    /// Waiting, for EDDN's own pacing. The game-internal API's waiting is the
     /// pool's.
     pub timer: &'a T,
     pub entropy: &'a E,
     pub fs: &'a F,
     pub out: &'a Out,
-    /// `EDM_ORIGIN_OVERRIDE`, or the Companion API's own origin.
+    /// `EDM_ORIGIN_OVERRIDE`, or the game-internal API's own origin.
     ///
     /// An argument rather than a constant, because a sweep that read the
     /// constant would go to the live API while the harness believed it was
@@ -133,7 +133,7 @@ pub struct Cx<'a, H, C, E, F, T> {
     /// `--verify-systems`: read each system's `starsystem` payload and take
     /// *its* market list, instead of Ardent's.
     ///
-    /// Off by default. Step 0 established that the Companion API answers for a
+    /// Off by default. Step 0 established that the game-internal API answers for a
     /// market the commander is not docked at, which is what makes Ardent's
     /// market ids usable directly — and a starsystem payload costs about
     /// twenty-five market reads. What the read buys is a market Ardent has
@@ -270,10 +270,10 @@ where
     }
 
     if cx.verify_systems {
-        // Discovery comes from the Companion API itself, so nothing is known
+        // Discovery comes from the game-internal API itself, so nothing is known
         // about which markets exist until the system reads land — and the cache
         // cannot be consulted for markets nobody has named yet.
-        // Discovery comes from the Companion API itself here, so the cache's
+        // Discovery comes from the game-internal API itself here, so the cache's
         // per-market answers cannot be used: nothing is known about which
         // markets exist until the system reads land.
         to_poll.clear();
@@ -357,11 +357,11 @@ where
         cx.frontier_time_override,
         cx.request_time_override,
     );
-    let request = capi::prepare(
+    let request = game_api::prepare(
         cx.origin,
         STARSYSTEM,
         cx.method_override,
-        capi::starsystem_fields(address, cx.language, 0.0, cx.credentials, stamp.frontier_time),
+        game_api::starsystem_fields(address, cx.language, 0.0, cx.credentials, stamp.frontier_time),
         stamp,
         cx.headers,
     );
@@ -421,11 +421,11 @@ where
         cx.frontier_time_override,
         cx.request_time_override,
     );
-    let request = capi::prepare(
+    let request = game_api::prepare(
         cx.origin,
         MARKET_LIST,
         cx.method_override,
-        capi::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
+        game_api::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
         stamp,
         cx.headers,
     );
@@ -458,7 +458,7 @@ where
         .and_then(|text| JsValue::parse(text).ok())
         .filter(|doc| edm_core::domain::parse_market_snapshot(doc).is_some());
 
-    // 410 is the Companion API saying, correctly and permanently, that this
+    // 410 is the game-internal API saying, correctly and permanently, that this
     // station has no commodity market. Retrying it repeats a question that has
     // been answered; counting it as unreached tells the user a market was
     // missed when it was not.
@@ -617,7 +617,7 @@ fn market_observed_at_ms(document: &JsValue) -> Option<f64> {
 
 /// Rows this market will actually sell or buy.
 ///
-/// Every Companion API market returns the same 391-entry commodity map — most
+/// Every game-internal API market returns the same 391-entry commodity map — most
 /// of it priced but with zero stock and zero demand — so a commodity count is
 /// the same number everywhere and says nothing about whether a station is worth
 /// visiting. Measured across four real markets, 2026-08-05.

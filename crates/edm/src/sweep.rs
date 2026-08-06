@@ -22,7 +22,7 @@ use edm_core::domain::{MarketSnapshot, parse_market_snapshot};
 use edm_core::js::json::JsValue;
 use edm_core::js;
 
-use crate::capi::{self, Credentials, HeaderConfig, Stamp};
+use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::eddn::EddnResult;
 use crate::net::HttpTransport;
 use crate::out::Out;
@@ -76,7 +76,7 @@ impl MarketVisit {
 /// and none of them need to be printable for this to be useful in a panic.
 pub struct Cx<'a, H, C, E> {
     pub http: &'a H,
-    /// `EDM_ORIGIN_OVERRIDE`, or the Companion API's own origin.
+    /// `EDM_ORIGIN_OVERRIDE`, or the game-internal API's own origin.
     pub origin: &'a str,
     pub clock: &'a C,
     pub entropy: &'a E,
@@ -226,11 +226,11 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.frontier_time_override,
         cx.request_time_override,
     );
-    let request = capi::prepare(
+    let request = game_api::prepare(
         cx.origin,
         MARKET_LIST,
         cx.method_override,
-        capi::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
+        game_api::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
         stamp,
         cx.headers,
     );

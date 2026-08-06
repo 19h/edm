@@ -17,7 +17,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Flag {
-    // `VALUE_FLAGS` (`market-request.ts:832-869`), in source order.
+    // `VALUE_FLAGS` (`game-internal-api.ts:832-869`), in source order.
     MarketId,
     CmdrId,
     MachineId,
@@ -88,10 +88,10 @@ pub enum Flag {
     /// `--from-file <path>`: one system name or market id per line.
     FromFile,
     /// `--eddn-rps <n>`: messages per second to EDDN, paced apart from the
-    /// Companion API.
+    /// game-internal API.
     EddnRps,
 
-    // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
+    // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
     DryRun,
     FullUrl,
@@ -127,7 +127,7 @@ pub enum Flag {
     Verbose,
     /// `--include-illegal`: rank commodities a market marks illegal there.
     IncludeIllegal,
-    /// `--verify-systems`: read each system's Companion API `starsystem`
+    /// `--verify-systems`: read each system's game-internal API `starsystem`
     /// payload rather than trusting Ardent's market list.
     ///
     /// Off by default because it costs about twenty-five times what the market
@@ -312,7 +312,7 @@ impl Flag {
         })
     }
 
-    /// The spelling a *message* uses: `flagName` (`market-request.ts:976`),
+    /// The spelling a *message* uses: `flagName` (`game-internal-api.ts:976`),
     /// i.e. `--` followed by `FLAG_DISPLAY[flag] ?? flag`.
     ///
     /// This is not what the user typed. Accessor errors report the documented
@@ -321,7 +321,7 @@ impl Flag {
     #[must_use]
     pub fn display(self) -> &'static str {
         match self {
-            // `FLAG_DISPLAY` (`market-request.ts:961-974`).
+            // `FLAG_DISPLAY` (`game-internal-api.ts:961-974`).
             Self::MarketId => "--market-id",
             Self::CmdrId => "--cmdr-id",
             Self::MachineId => "--machine-id",
@@ -417,7 +417,7 @@ impl Flag {
     }
 
     /// Resolves an already-[`normalize`]d name, folding `FLAG_ALIASES`
-    /// (`market-request.ts:804-829`) into the canonical identity.
+    /// (`game-internal-api.ts:804-829`) into the canonical identity.
     ///
     /// `None` is the union of the TypeScript's two rejection paths — a name in
     /// neither set — because the alias lookup can only ever widen the input to
@@ -489,7 +489,7 @@ impl Flag {
     }
 }
 
-/// `normalizeFlag` (`market-request.ts:800`) — strip **every** `-` and `_`,
+/// `normalizeFlag` (`game-internal-api.ts:800`) — strip **every** `-` and `_`,
 /// then lowercase.
 ///
 /// The lowercasing is full Unicode, not ASCII: `String.prototype.toLowerCase`
@@ -516,7 +516,7 @@ pub enum Literal {
     Poison,
 }
 
-/// `BOOLEAN_LITERALS[token.toLowerCase()]` (`market-request.ts:893`).
+/// `BOOLEAN_LITERALS[token.toLowerCase()]` (`game-internal-api.ts:893`).
 ///
 /// The lookup is a plain object index, so it does not stop at the object's own
 /// properties. Two lowercase spellings — `constructor` and `__proto__` —

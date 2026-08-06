@@ -1,5 +1,5 @@
 # encodeSystemAddress — x<TAB>y<TAB>z<TAB>massCode<TAB>index<TAB>address or ERR<TAB>containsCoordinates
-# sliced verbatim from market-request.ts:2348-2445 under bun 1.2.3
+# sliced verbatim from game-internal-api.ts:2348-2445 under bun 1.2.3
 105	-45	-105	0	0	5378909424384	true
 105.5	-44.5	-104.5	0	0	5378909424384	true
 114.5	-35.5	-95.5	0	0	5378909424384	true

@@ -7,5 +7,5 @@ path = "/2.0/elite/market/list"
 
 [[route.reply]]
 status = 200
-encode = "capi-corrupt-block"
+encode = "game-api-corrupt-block"
 payload-file = "payloads/market-small.json"

@@ -7,7 +7,7 @@
 *.pending-snap
 /.claude/
 
-# Live Companion API credentials. Never tracked.
+# Live game-internal API credentials. Never tracked.
 .env
 .env.*
 !.env.example

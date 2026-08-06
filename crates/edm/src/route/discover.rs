@@ -23,7 +23,7 @@
 //! meant to be printed.
 //!
 //! Nothing here is paced: `/nearby` is CDN-fronted, free and unmetered, and it
-//! is the Companion API — one request per market — that the pacer and the
+//! is the game-internal API — one request per market — that the pacer and the
 //! spend gate exist for.
 
 use std::collections::HashSet;

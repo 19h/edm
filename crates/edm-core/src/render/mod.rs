@@ -24,7 +24,7 @@ pub const MIN_WIDTH: usize = 48;
 /// The width assumed when stdout is not a terminal.
 ///
 /// A hundred, not the conventional eighty: the tables are wide and this is what
-/// the TypeScript picks (`market-request.ts:364`).
+/// the TypeScript picks (`game-internal-api.ts:364`).
 pub const DEFAULT_WIDTH: usize = 100;
 
 /// The ceiling imposed on a `COLUMNS` override [C11].
@@ -35,7 +35,7 @@ pub const DEFAULT_WIDTH: usize = 100;
 /// absurd width is the registered divergence.
 pub const MAX_WIDTH: usize = 10_000;
 
-/// `TERMINAL_WIDTH` (`market-request.ts:360`) [R31].
+/// `TERMINAL_WIDTH` (`game-internal-api.ts:360`) [R31].
 ///
 /// `columns_env` is `$COLUMNS` as the process received it, `tty_columns` the
 /// column count from the terminal, or `None` when stdout is not one. An
@@ -74,15 +74,15 @@ pub fn terminal_width(columns_env: Option<&str>, tty_columns: Option<usize>) -> 
 /// corresponds to one emitter in the TypeScript.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Block<'a> {
-    /// `heading(title)` on its own (`market-request.ts:467`).
+    /// `heading(title)` on its own (`game-internal-api.ts:467`).
     Heading(String),
-    /// `emitTable` (`market-request.ts:488`): a heading, the frame, and — when
+    /// `emitTable` (`game-internal-api.ts:488`): a heading, the frame, and — when
     /// columns had to be dropped — a note naming them.
     Table { title: String, columns: &'a [Column], rows: Vec<Row<'a>> },
-    /// `emitNote` (`market-request.ts:473`): indented, word-wrapped commentary.
+    /// `emitNote` (`game-internal-api.ts:473`): indented, word-wrapped commentary.
     Note(String),
     /// A line printed as-is, clamped to the terminal width — the streamed
-    /// progress lines of `emitProgressLine` (`market-request.ts:2043`) [R33].
+    /// progress lines of `emitProgressLine` (`game-internal-api.ts:2043`) [R33].
     Line(String),
     /// Text printed verbatim, with no clamping at all.
     ///
@@ -140,7 +140,7 @@ fn push_line(out: &mut String, line: &str) {
     out.push('\n');
 }
 
-/// `heading` (`market-request.ts:467`) [R28].
+/// `heading` (`game-internal-api.ts:467`) [R28].
 ///
 /// `== TITLE ` padded out to the terminal width with `=`. The comparison is
 /// `>=`, so a label that exactly fills the terminal gets no padding at all —
@@ -162,7 +162,7 @@ pub fn heading(title: &str, width: usize, metric: Metric) -> String {
 /// The indent `emitNote` prefixes every line with.
 const NOTE_INDENT: &str = "   ";
 
-/// `emitNote` (`market-request.ts:473`) [R29], as the lines it would print.
+/// `emitNote` (`game-internal-api.ts:473`) [R29], as the lines it would print.
 ///
 /// A greedy wrap with no cleverness whatsoever, and the lack of cleverness is
 /// the specification:

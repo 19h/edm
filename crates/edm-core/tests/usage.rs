@@ -6,7 +6,7 @@
 //! upload URL and software name. A drift in any of those is both invisible in
 //! review and a lie to the reader.
 //!
-//! `tests/fixtures/usage.txt` is `bun market-request.ts help` captured verbatim.
+//! `tests/fixtures/usage.txt` is `bun game-internal-api.ts help` captured verbatim.
 
 use edm_core::cli;
 

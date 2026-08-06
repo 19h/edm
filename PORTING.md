@@ -1,6 +1,6 @@
-<!-- The contract between market-request.ts and this port. -->
+<!-- The contract between game-internal-api.ts and this port. -->
 
-`market-request.ts` is the specification. Every observable byte on stdout and
+`game-internal-api.ts` is the specification. Every observable byte on stdout and
 stderr, every exit code, and every byte on the wire is reproduced unless it
 appears below marked **CORRECT**. Anything that differs and is not listed here
 is a bug.
@@ -18,7 +18,7 @@ so renumbering them is a breaking change to the test suite.
 | 4 | `edm_core::render` | done — 90 Bun-blessed snapshots |
 | 5 | `edm_core::cli` | done |
 | 6 | `edm_core::domain` | done — including the batch state machine |
-| 7-10 | `edm` I/O layer | done — sys/secret/ports/net/capi/exchange/ardent/eddn/out |
+| 7-10 | `edm` I/O layer | done — sys/secret/ports/net/game_api/exchange/ardent/eddn/out |
 | 11-12 | sweep and commands | done |
 | 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 8 `route` scenarios diffed against goldens (C25)** |
 | 14 | `edm_core::pace` / `edm::route` | done — pacer, two-stage pool, spend gate, resumable cache |
@@ -56,7 +56,7 @@ Three defects it found, all now fixed and all with a test:
    proved of any of them. `Rate` and `Claim` both declare priority zero now —
    the rule `Route::rate` enforces in Rust, carried into the table.
 2. **The second run was served entirely from the cache and still printed "every
-   price below was read live from the Companion API during this run".**
+   price below was read live from the game-internal API during this run".**
 3. **That run's plan priced 22 requests and then sent none**, because the cache
    was consulted after the spend gate rather than before it.
 
@@ -65,7 +65,7 @@ And one in the harness: scenarios shared a cache through the developer's real
 earlier scenario had cached one of the two markets it counted. Each side now
 gets an `XDG_CACHE_HOME` under its own scenario directory.
 
-## Measured facts about the Companion API
+## Measured facts about the game-internal API
 
 - **`/2.0/elite/market/list?marketID=N` answers for a market the commander is
   not docked at.** Measured 2026-08-05 against four real markets — Prince
@@ -137,8 +137,8 @@ Recorded when an assumption made while planning turned out to be wrong.
   diffs have to stay readable. Making the tree rustfmt-clean is a defensible
   decision; it is a commit of its own, not a side effect.
 - **The plan's starsystem-per-system read is off by default.** §3.1 has the
-  Companion API's `starsystem` payload confirm what Ardent proposed, one read
-  per system. Step 0 then established that the Companion API answers for a
+  game-internal API's `starsystem` payload confirm what Ardent proposed, one read
+  per system. Step 0 then established that the game-internal API answers for a
   market the commander is not docked at, which makes Ardent's market ids usable
   directly — and a starsystem payload is ~500 KB against a market's ~20 KB, with
   roughly one starport per system near Sol. Reading one per system to
@@ -202,10 +202,10 @@ Recorded when an assumption made while planning turned out to be wrong.
   then removes `content-encoding` and `content-length` from the response
   headers; `fetch` leaves both visible, and this program prints the header
   table.
-- **The Companion API origin is an argument to `capi::prepare`, not a constant
+- **The game-internal API origin is an argument to `game_api::prepare`, not a constant
   it reaches for.** Building with the constant and rewriting the prefix
   afterwards is a step a caller can forget, and one did: the sweep sent every
-  market poll to the live Companion API while the harness believed it was
+  market poll to the live game-internal API while the harness believed it was
   talking to a mock. The signature now cannot be satisfied without deciding.
 - **R47 swallows exactly two tokens, and the reason is not the obvious one.**
   The lookup is `BOOLEAN_LITERALS[next.toLowerCase()]`, so the token is folded
@@ -350,7 +350,7 @@ differs is a bug.
 | R64 | Standard (not URL-safe), **padded** base64 appended raw to the query. No percent-encoding. |
 | R65 | The envelope plaintext is UTF-8 **bytes**; `--language` is the one unvalidated field. |
 | R66 | Body keyed on the **effective** method after `--method`: GET/HEAD → none; otherwise `""`, which makes fetch add `Content-Type: text/plain;charset=UTF-8` + `Content-Length: 0` **on the wire but not in the printed table**. |
-| R67 | Redirects: CAPI **none**; Ardent and EDDN **follow, limit 20** (not reqwest's default 10). |
+| R67 | Redirects: game-internal API **none**; Ardent and EDDN **follow, limit 20** (not reqwest's default 10). |
 | R68 | HTTP/1.1 only, both clients. |
 | R69 | **No client-level timeout anywhere.** The sweep's per-attempt race is the only deadline, and it wraps the whole visit **including the EDDN POST**. A single `market --market-id` can hang forever. |
 | R70 | `Fdev-Retry` is the constant `"0/2"` on every attempt, including requeues. |
@@ -399,14 +399,14 @@ differs is a bug.
 | C5 | UTF-8 decode failure message is ours, not Bun's engine-internal `TypeError`. | Reachable only on a corrupt body; the exact Bun string is recorded so the allowlist row is precise. |
 | C6 | ChaCha20 refuses at 2³²−1 blocks; the TS at 2³². | 64 bytes of difference at 274 GB; the C4 cap fires first. Same error string. |
 | C7 | The two dead key/nonce length errors cease to exist. | Both unreachable in the TS; encoded as `&[u8; 32]` and `Nonce([u8; 12])`. |
-| C8 | A timed-out attempt is cancelled hard and prints nothing. | Proven equivalent for printing (the only `await` in between is `response.text()`, whose continuation is a microtask that runs first) and enforced by `capi_failure_report_is_atomic`. Structured cancellation is strictly stronger, and the TS's late output is nondeterministic, which would break the byte-diff harness. |
+| C8 | A timed-out attempt is cancelled hard and prints nothing. | Proven equivalent for printing (the only `await` in between is `response.text()`, whose continuation is a microtask that runs first) and enforced by `game_api_failure_report_is_atomic`. Structured cancellation is strictly stronger, and the TS's late output is nondeterministic, which would break the byte-diff harness. |
 | C9 | A first-attempt timeout still requeues and re-POSTs to EDDN (**preserved**), but `EDM_EDDN_ONCE=1` suppresses the second POST. | The double-post breaches EDDN's one-minute rule. Preserved by default, with a test asserting the bug so a fix must delete a test and add a register row. |
 | C10 | On a fatal error we drop the worker pool; the TS leaves the other 15 running. | Only reachable via the `RangeError` C4 removes. Detached work after a fatal error is indefensible. |
 | C11 | `COLUMNS` clamped to 10,000. | `COLUMNS=99999999999999999999` makes the TS attempt `"=".repeat(1e20)` at **module init**, outside `main`'s try/catch. |
 | C12 | The envelope plaintext is not retained, only its byte length; the buffer is zeroized after sealing. | The TS reads only `.length` from it. Security gain, zero observable difference. |
 | C13 | Non-ASCII collation falls back to scalar order; `--features icu-collation` is the escape hatch. | ICU-exact ordering costs ~1 MB for a corpus that is ASCII in practice, and bare `localeCompare()` is locale-dependent so the TS is not reproducible across environments anyway. |
 | C14 | `POI_TYPE_LABELS["constructor"]` returns the raw string; the TS dies at `type.toUpperCase()`. | Reproducing a mid-table `TypeError` would require modelling a function value for zero benefit. (The *CLI* prototype hit, R47, **is** reproduced — it is cheap and changes the exit code.) |
-| C15 | A lone `\uD800` escape or an out-of-range float fails to parse; the TS accepts both. | `serde_json`'s lexer rejects them; neither can occur in CAPI data. Routed into the same `emitOpaquePayload` path so the shape degrades identically. |
+| C15 | A lone `\uD800` escape or an out-of-range float fails to parse; the TS accepts both. | `serde_json`'s lexer rejects them; neither can occur in game-internal API data. Routed into the same `emitOpaquePayload` path so the shape degrades identically. |
 | C16 | `writeFileSync` I/O error text is Rust's, not Node's. | Engine-internal. The *ordering* is preserved: the dump happens before `JSON.parse`, and `--json --dump f` writes nothing. |
 | C17 | `edm --help constructor` prints the exact JSC message and exits 1, but no stack trace. | The TS throw is outside `main`'s try/catch so Bun adds an unhandled-rejection trace. Exit code and message match; the trace does not. |
 | C18 | The two unreachable TS strings (lines 986, 1021) have no `ArgError` variant. | Proved unconstructible by the disjointness of `VALUE_FLAGS`/`BOOLEAN_FLAGS` plus the slot-type proptest. Recorded in `PORTING.md`; dead variants would be worse. |
@@ -418,12 +418,12 @@ differs is a bug.
 | C24 | `EDM_ORIGIN_OVERRIDE`, `EDM_ARDENT_BASE`, `EDM_EDDN_URL` added. | Harness plumbing. Unset, behaviour is byte-identical. |
 | C25 | `edm route` exists. Bun answers `Unknown command "route"` and exits 2. | A new command, not a port of one. `KNOWN_COMMANDS` is untouched and `route` dispatches from a disjoint `EXTENDED_COMMANDS`, so R48's ordering is unaffected. Confined to argv beginning with `route`. |
 | C26 | Route-only flag names resolve **only** when the command is `route` (a two-pass parse against `Table::Base` / `Table::Extended`). | Widening `Flag::resolve` globally would make `edm market Colonia --pad L` succeed where the TypeScript exits 2 — a fidelity regression on argv the harness never runs, and so one no scenario would catch. The `parity-isolation` gate proves the two tables agree over every committed scenario's argv. |
-| C27 | `route` paces its requests, backs off on `Retry-After`, trips a breaker and bounds retries by wall clock. | R84 and R98 continue to describe `edm market` exactly. The original has no pacer at all: `market-request.ts:2988` is a `// Request pacing` header with an empty body, and a 429 is requeued immediately with no delay and no header read — affordable for a seven-market system sweep and not for a thousand-market region. |
+| C27 | `route` paces its requests, backs off on `Retry-After`, trips a breaker and bounds retries by wall clock. | R84 and R98 continue to describe `edm market` exactly. The original has no pacer at all: `game-internal-api.ts:2988` is a `// Request pacing` header with an empty body, and a 429 is requeued immediately with no delay and no header read — affordable for a seven-market system sweep and not for a thousand-market region. |
 | C28 | `route --json` is one well-formed document. | R76's leak — a diagnostic in the middle of the stream — is faithful for the ported commands and is reproduced for them. `route` has no oracle to be faithful to, and a document a consumer cannot parse is not an output format. `Out::aside` sends the plan and diagnostics to stderr when stdout is a document. |
 | C30 | `--deadline` bounds the loop search as well as the sweep and its retries. | The optimiser had no clock and no bound: a radius-100 loop search is tens of minutes of silence. It degrades to `Heuristic { SearchBudgetExhausted }` and never claims an optimum it did not prove. |
 | C34 | **EDDN uploads are signed `edm`, not `int-market-sync`.** | The original's name, and the port said it too — so every row this program contributed to a shared dataset was attributed to a different piece of software. EDDN records the name so that consumers and maintainers can find a sender that misbehaves, and know when one is fixed; being byte-identical to the original is worth a great deal here, and it is not worth signing somebody else's name. `--software-name` still overrides it. The usage text's one line stating the default changes with it, and is the only line of the eighty-nine exempted from the byte pin — a help text documenting a default the program does not use is a worse thing for a reader than a masked line is for a test. The two EDDN parity scenarios pass `--software-name edm` to **both** sides, so the posted body and its `content-length` stay compared byte for byte. |
 | C33 | **`edm eddn <kind>` exists.** Bun answers `Unknown command "eddn"` and exits 2. | A second command in the disjoint `EXTENDED_COMMANDS` set, dispatched by the same two-pass parse C26 describes, so `KNOWN_COMMANDS` and R48's ordering are untouched. It relays named markets to EDDN on purpose, where `route --eddn` publishes only what a route search happened to read — bounded by a radius and filtered to berths a large ship can use, which is the wrong shape for refreshing a region whose data has gone stale. |
-| C32 | **EDDN quantities and prices are truncated to integers.** | The Companion API sends fractional quantities — `Water` with a demand of `113.47560000000001` is a real row — and EDDN's schema types `demand`, `stock`, `meanPrice`, `buyPrice` and `sellPrice` as `integer`. Measured 2026-08-06 over 29,152 cached markets: 29,370 fractional values, and **29.7% of markets carry at least one**, so nearly a third of all uploads were answered `400 FAIL: Schema Validation`. Truncation rather than rounding, matching `EDMarketConnector/plugins/eddn.py:624-629` — EDDN is a shared dataset whose value depends on senders agreeing, and a rounding rule of our own would put this program's rows subtly out of step with every other uploader's for the same market. Brackets are **not** coerced: `levelType` is the enum `[0, 1, 2, 3, ""]` and no observed value falls outside it, so truncating one would turn an unexpected value into a plausible wrong one. |
+| C32 | **EDDN quantities and prices are truncated to integers.** | The game-internal API sends fractional quantities — `Water` with a demand of `113.47560000000001` is a real row — and EDDN's schema types `demand`, `stock`, `meanPrice`, `buyPrice` and `sellPrice` as `integer`. Measured 2026-08-06 over 29,152 cached markets: 29,370 fractional values, and **29.7% of markets carry at least one**, so nearly a third of all uploads were answered `400 FAIL: Schema Validation`. Truncation rather than rounding, matching `EDMarketConnector/plugins/eddn.py:624-629` — EDDN is a shared dataset whose value depends on senders agreeing, and a rounding rule of our own would put this program's rows subtly out of step with every other uploader's for the same market. Brackets are **not** coerced: `levelType` is the enum `[0, 1, 2, 3, ""]` and no observed value falls outside it, so truncating one would turn an unexpected value into a plausible wrong one. |
 | C31 | **`authToken` is checked against a floor of 512 characters, not the original's exact 2024.** | A live token measured 2026-08-06 is **2022** characters, so 2024 is one observation written down as a law — and it made the program refuse a credential the game itself was using, on every command. The check is kept because a half-pasted token is a real mistake with a confusing failure; the exact length is not, for a value this program does not issue. `machineToken` keeps its exact check at 80, which every observed value has matched. |
 | C29 | `EDM_JITTER` pins backoff jitter to a fixed fraction of the window. | Backoff jitter is the one random quantity a recorded run cannot reproduce, and it decides how many attempts fit inside a wall-clock budget. It delegates `nonce_bytes` untouched: a pinned nonce is a separate decision with a separate flag. |
 | C30 | `--deadline` bounds the loop search as well as the sweep, and a search it stops reports `Heuristic { SearchBudgetExhausted }` rather than an optimum. | The search is part of the run, so "how long this may take" already covers it; a second wall-clock flag would let two limits contradict each other and would leave the default answer to "how long may the search take" at *forever*. Measured 2026-08-06: 78 s to build the graph and 205 s per improving Dinkelbach round at 5,000 markets. `edm-route` is pure and has no clock, so the budget arrives as a predicate the caller answers — never as a step count, which does not convert to seconds at any fixed rate. |
@@ -438,5 +438,5 @@ differs is a bug.
 | `EDM_EDDN_BRACKET=passthrough` | Emits `stockBracket: ""` instead of coercing to `0`, per the schema's own `levelType` semantics. |
 
 **TS defects preserved, not fixed** (the port matches exactly; listed so they aren't mistaken for
-port bugs): `statusFlags` never sent although the EDDN README says SHOULD for CAPI sources;
+port bugs): `statusFlags` never sent although the EDDN README says SHOULD for game-internal API sources;
 `horizons` never inferred. (A fractional `stock` or `demand` forwarded verbatim *was* preserved here and reached a 400 on 29.7% of markets; it is now fixed under C32.)

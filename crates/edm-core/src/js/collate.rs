@@ -1,6 +1,6 @@
 //! `String.prototype.localeCompare`.
 //!
-//! Every sort in `market-request.ts` goes through it — commodity names,
+//! Every sort in `game-internal-api.ts` goes through it — commodity names,
 //! category bands, header rows, station names, market types. Byte order is not
 //! a substitute: it puts every uppercase letter before every lowercase one, so
 //! `"Silver"` would sort before `"agronomic treatment"` and every table would

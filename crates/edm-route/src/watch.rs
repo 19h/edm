@@ -17,7 +17,7 @@
 //! It is the wrong shape for a wall clock, and the numbers say by how much. One
 //! Bellman-Ford sweep is 2 edge relaxations on the two-market fixture and
 //! **24,292,232** on a radius-100 sweep (measured 2026-08-06 over 5,049 cached
-//! Companion API markets). A probe is `n` sweeps, so one probe ranges from
+//! game-internal API markets). A probe is `n` sweeps, so one probe ranges from
 //! microseconds to **205 seconds** on the same binary — and the graph build
 //! ahead of it ranges from microseconds to two minutes. A step count calibrated
 //! to "about thirty seconds" is therefore a number that is wrong everywhere

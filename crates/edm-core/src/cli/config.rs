@@ -34,7 +34,7 @@ use super::flag::Flag;
 // Credentials and the session
 // ---------------------------------------------------------------------------
 
-/// The four secrets every Companion API request carries (ts:46).
+/// The four secrets every game-internal API request carries (ts:46).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Credentials {
     pub commander_id: String,
@@ -906,7 +906,7 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
 // A new command, so nothing here is transcribed and nothing is bound by the
 // parity register. What it does inherit is the discipline: reads happen in a
 // stated order, every default is named, and a filter records whether it prunes
-// before the Companion API is touched or only at ranking time. That last
+// before the game-internal API is touched or only at ranking time. That last
 // distinction is the request count, which is the whole cost of the feature.
 // ---------------------------------------------------------------------------
 
@@ -976,7 +976,7 @@ pub struct RouteConfig {
     pub reference: String,
     pub radius_ly: f64,
 
-    // Pruned before the Companion API is touched.
+    // Pruned before the game-internal API is touched.
     pub pad: Pad,
     pub station_types: Option<Vec<String>>,
     pub include_carriers: bool,
@@ -1004,7 +1004,7 @@ pub struct RouteConfig {
     /// this machine relayed it.
     pub eddn_max_age_minutes: f64,
     /// `--eddn-rps`: messages per second to EDDN, paced apart from the
-    /// Companion API. They ride inside the market poll, so before this existed
+    /// game-internal API. They ride inside the market poll, so before this existed
     /// `--rps` set both.
     pub eddn_rate_per_second: f64,
 
@@ -1080,7 +1080,7 @@ pub const DEFAULT_RPS: f64 = 4.0;
 /// anyway.
 pub const DEFAULT_EDDN_MAX_AGE_MINUTES: f64 = 30.0;
 
-/// Messages per second to EDDN, **paced apart from the Companion API**.
+/// Messages per second to EDDN, **paced apart from the game-internal API**.
 ///
 /// They ride inside the market poll, so before this existed `--rps 40` set the
 /// EDDN rate too — and a 565-market import at forty a second got this host a

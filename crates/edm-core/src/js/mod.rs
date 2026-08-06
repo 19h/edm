@@ -2,7 +2,7 @@
 //!
 //! Every function here exists because the Rust-idiomatic equivalent produces
 //! different bytes. They are pinned by fixtures generated from the same Bun
-//! build that runs `market-request.ts` (`cargo xtask bless`), because arguing
+//! build that runs `game-internal-api.ts` (`cargo xtask bless`), because arguing
 //! about JavaScript engine behaviour is slower and less reliable than
 //! measuring it.
 //!
@@ -166,7 +166,7 @@ fn push_u32(out: &mut String, v: u32) {
     }
 }
 
-/// `formatInteger` (`market-request.ts:522`) — `Math.trunc` then
+/// `formatInteger` (`game-internal-api.ts:522`) — `Math.trunc` then
 /// `toLocaleString("en-US")`, with a `"?"` placeholder for non-finite input.
 ///
 /// Note what this is *not*: it never goes exponential. `1e21` renders as
@@ -216,7 +216,7 @@ pub fn thousands(t: f64) -> String {
     out
 }
 
-/// `formatQuantity` (`market-request.ts:527`) — zeroes dominate a market table,
+/// `formatQuantity` (`game-internal-api.ts:527`) — zeroes dominate a market table,
 /// so they render as a placeholder.
 ///
 /// The `=== 0` test happens *before* truncation, and `-0 === 0` is true in
@@ -490,7 +490,7 @@ fn radix_value(s: &str, radix: u32) -> f64 {
     exact.map_or(approx, |v| v as f64)
 }
 
-/// `parseUnsignedInteger` (`market-request.ts:53`).
+/// `parseUnsignedInteger` (`game-internal-api.ts:53`).
 ///
 /// The two failure messages are distinct and the order matters: a 100-digit
 /// string passes the pattern and fails the range check, so it gets the second

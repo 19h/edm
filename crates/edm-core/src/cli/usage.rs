@@ -1,6 +1,6 @@
 //! The `--help` text, and the constants it advertises.
 //!
-//! `USAGE` is a JavaScript template literal (`market-request.ts:1029`), not a
+//! `USAGE` is a JavaScript template literal (`game-internal-api.ts:1029`), not a
 //! frozen block of prose: fourteen of its values are interpolated from the same
 //! constants the program actually runs on. Freezing the rendered text here
 //! would let a default drift away from its own documentation silently, so the
@@ -9,48 +9,48 @@
 
 use crate::js;
 
-/// `MARKET_LIST.method` (`market-request.ts:18`).
+/// `MARKET_LIST.method` (`game-internal-api.ts:18`).
 ///
 /// The verbs are the game's own `methodCode` values: 1 = GET, 3 = PUT.
 pub const MARKET_LIST_METHOD: &str = "GET";
-/// `MARKET_LIST.path` / `MARKET_LIST_PATH` (`market-request.ts:18`).
+/// `MARKET_LIST.path` / `MARKET_LIST_PATH` (`game-internal-api.ts:18`).
 pub const MARKET_LIST_PATH: &str = "/2.0/elite/market/list";
-/// `MARKET_TRADE.method` (`market-request.ts:19`) — trade answers
+/// `MARKET_TRADE.method` (`game-internal-api.ts:19`) — trade answers
 /// `Allow: PUT, OPTIONS`, so a GET there is a 405.
 pub const MARKET_TRADE_METHOD: &str = "PUT";
-/// `MARKET_TRADE.path` / `MARKET_TRADE_PATH` (`market-request.ts:19`).
+/// `MARKET_TRADE.path` / `MARKET_TRADE_PATH` (`game-internal-api.ts:19`).
 pub const MARKET_TRADE_PATH: &str = "/2.0/elite/market/trade";
-/// `STARSYSTEM.method` (`market-request.ts:20`).
+/// `STARSYSTEM.method` (`game-internal-api.ts:20`).
 pub const STARSYSTEM_METHOD: &str = "GET";
-/// `STARSYSTEM.path` (`market-request.ts:20`).
+/// `STARSYSTEM.path` (`game-internal-api.ts:20`).
 pub const STARSYSTEM_PATH: &str = "/2.0/elite/starsystem";
-/// `EDDN_UPLOAD_URL` (`market-request.ts:30`) — the non-standard port and the
+/// `EDDN_UPLOAD_URL` (`game-internal-api.ts:30`) — the non-standard port and the
 /// trailing slash are both required by EDDN's `docs/Developers.md`.
 pub const EDDN_UPLOAD_URL: &str = "https://eddn.edcd.io:4430/upload/";
-/// `EDDN_SOFTWARE_NAME` (`market-request.ts:32`).
+/// `EDDN_SOFTWARE_NAME` (`game-internal-api.ts:32`).
 pub const EDDN_SOFTWARE_NAME: &str = "edm";
-/// `EDDN_SOFTWARE_VERSION` (`market-request.ts:34`) — EDDN requires this to be
+/// `EDDN_SOFTWARE_VERSION` (`game-internal-api.ts:34`) — EDDN requires this to be
 /// incremented whenever the content of the messages sent changes.
 pub const EDDN_SOFTWARE_VERSION: &str = "1.0.0";
-/// `EDDN_GAME_VERSION` (`market-request.ts:36`).
-pub const EDDN_GAME_VERSION: &str = "CAPI-Live-market";
+/// `EDDN_GAME_VERSION` (`game-internal-api.ts:36`).
+pub const EDDN_GAME_VERSION: &str = "GameInternal-Live-market";
 
 // The four numeric defaults are `f64` because that is what a JavaScript
 // `number` is, and because their consumers do `f64` arithmetic on them
 // (`Math.max(1, Math.min(MAX_CONCURRENCY, ...))`, `timeout * 1_000`). They
 // reach the help text through `js_number`, exactly as `${...}` would.
 
-/// `DEFAULT_CONCURRENCY` (`market-request.ts:38`) — a sweep is a pool of
+/// `DEFAULT_CONCURRENCY` (`game-internal-api.ts:38`) — a sweep is a pool of
 /// workers pulling from one queue, not a fixed rate.
 pub const DEFAULT_CONCURRENCY: f64 = 5.0;
-/// `MAX_CONCURRENCY` (`market-request.ts:39`).
+/// `MAX_CONCURRENCY` (`game-internal-api.ts:39`).
 pub const MAX_CONCURRENCY: f64 = 16.0;
-/// `DEFAULT_TIMEOUT_SECONDS` (`market-request.ts:40`).
+/// `DEFAULT_TIMEOUT_SECONDS` (`game-internal-api.ts:40`).
 pub const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
-/// `DEFAULT_REQUEUES` (`market-request.ts:41`).
+/// `DEFAULT_REQUEUES` (`game-internal-api.ts:41`).
 pub const DEFAULT_REQUEUES: f64 = 3.0;
 
-/// The `USAGE` text (`market-request.ts:1029-1117`), rendered.
+/// The `USAGE` text (`game-internal-api.ts:1029-1117`), rendered.
 ///
 /// Printed on **stdout** — including on the two exit-2 paths, where the
 /// diagnostic goes to stderr and the help text does not \[R49\]. It carries no
@@ -62,10 +62,10 @@ pub fn usage() -> String {
     let default_timeout_seconds = js::js_number(DEFAULT_TIMEOUT_SECONDS);
     let default_requeues = js::js_number(DEFAULT_REQUEUES);
     format!(
-        r#"market-request.ts — Frontier market API client
+        r#"game-internal-api.ts — Elite Dangerous game-internal API client
 
 Usage
-  bun market-request.ts [command] [options]
+  bun game-internal-api.ts [command] [options]
 
 Commands
   market [name]            {MARKET_LIST_METHOD} {MARKET_LIST_PATH} — one market's commodity listing, or every
@@ -141,15 +141,15 @@ markets options
   --dump <file>            write the decoded starsystem payload for inspection
 
 Examples
-  bun market-request.ts market --market-id 4306502403
-  bun market-request.ts market Colonia --eddn
-  bun market-request.ts market --market-id 128667761 --eddn-test
-  bun market-request.ts markets "Hyades Sector NI-X a16-0"
-  bun market-request.ts markets --station "Jaques Station"
-  bun market-request.ts list --market-id 4306502403
-  bun market-request.ts trade --market-id 4306502403 --type buy --item silver --qty 10
-  bun market-request.ts trade --type sell --item 128049155 --qty 5 --unit-price 3340 --stolen
-  bun market-request.ts trade --type buy --item palladium,gold --cargo 1232 --fill
-  bun market-request.ts trade --type buy --item palladium,gold --cargo 1232 --fill --watch"#
+  bun game-internal-api.ts market --market-id 4306502403
+  bun game-internal-api.ts market Colonia --eddn
+  bun game-internal-api.ts market --market-id 128667761 --eddn-test
+  bun game-internal-api.ts markets "Hyades Sector NI-X a16-0"
+  bun game-internal-api.ts markets --station "Jaques Station"
+  bun game-internal-api.ts list --market-id 4306502403
+  bun game-internal-api.ts trade --market-id 4306502403 --type buy --item silver --qty 10
+  bun game-internal-api.ts trade --type sell --item 128049155 --qty 5 --unit-price 3340 --stolen
+  bun game-internal-api.ts trade --type buy --item palladium,gold --cargo 1232 --fill
+  bun game-internal-api.ts trade --type buy --item palladium,gold --cargo 1232 --fill --watch"#
     )
 }

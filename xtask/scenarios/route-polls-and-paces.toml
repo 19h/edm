@@ -53,12 +53,12 @@ path = "/2.0/elite/market/list"
 # completion order would otherwise be a race.
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 delay-ms = 30
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 delay-ms = 60

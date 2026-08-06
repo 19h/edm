@@ -29,7 +29,7 @@ cast_possible_wrap = "allow"
 # is false). The sanctioned comparisons live behind `js::js_min`/`js_max`/
 # `truthy`/`safe_int`; the rest are transcriptions of TypeScript comparisons.
 float_cmp = "allow"
-# `Commodity` mirrors the Companion API's own field set.
+# `Commodity` mirrors the game-internal API's own field set.
 struct_excessive_bools = "allow"
 # This codebase explains itself in prose, and the lint cannot tell a proper noun
 # (ChaCha20, CPython, JavaScript) from an unquoted code item.

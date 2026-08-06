@@ -20,7 +20,7 @@ use edm_core::js::{self, time};
 use edm_core::render::{Block, views};
 
 use crate::ardent::{ArdentClient, ResolvedSystem};
-use crate::capi;
+use crate::game_api;
 use crate::eddn::EddnResult;
 use crate::exchange::SendOptions;
 use crate::net::HttpTransport;
@@ -263,7 +263,7 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         .map_err(|error| error.message().to_owned())?;
     let request = app.prepare(
         STARSYSTEM,
-        capi::starsystem_fields(
+        game_api::starsystem_fields(
             resolved.system.address,
             &query.language,
             query.cached_timestamp,

@@ -1,5 +1,5 @@
 # Guardrails that stop a "harmless" refactor from silently breaking parity with
-# market-request.ts. Every entry here corresponds to a row in PORTING.md.
+# game-internal-api.ts. Every entry here corresponds to a row in PORTING.md.
 
 disallowed-methods = [
     { path = "serde_json::to_string", reason = "use JsValue::stringify_compact — serde_json prints integral f64 as `1.0` [F2/R3]" },

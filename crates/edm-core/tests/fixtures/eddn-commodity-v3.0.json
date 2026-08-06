@@ -18,11 +18,11 @@
                 },
                 "gameversion": {
                     "type"          : "string",
-                    "description"   : "Fileheader->gameversion, else LoadGame->gameversion, else 'CAPI-market', else ''."
+                    "description"   : "Fileheader->gameversion, else LoadGame->gameversion, else 'game-internal-market', else ''."
                 },
                 "gamebuild": {
                     "type"          : "string",
-                    "description"   : "Fileheader->build, else LoadGame->build, else 'CAPI-market', else ''."
+                    "description"   : "Fileheader->build, else LoadGame->build, else 'game-internal-market', else ''."
                 },
                 "softwareName": {
                     "type"          : "string"
@@ -78,7 +78,7 @@
                 },
                 "commodities": {
                     "type"      : "array",
-                    "description" : "Commodities returned by the Companion API, with illegal commodities omitted",
+                    "description" : "Commodities returned by the game-internal API, with illegal commodities omitted",
                     "items"     : {
                         "type"                  : "object",
                         "additionalProperties"  : false,
@@ -88,7 +88,7 @@
                                 "type"          : "string",
                                 "renamed"       : "Name",
                                 "minLength"     : 1,
-                                "description"   : "Symbolic name as returned by the Companion API"
+                                "description"   : "Symbolic name as returned by the game-internal API"
                             },
                             "meanPrice": {
                                 "type"          : "integer",
@@ -131,11 +131,11 @@
                             },
                             "Producer": {
                                 "$ref"          : "#/definitions/disallowed",
-                                "description"   : "Not present in CAPI data, so removed from Journal-sourced data"
+                                "description"   : "Not present in game-internal API data, so removed from Journal-sourced data"
                             },
                             "Rare" : {
                                 "$ref"          : "#/definitions/disallowed",
-                                "description"   : "Not present in CAPI data, so removed from Journal-sourced data"
+                                "description"   : "Not present in game-internal API data, so removed from Journal-sourced data"
                             },
                             "id": {
                                 "$ref"          : "#/definitions/disallowed",
@@ -154,7 +154,7 @@
                             "name": {
                                 "type"          : "string",
                                 "minLength"     : 1,
-                                "description"   : "Economy type as returned by the Companion API"
+                                "description"   : "Economy type as returned by the game-internal API"
                             },
                             "proportion": {
                                 "type"          : "number"

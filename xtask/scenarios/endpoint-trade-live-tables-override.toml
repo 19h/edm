@@ -7,5 +7,5 @@ path = "/2.0/elite/market/trade"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/trade.json"

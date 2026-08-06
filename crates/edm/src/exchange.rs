@@ -8,7 +8,7 @@
 use edm_core::js;
 use edm_core::wire::{self, Nonce};
 
-use crate::capi::PreparedRequest;
+use crate::game_api::PreparedRequest;
 use crate::net::{HeaderView, HttpRequest, HttpResponse, HttpTransport, Profile};
 use crate::out::{EXIT_FAILURE, Out};
 
@@ -70,7 +70,7 @@ where
         request.headers.iter().map(|(name, value)| (*name, value.clone())).collect();
     let response = http
         .send(HttpRequest {
-            profile: Profile::Capi,
+            profile: Profile::GameApi,
             method: &request.method,
             url: &request.url,
             headers: &headers,

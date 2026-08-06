@@ -1,7 +1,7 @@
 //! `cargo xtask <subcommand>` — the development tasks that need more than
 //! `cargo test` can express.
 //!
-//! * `parity` runs the same argv through `market-request.ts` under Bun and
+//! * `parity` runs the same argv through `game-internal-api.ts` under Bun and
 //!   through the Rust binary, against one mock server, and diffs stdout,
 //!   stderr, the exit code, any `--dump` file and the wire log. It is the
 //!   acceptance gate for the whole port.

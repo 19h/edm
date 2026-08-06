@@ -14,7 +14,7 @@ enumerating systems within 10 Ly of Sol...
 |   - fleet carriers      | -1   (--include-carriers to keep)            |
 | markets to poll         | 0                                            |
 | cached and still fresh  | 2                                            |
-| CAPI requests           | 0  (one per market)                          |
+| game-internal API requests           | 0  (one per market)                          |
 | estimated transfer      | 0-0 KB  (prior: 500 KB/system, 20 KB/market) |
 | pacing                  | 8 req/s                                      |
 | estimated wall clock    | 0s                                           |

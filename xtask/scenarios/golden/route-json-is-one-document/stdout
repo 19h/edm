@@ -26,7 +26,7 @@
       "commodityOverrideMarkets": 0
     },
     "notes": [
-      "every price below was read live from the Companion API during this run",
+      "every price below was read live from the game-internal API during this run",
       "2 priced listings have no underlying market timestamp; retrieval time was not substituted"
     ]
   },

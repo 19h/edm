@@ -1,5 +1,5 @@
 # fail-302
-why = "302 with a Location header: the Companion API client follows no redirects (R67), so this is reported as a plain failure."
+why = "302 with a Location header: the game-internal API client follows no redirects (R67), so this is reported as a plain failure."
 argv = ["market", "--market-id", "3229009408"]
 
 [[route]]

@@ -1,4 +1,4 @@
-//! The eight column sets, transcribed from `market-request.ts`.
+//! The eight column sets, transcribed from `game-internal-api.ts`.
 //!
 //! Field order inside each column matters twice over: it is the left-to-right
 //! order on screen, and — because ties in the drop rule go to the leftmost
@@ -11,7 +11,7 @@
 
 use super::table::Column;
 
-/// `FIELD_COLUMNS` (`market-request.ts:497`) — the two-column label/value table
+/// `FIELD_COLUMNS` (`game-internal-api.ts:497`) — the two-column label/value table
 /// used for request and response summaries. Nothing is droppable, so this table
 /// only ever squeezes.
 pub const FIELD_COLUMNS: &[Column] = &[
@@ -22,7 +22,7 @@ pub const FIELD_COLUMNS: &[Column] = &[
 /// The same two-column shape as [`FIELD_COLUMNS`], with a wider label.
 ///
 /// A separate constant rather than a widened `FIELD_COLUMNS` because that one
-/// is pinned to `market-request.ts:497` and every request and response table in
+/// is pinned to `game-internal-api.ts:497` and every request and response table in
 /// the program is drawn with it. The route plan's labels are indented exclusion
 /// lines — `  - Odyssey settlements` is 23 characters — and eliding the very
 /// words that explain what was filtered out would defeat the table.
@@ -85,7 +85,7 @@ pub const LEG_COLUMNS: &[Column] = &[
     Column::new("time", "Time").right().priority(4),
 ];
 
-/// `COMMODITY_COLUMNS` (`market-request.ts:621`) — the market listing.
+/// `COMMODITY_COLUMNS` (`game-internal-api.ts:621`) — the market listing.
 ///
 /// Only `Commodity` declares a floor, so it is the only column that is ever
 /// squeezed; the other ten are dropped whole, heaviest priority first.
@@ -103,7 +103,7 @@ pub const COMMODITY_COLUMNS: &[Column] = &[
     Column::new("flags", "CPRI").priority(1),
 ];
 
-/// `INVENTORY_COLUMNS` (`market-request.ts:681`) — the commander's hold.
+/// `INVENTORY_COLUMNS` (`game-internal-api.ts:681`) — the commander's hold.
 pub const INVENTORY_COLUMNS: &[Column] = &[
     Column::new("commodity", "Commodity").min_width(10).max_width(30),
     Column::new("qty", "Qty").right(),
@@ -115,7 +115,7 @@ pub const INVENTORY_COLUMNS: &[Column] = &[
     Column::new("position", "Position (x / y / z)").priority(1),
 ];
 
-/// `SWEEP_COLUMNS` (`market-request.ts:1358`) — one row per market visited.
+/// `SWEEP_COLUMNS` (`game-internal-api.ts:1358`) — one row per market visited.
 pub const SWEEP_COLUMNS: &[Column] = &[
     Column::new("marketId", "Market ID").right(),
     Column::new("name", "Name").min_width(12).max_width(32),
@@ -127,7 +127,7 @@ pub const SWEEP_COLUMNS: &[Column] = &[
     Column::new("attempts", "Try").right().priority(3),
 ];
 
-/// `PLAN_COLUMNS` (`market-request.ts:1731`) — a resolved trade, with the
+/// `PLAN_COLUMNS` (`game-internal-api.ts:1731`) — a resolved trade, with the
 /// provenance of each field.
 pub const PLAN_COLUMNS: &[Column] = &[
     Column::new("field", "Field").min_width(8).max_width(20),
@@ -135,7 +135,7 @@ pub const PLAN_COLUMNS: &[Column] = &[
     Column::new("source", "From").priority(1),
 ];
 
-/// `TRADE_LOG_COLUMNS` (`market-request.ts:2024`) — one row per executed trade.
+/// `TRADE_LOG_COLUMNS` (`game-internal-api.ts:2024`) — one row per executed trade.
 pub const TRADE_LOG_COLUMNS: &[Column] = &[
     Column::new("round", "#").right(),
     Column::new("commodity", "Commodity").min_width(10).max_width(28),
@@ -146,7 +146,7 @@ pub const TRADE_LOG_COLUMNS: &[Column] = &[
     Column::new("cargo", "Cargo").right().priority(2),
 ];
 
-/// `POI_COLUMNS` (`market-request.ts:2613`) — the structural scan's fallback
+/// `POI_COLUMNS` (`game-internal-api.ts:2613`) — the structural scan's fallback
 /// listing, used when `starsystem.polities` yields no markets.
 pub const POI_COLUMNS: &[Column] = &[
     Column::new("marketId", "Market ID").right(),
@@ -157,7 +157,7 @@ pub const POI_COLUMNS: &[Column] = &[
     Column::new("path", "Found at").max_width(28).priority(4),
 ];
 
-/// `MARKET_POINT_COLUMNS` (`market-request.ts:2758`) — the markets of a system.
+/// `MARKET_POINT_COLUMNS` (`game-internal-api.ts:2758`) — the markets of a system.
 pub const MARKET_POINT_COLUMNS: &[Column] = &[
     Column::new("marketId", "Market ID").right(),
     Column::new("name", "Name").min_width(14).max_width(36),
@@ -188,7 +188,7 @@ pub const ALL: &[(&str, &[Column])] = &[
     ("MARKET_POINT", MARKET_POINT_COLUMNS),
 ];
 
-/// Looks a column set up by the name it has in `market-request.ts`.
+/// Looks a column set up by the name it has in `game-internal-api.ts`.
 #[must_use]
 pub fn by_name(name: &str) -> Option<&'static [Column]> {
     ALL.iter().find(|(candidate, _)| *candidate == name).map(|(_, columns)| *columns)

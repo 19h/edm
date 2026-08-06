@@ -240,7 +240,7 @@ fn cargo(route: &Route, commodities: &Commodities) -> String {
 
 /// `AgronomicTreatment` as `Agronomic Treatment`.
 ///
-/// The Companion API returns the internal identifier; the game shows the spaced
+/// The game-internal API returns the internal identifier; the game shows the spaced
 /// form, and so does every third-party tool a commander has ever used. Left
 /// unsplit, a truncated cell reads `AgronomicTr~`, which is both longer and
 /// harder to recognise than `Agronomic Tr~`.
@@ -524,7 +524,7 @@ mod tests {
 /// step short of being usable: you know where to go and what to carry, and then
 /// have to go and look up two numbers by hand.
 ///
-/// The commodity goes on the wire as the Companion API's own identifier rather
+/// The commodity goes on the wire as the game-internal API's own identifier rather
 /// than the spaced form the table shows, because [`domain::find_commodity`]
 /// strips whitespace and lowercases before matching and takes an **exact** hit
 /// over a partial one — so `Tantalum` can only ever resolve to Tantalum, while

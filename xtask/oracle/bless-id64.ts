@@ -3,7 +3,7 @@
  * Pins the ID64 system-address codec.
  *
  * The oracle here is not a re-transcription of the algorithm — it is the
- * algorithm. The three functions are sliced verbatim out of `market-request.ts`
+ * algorithm. The three functions are sliced verbatim out of `game-internal-api.ts`
  * and executed, so a fixture can never agree with a mistake this generator and
  * the Rust both made.
  *
@@ -21,7 +21,7 @@ mkdirSync(outDir, { recursive: true });
 // Load the original implementation by slicing it out of the script.
 // ---------------------------------------------------------------------------
 
-const SOURCE = "market-request.ts";
+const SOURCE = "game-internal-api.ts";
 const FIRST_LINE = 2348; // `const SECTOR_SIZE`
 const LAST_LINE = 2445; // closing brace of `containsCoordinates`
 

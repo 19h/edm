@@ -25,7 +25,7 @@ path = "/2.0/elite/starsystem"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/starsystem-sweep.json"
 
 # Alpha answers slowly and Bravo quickly, so Bravo's snapshot must appear first
@@ -37,7 +37,7 @@ envelope = "marketId=3229009401&"
 [[route.reply]]
 status = 200
 delay-ms = 120
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market.json"
 
 [[route]]
@@ -47,7 +47,7 @@ envelope = "marketId=3229009402&"
 [[route.reply]]
 status = 200
 delay-ms = 10
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 # The rest carry distinct delays too: with three workers in flight the harness
@@ -60,7 +60,7 @@ envelope = "marketId=3229009403&"
 [[route.reply]]
 status = 200
 delay-ms = 30
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -70,7 +70,7 @@ envelope = "marketId=3229009404&"
 [[route.reply]]
 status = 200
 delay-ms = 55
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -80,7 +80,7 @@ envelope = "marketId=3229009405&"
 [[route.reply]]
 status = 200
 delay-ms = 80
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -90,7 +90,7 @@ envelope = "marketId=3229009406&"
 [[route.reply]]
 status = 200
 delay-ms = 105
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"
 
 [[route]]
@@ -100,5 +100,5 @@ envelope = "marketId=3229009407&"
 [[route.reply]]
 status = 200
 delay-ms = 135
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-small.json"

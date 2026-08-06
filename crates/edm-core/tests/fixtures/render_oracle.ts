@@ -1,6 +1,6 @@
 // Blesses tests/snapshots/render__*.snap from Bun.
 //
-// Lines 358-495 of market-request.ts, verbatim, plus the eight column sets,
+// Lines 358-495 of game-internal-api.ts, verbatim, plus the eight column sets,
 // plus a driver that renders render_scenarios.json at the width in $COLUMNS.
 // The Rust test reads the same scenario file, so the two sides cannot drift
 // apart in their input; what comes out here is what the snapshots must contain.
@@ -30,7 +30,7 @@ type TableRow =
   | { readonly kind: "band"; readonly text: string }
   | { readonly kind: "rule" };
 
-// ---- verbatim from market-request.ts:358-495 --------------------------------
+// ---- verbatim from game-internal-api.ts:358-495 --------------------------------
 
 const TRUNCATION_MARK = "~";
 

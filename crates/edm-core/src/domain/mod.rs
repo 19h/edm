@@ -1,4 +1,4 @@
-//! The market model: what a Companion API payload means once it has been read.
+//! The market model: what a game-internal API payload means once it has been read.
 
 pub mod batch;
 pub mod commander;
@@ -19,7 +19,7 @@ use read::Read;
 ///
 /// Borrows out of the parsed document rather than owning its strings, so
 /// reading a market costs one `Vec` allocation and no string allocations. Every
-/// numeric field is `f64` because the Companion API's numbers arrive as
+/// numeric field is `f64` because the game-internal API's numbers arrive as
 /// JavaScript numbers and reach the wire the same way — a stock level or a unit
 /// price can legitimately be fractional. See F3.
 #[derive(Clone, Copy, Debug, PartialEq)]

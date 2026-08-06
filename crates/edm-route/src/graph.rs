@@ -4,7 +4,7 @@
 //! **Never pair-major.** Pairing markets first and asking what they can trade
 //! costs `n² · |C|` and spends nearly all of it discovering emptiness. Pivoting
 //! on the commodity costs `Σ_c |suppliers_c| · |buyers_c|` instead, and every
-//! Companion API market returns the same 391-entry commodity map with most rows
+//! game-internal API market returns the same 391-entry commodity map with most rows
 //! priced but holding nothing and wanting nothing — so the pivot is what makes
 //! the constant factor bearable. Measured 2026-08-06 over the 22 real market
 //! payloads the first live run cached: `Σ_c |sup| · |buy|` is 7,038 against a
@@ -12,7 +12,7 @@
 //!
 //! **The result is nevertheless a dense graph, and an earlier version of this
 //! comment claimed otherwise.** "Most market pairs share no tradeable commodity"
-//! is false for Companion API data. Over those 22 markets, **410 of the 462
+//! is false for game-internal API data. Over those 22 markets, **410 of the 462
 //! ordered pairs — 89% — have a profitable trade between them**; over a cached
 //! 5,049-market sweep it is **95%**. So the compressed sparse row layout below
 //! is a memory layout and not a sparsity claim, the strongly connected

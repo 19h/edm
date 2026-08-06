@@ -7,7 +7,7 @@ path = "/2.0/elite/market/list"
 
 [[route.reply]]
 status = 500
-encode = "capi"
+encode = "game_api"
 payload = """
 {"code":"MarketNotFound","message":"no such market"}
 """

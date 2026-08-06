@@ -8,7 +8,7 @@
 //! "gold,"` taking the single path and then looking up a commodity called
 //! `gold,`) are pinned deliberately.
 //!
-//! Expected message strings are transcriptions of `market-request.ts`, not
+//! Expected message strings are transcriptions of `game-internal-api.ts`, not
 //! guesses; each is cited by line number where it is produced in
 //! `cli::config`.
 
@@ -556,7 +556,7 @@ fn eddn_options_default_to_the_commander_and_the_constants() {
     // rows to a different piece of software defeats the point of the field.
     assert_eq!(defaults.software_name, "edm");
     assert_eq!(defaults.software_version, "1.0.0");
-    assert_eq!(defaults.game_version, "CAPI-Live-market");
+    assert_eq!(defaults.game_version, "GameInternal-Live-market");
     assert_eq!(defaults.game_build, "");
     assert!(!defaults.test);
     assert_eq!(defaults.horizons, None, "absent is not false: the key is omitted");

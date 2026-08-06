@@ -1,4 +1,4 @@
-//! The Companion API session: credentials, per-request stamps, envelopes, and
+//! The game-internal API session: credentials, per-request stamps, envelopes, and
 //! the send/decode sequence.
 //!
 //! The sequence is not an implementation detail. `send` prints the request
@@ -380,7 +380,7 @@ pub fn prepare(
     // The origin is a parameter, not the constant, because the alternative —
     // building with the constant and rewriting the prefix afterwards — is a
     // step a caller can forget. One did: the sweep sent every market poll to
-    // the live Companion API while the harness believed it was talking to a
+    // the live game-internal API while the harness believed it was talking to a
     // mock. A signature that cannot be satisfied without deciding the origin
     // makes that class of mistake unrepresentable.
     let url = format!("{origin}{}?{sealed}", endpoint.path);

@@ -52,10 +52,10 @@ path = "/2.0/elite/market/list"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-gold-source.json"
 
-# The Companion API's answer for a station that has no commodity market.
+# The game-internal API's answer for a station that has no commodity market.
 # Verbatim from a live radius-100 sweep, 2026-08-05.
 [[route.reply]]
 status = 410

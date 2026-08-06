@@ -9,7 +9,7 @@
 #
 # That also means the original scenario could never have shown the divergence:
 # it ran `help`, which prints one string and calls `heading` not once. At a
-# COLUMNS of twenty digits `bun market-request.ts help` exits 0 and prints
+# COLUMNS of twenty digits `bun game-internal-api.ts help` exits 0 and prints
 # normally — which is exactly what the harness reported.
 why = "COLUMNS of twenty digits. Number(COLUMNS) is 1e20, and the first `\"=\".repeat(1e20)` inside `heading` exhausts memory — Bun prints `Out of memory` and exits 1. C11 clamps to 10,000 instead and renders. This scenario passes when the two sides differ; if they ever agree, C11 has become untrue and the row should be deleted."
 argv = ["markets", "--address", "5378909424384", "--dry-run"]

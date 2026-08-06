@@ -9,11 +9,11 @@ use super::{Body, HeaderView, HttpRequest, HttpResponse, HttpTransport, Profile,
 /// JavaScript would throw something catchable.
 const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
 
-/// Two clients, because the Companion API and the auxiliary services need
+/// Two clients, because the game-internal API and the auxiliary services need
 /// genuinely different behaviour.
 #[derive(Debug)]
 pub struct LiveHttp {
-    capi: reqwest::Client,
+    game_api: reqwest::Client,
     aux: reqwest::Client,
 }
 
@@ -23,8 +23,8 @@ impl LiveHttp {
         // sets neither: a sweep's per-attempt race is the only deadline in the
         // program, and a single `market --market-id` really can hang forever.
         // Adding one here would be an improvement that changes behaviour. R69.
-        let capi = reqwest::Client::builder()
-            // The Companion API answers a redirect with something worth seeing,
+        let game_api = reqwest::Client::builder()
+            // The game-internal API answers a redirect with something worth seeing,
             // so it is surfaced rather than followed. R67.
             .redirect(redirect::Policy::none())
             .pool_max_idle_per_host(16)
@@ -43,12 +43,12 @@ impl LiveHttp {
             .build()
             .map_err(|e| TransportError::Other(e.to_string()))?;
 
-        Ok(Self { capi, aux })
+        Ok(Self { game_api, aux })
     }
 
     const fn client(&self, profile: Profile) -> &reqwest::Client {
         match profile {
-            Profile::Capi => &self.capi,
+            Profile::GameApi => &self.game_api,
             Profile::Aux => &self.aux,
         }
     }
@@ -72,7 +72,7 @@ impl HttpTransport for LiveHttp {
             // measured against bun 1.2.3 with a raw socket server; R66's
             // Content-Type half is wrong. The length has to be set explicitly
             // because reqwest omits the header entirely for an empty body,
-            // where `fetch` sends it, and the Companion API's PUT routes want
+            // where `fetch` sends it, and the game-internal API's PUT routes want
             // the framing.
             Body::EmptyText => builder.header("content-length", "0").body(""),
             Body::Json(bytes) => {

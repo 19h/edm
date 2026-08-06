@@ -56,10 +56,10 @@ path = "/2.0/elite/market/list"
 # request counter over that run alone is what says so.
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-gold-source.json"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-gold-sink.json"

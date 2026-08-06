@@ -1,4 +1,4 @@
-//! `runBatchTrade` (`market-request.ts:2091`) — buying or selling several
+//! `runBatchTrade` (`game-internal-api.ts:2091`) — buying or selling several
 //! commodities, filling a hold, and retrying until it is full.
 //!
 //! The original is one `while` loop carrying five mutable flags (`outcome`,

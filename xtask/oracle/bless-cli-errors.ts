@@ -100,7 +100,7 @@ const CASES: [string, string[]][] = [
 
 const rows: string[] = [];
 for (const [name, argv] of CASES) {
-  const proc = Bun.spawnSync(["bun", "market-request.ts", ...argv], {
+  const proc = Bun.spawnSync(["bun", "game-internal-api.ts", ...argv], {
     env: { ...process.env, COLUMNS: "100", MARKET_ID: "", COMMANDER_ID: "", MACHINE_ID: "",
            MACHINE_TOKEN: "", AUTH_TOKEN: "" },
   });

@@ -265,7 +265,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                             let stamp = app.stamp().map_err(|error| error.clone())?;
                             let request = app.prepare(
                                 edm_core::consts::STARSYSTEM_DAILY_DIGEST,
-                                crate::capi::daily_digest_fields(
+                                crate::game_api::daily_digest_fields(
                                     app.cli
                                         .optional_value(edm_core::cli::Flag::Language, None)
                                         .unwrap_or("en"),
@@ -329,7 +329,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         app.ports.clock.now_ms(),
     );
     // Zero unless `--verify-systems`. Ardent's market ids are usable directly —
-    // step 0 established that the Companion API answers for a market the
+    // step 0 established that the game-internal API answers for a market the
     // commander is not docked at — and a starsystem payload is ~500 KB against
     // a market's ~20 KB, so reading one per system to rediscover ids we already
     // have would be twenty-five times the transfer for the same prices.
@@ -414,7 +414,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                     }
                     requests.set(requests.get() + 1);
                     let stamp = app.stamp().map_err(|error| error.clone())?;
-                    let fields = crate::capi::marketdata_fields(
+                    let fields = crate::game_api::marketdata_fields(
                         &batch,
                         &app.credentials,
                         stamp.frontier_time,
@@ -1097,7 +1097,7 @@ async fn resolve<H: HttpTransport>(
 ///
 /// Free and unmetered, so this is not paced and failures are not retried: a
 /// system whose market list does not answer contributes nothing, and the plan
-/// reports a smaller region rather than a wrong one. The Companion API is what
+/// reports a smaller region rather than a wrong one. The game-internal API is what
 /// the pacer and the spend gate exist for.
 ///
 /// Returns the stations and how many systems answered at all.

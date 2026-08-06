@@ -13,7 +13,7 @@ enumerating systems within 10 Ly of Sol...
 |   - Odyssey settlements | -1   (--settlements to keep)                   |
 |   - fleet carriers      | -1   (--include-carriers to keep)              |
 | markets to poll         | 2                                              |
-| CAPI requests           | 2  (one per market)                            |
+| game-internal API requests           | 2  (one per market)                            |
 | estimated transfer      | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
 | pacing                  | 4 req/s                                        |
 | estimated wall clock    | 1s                                             |

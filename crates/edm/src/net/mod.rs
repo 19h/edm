@@ -16,7 +16,7 @@ pub mod live;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Profile {
     /// `api.orerve.net`. Redirects are surfaced, not followed.
-    Capi,
+    GameApi,
     /// Ardent and EDDN.
     Aux,
 }
@@ -29,7 +29,7 @@ pub enum Body<'a> {
     /// The empty string.
     ///
     /// Not the same as [`Body::None`]: `fetch` with `body: ""` sends
-    /// `Content-Length: 0`, which is the framing the Companion API's PUT routes
+    /// `Content-Length: 0`, which is the framing the game-internal API's PUT routes
     /// want, and that header appears on the wire but *not* in the request table
     /// the program prints.
     ///

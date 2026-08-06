@@ -13,7 +13,7 @@ enumerating systems within 10 Ly of Sol...
 |   - Odyssey settlements | -1   (--settlements to keep)                   |
 |   - fleet carriers      | -1   (--include-carriers to keep)              |
 | markets to poll         | 2                                              |
-| CAPI requests           | 2  (one per market)                            |
+| game-internal API requests           | 2  (one per market)                            |
 | estimated transfer      | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
 | pacing                  | 8 req/s                                        |
 | estimated wall clock    | 1s                                             |
@@ -95,7 +95,7 @@ enumerating systems within 10 Ly of Sol...
 | requests sent  | 9            |
 | elapsed        | <ELAPSED>    |
 +----------------+--------------+
-   every price below was read live from the Companion API during this run
+   every price below was read live from the game-internal API during this run
    1 priced listing has no underlying market timestamp; retrieval time was not substituted
    1 market in radius was not reached and is absent from the ranking, not ranked low
 == BEST ROUND TRIPS ================================================================================

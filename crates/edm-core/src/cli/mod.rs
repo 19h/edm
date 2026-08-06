@@ -34,7 +34,7 @@ pub use parse::{ArgError, Args, Value, parse, parse_with};
 pub use route_usage::route_usage;
 pub use usage::usage;
 
-/// The commands `main` will dispatch on (`market-request.ts:3148`).
+/// The commands `main` will dispatch on (`game-internal-api.ts:3148`).
 ///
 /// Checked *after* both the `help` command and the `--help` switch, which is
 /// why `edm bogus --help` prints the help text and exits 0 instead of

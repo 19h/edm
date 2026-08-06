@@ -1,4 +1,4 @@
-//! The accessor family (`market-request.ts:980-1027`).
+//! The accessor family (`game-internal-api.ts:980-1027`).
 //!
 //! Nothing in the program reads a flag directly. Six small functions sit
 //! between the parse result and every command, and they carry more behaviour
@@ -123,7 +123,7 @@ impl<'a> Cli<'a> {
         self.env.get(name)
     }
 
-    /// `optionalValue` (`market-request.ts:980`).
+    /// `optionalValue` (`game-internal-api.ts:980`).
     ///
     /// Three things here are easy to get wrong. The stored value is trimmed on
     /// *read*, not on parse. A present-but-blank flag is treated as absent and
@@ -131,7 +131,7 @@ impl<'a> Cli<'a> {
     /// `--qty` at all \[R56\]. And the environment name is itself tested for
     /// truthiness, so an empty name means "no environment fallback".
     ///
-    /// It cannot fail. `market-request.ts:986` throws
+    /// It cannot fail. `game-internal-api.ts:986` throws
     /// `{display} requires a value` when the slot holds a boolean, which the
     /// slot-type invariant makes unconstructible: every caller passes a flag
     /// with [`Flag::takes_value`], and only those flags can hold text \[C18\].
@@ -152,7 +152,7 @@ impl<'a> Cli<'a> {
         if value.is_empty() { None } else { Some(value) }
     }
 
-    /// `requireValue` (`market-request.ts:990`).
+    /// `requireValue` (`game-internal-api.ts:990`).
     ///
     /// The two messages differ by whether the option has an environment
     /// fallback to mention.
@@ -169,7 +169,7 @@ impl<'a> Cli<'a> {
         })
     }
 
-    /// `optionalNumber` (`market-request.ts:1002`).
+    /// `optionalNumber` (`game-internal-api.ts:1002`).
     ///
     /// No environment fallback: the TypeScript passes none, so `--qty` reads
     /// the flag alone even though the same flag's sibling accessors would
@@ -183,7 +183,7 @@ impl<'a> Cli<'a> {
         }
     }
 
-    /// `optionalDecimal` (`market-request.ts:1008`) — for values like
+    /// `optionalDecimal` (`game-internal-api.ts:1008`) — for values like
     /// `--interval` that may be fractional.
     ///
     /// The conversion is `Number(string)`, not a Rust float parse, so it
@@ -201,7 +201,7 @@ impl<'a> Cli<'a> {
         Ok(Some(value))
     }
 
-    /// `optionalSwitch` (`market-request.ts:1016`).
+    /// `optionalSwitch` (`game-internal-api.ts:1016`).
     ///
     /// The only accessor that can fail on a switch, and it fails for one
     /// reason: the slot was poisoned by a token that resolved through
@@ -218,7 +218,7 @@ impl<'a> Cli<'a> {
             None => Ok(None),
             Some(Value::Bool(value)) => Ok(Some(*value)),
             Some(Value::Poison) => Err(CliError::from(POISON_TYPE_ERROR.to_owned())),
-            // `market-request.ts:1021` re-reads a *string* slot as a boolean
+            // `game-internal-api.ts:1021` re-reads a *string* slot as a boolean
             // literal and throws `{display} expects true or false` when it is
             // not one. Unconstructible for the same reason as ts:986: text only
             // ever lands in a value flag's slot \[C18\].
@@ -226,7 +226,7 @@ impl<'a> Cli<'a> {
         }
     }
 
-    /// `switchValue` (`market-request.ts:1025`).
+    /// `switchValue` (`game-internal-api.ts:1025`).
     pub fn switch_value(&self, flag: Flag, fallback: bool) -> Result<bool, CliError> {
         Ok(self.optional_switch(flag)?.unwrap_or(fallback))
     }

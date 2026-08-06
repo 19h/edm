@@ -7,7 +7,7 @@
 //! `cargo xtask gates` fails the build if an impure dependency ever appears in
 //! this crate's dependency tree.
 //!
-//! The organising idea: `market-request.ts` is the specification, and its
+//! The organising idea: `game-internal-api.ts` is the specification, and its
 //! observable behaviour is inherited from JavaScript semantics that Rust does
 //! not share — `f64`-only arithmetic, UTF-16 string indexing, ECMAScript object
 //! key enumeration order, and `Number::toString`. Rather than dust those

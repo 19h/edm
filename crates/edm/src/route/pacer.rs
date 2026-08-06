@@ -132,7 +132,7 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
     /// The hold-off is **global**: it moves the shared bucket's gate, so one
     /// worker's 429 pauses every other worker too. A per-job backoff would
     /// leave fifteen of sixteen workers hammering a server that just said stop,
-    /// which is the failure the original has (`market-request.ts` requeues a
+    /// which is the failure the original has (`game-internal-api.ts` requeues a
     /// 429 immediately, with no delay and no header read).
     pub fn observe_throttled(&self, retry_after: Option<&str>) {
         let now = self.clock.now_ms();

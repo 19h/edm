@@ -2,7 +2,7 @@
 //!
 //! The fixtures are produced by executing `decodeSystemAddress`,
 //! `encodeSystemAddress` and `containsCoordinates` **sliced verbatim out of
-//! `market-request.ts`** — not by re-transcribing them. A fixture therefore
+//! `game-internal-api.ts`** — not by re-transcribing them. A fixture therefore
 //! cannot agree with a mistake that the generator and this implementation
 //! happened to share.
 

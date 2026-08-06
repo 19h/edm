@@ -68,7 +68,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
-/// `formatUnixSeconds` (`market-request.ts:540`).
+/// `formatUnixSeconds` (`game-internal-api.ts:540`).
 ///
 /// The seconds are interpolated through `String(n)`, so they are *ungrouped*
 /// here while the same value would carry commas through `formatInteger`
@@ -82,7 +82,7 @@ pub fn unix_seconds_display(seconds: f64) -> String {
     }
 }
 
-/// `formatMilliseconds` (`market-request.ts:545`).
+/// `formatMilliseconds` (`game-internal-api.ts:545`).
 ///
 /// `padStart(2, "0")` pads but never truncates, so an uptime past 100 hours
 /// widens the clock field rather than wrapping it.

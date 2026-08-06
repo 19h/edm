@@ -87,7 +87,7 @@ for (const p of stationPayloads) {
 
 writeFileSync(
   join(outDir, "ardent_contract.tsv"),
-  `# the four ardent.ts exports market-request.ts duck-types, recorded from the real module\n` +
+  `# the four ardent.ts exports game-internal-api.ts duck-types, recorded from the real module\n` +
     `# source: ${modulePath}\n# bun ${Bun.version}\n` +
     `# kind<TAB>input (JSON)<TAB>output\n${rows.join("\n")}\n`,
 );

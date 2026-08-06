@@ -34,7 +34,7 @@
 //! runs all `n` sweeps by construction, and the last one is the cheap one.
 //!
 //! On a radius-100 sweep that is not a theoretical remark. Measured 2026-08-06
-//! over 5,049 cached Companion API markets: the graph holds 24,292,232 legs in
+//! over 5,049 cached game-internal API markets: the graph holds 24,292,232 legs in
 //! one component of 5,045 nodes, so a probe that cannot exit early is
 //! **1.2e11 relaxations**. On a comparable 5,000-market instance where the
 //! iteration did improve, one such round took **205 seconds** — in silence,
@@ -229,7 +229,7 @@ pub(crate) struct LocalEdge {
 /// cycle lies wholly inside one and the decomposition turns a single large
 /// graph into several small independent ones.
 ///
-/// **On Companion API data it turns one large graph into one large graph.** 89%
+/// **On game-internal API data it turns one large graph into one large graph.** 89%
 /// of ordered market pairs can trade, so the decomposition of a radius-100
 /// sweep is one component holding all but a handful of stations plus a
 /// singleton for each of those — 5,045 of 5,049 nodes in one piece, measured

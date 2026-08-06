@@ -75,7 +75,7 @@ pub fn station_search_url(base: &str, station_name: &str) -> String {
 
 /// The route that maps a bare market id to the names EDDN requires.
 ///
-/// Not one of `ardent.ts`'s exports — `market-request.ts:27` defines it
+/// Not one of `ardent.ts`'s exports — `game-internal-api.ts:27` defines it
 /// separately, and it is a different route from that module's
 /// `marketCommodityUrl`.
 #[must_use]
@@ -375,7 +375,7 @@ pub struct ArdentStation {
     ///
     /// Ardent reports 3 (Large) for 30 of the 46 on-foot settlements in Sol,
     /// which cannot berth a large ship at all. Reading it as a pad filter would
-    /// admit hundreds of unlandable rows per region and spend a Companion API
+    /// admit hundreds of unlandable rows per region and spend a game-internal API
     /// request on each. Filter on [`station_type`](Self::station_type); use
     /// this to break ties, or to warn.
     pub max_landing_pad_size: Option<f64>,
@@ -432,7 +432,7 @@ pub fn parse_system_markets(value: &JsValue) -> Vec<ArdentStation> {
 /// Settlements and outposts can do neither, and they are most of what Ardent
 /// calls a station: 46 of Sol's 62 rows are on-foot settlements, and near
 /// Colonia 58% are fleet carriers. Filtering to these seven removes 87-93% of
-/// the Companion API spend for a region — but that is the smaller half of the
+/// the game-internal API spend for a region — but that is the smaller half of the
 /// argument. Excluding a berth a large ship cannot use is *correctness*; the
 /// saving is a consequence.
 pub const STARPORT_TYPES: [&str; 7] =
@@ -440,7 +440,7 @@ pub const STARPORT_TYPES: [&str; 7] =
 
 /// Whether a station type is in [`STARPORT_TYPES`].
 ///
-/// Compared case-insensitively: Ardent, EDDN and the Companion API each spell
+/// Compared case-insensitively: Ardent, EDDN and the game-internal API each spell
 /// these consistently and differently from each other, and a filter that
 /// silently dropped every station because of a capital letter would look
 /// exactly like a sparse region.

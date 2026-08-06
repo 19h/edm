@@ -1,4 +1,4 @@
-//! `parseArguments` (`market-request.ts:897-955`).
+//! `parseArguments` (`game-internal-api.ts:897-955`).
 //!
 //! The grammar is small but none of it is conventional, so no argument-parsing
 //! crate can express it: `--` is an unknown option rather than a terminator,
@@ -41,23 +41,23 @@ pub enum Value {
 /// errors in [`super::access`], and both rules are observable \[R46\].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ArgError {
-    /// `market-request.ts:922`. The raw name still carries its `no-` prefix,
+    /// `game-internal-api.ts:922`. The raw name still carries its `no-` prefix,
     /// so the message reads `--no- may only negate a switch, not --no-qty`.
     #[error("--no- may only negate a switch, not --{0}")]
     NegatedNonSwitch(Box<str>),
-    /// `market-request.ts:933`.
+    /// `game-internal-api.ts:933`.
     #[error("--{0} requires a value")]
     RequiresValue(Box<str>),
-    /// `market-request.ts:939`.
+    /// `game-internal-api.ts:939`.
     #[error("Unknown option --{0}")]
     UnknownOption(Box<str>),
-    /// `market-request.ts:942`. Only the `--switch=value` form can produce
+    /// `game-internal-api.ts:942`. Only the `--switch=value` form can produce
     /// this; a bare switch followed by a non-literal simply does not consume it.
     #[error("--{0} expects true or false")]
     ExpectsBoolean(Box<str>),
 }
 
-/// A parsed command line: `ParsedArguments` (`market-request.ts:792`).
+/// A parsed command line: `ParsedArguments` (`game-internal-api.ts:792`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
     /// The lowercased first bare word, or `"market"` when there was none.
@@ -215,7 +215,7 @@ pub fn parse_with(argv: &[String], table: Table) -> Result<Args, ArgError> {
     }
 
     Ok(Args {
-        // `command || "market"` (`market-request.ts:954`).
+        // `command || "market"` (`game-internal-api.ts:954`).
         command: if command.is_empty() { "market".to_owned() } else { command },
         slots,
         positionals,

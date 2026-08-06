@@ -1,4 +1,4 @@
-//! The renderer, held to `market-request.ts` lines 341-516.
+//! The renderer, held to `game-internal-api.ts` lines 341-516.
 //!
 //! The snapshots in `snapshots/` are an oracle, not a record of what this code
 //! happened to print: every one of them has been diffed against the output of

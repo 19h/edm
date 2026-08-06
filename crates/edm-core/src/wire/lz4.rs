@@ -1,4 +1,4 @@
-//! A raw LZ4 block decompressor transcribed from `market-request.ts:271-318`.
+//! A raw LZ4 block decompressor transcribed from `game-internal-api.ts:271-318`.
 //!
 //! There is a perfectly good LZ4 crate and it is not used here. **[R61]** The
 //! TypeScript's decoder is not the reference decoder: it rejects a zero match
@@ -77,7 +77,7 @@ impl std::error::Error for Lz4Error {}
 
 /// The largest output this decoder will allocate, 256 MiB. **C4**
 ///
-/// A CAPI market snapshot is tens of kilobytes; a shipyard is smaller still.
+/// A game-internal API market snapshot is tens of kilobytes; a shipyard is smaller still.
 pub const MAX_DECOMPRESSED: usize = 256 << 20;
 
 /// `decompressLz4Block` (ts:271).

@@ -44,7 +44,7 @@ use edm_core::js::{self, text::Metric};
 use edm_core::render::{Block, views, write_blocks};
 use edm_core::wire::Nonce;
 
-use crate::capi::{self, Field, FieldValue, HeaderConfig, PreparedRequest, Stamp};
+use crate::game_api::{self, Field, FieldValue, HeaderConfig, PreparedRequest, Stamp};
 use crate::exchange::{self, Exchange, SendOptions};
 use crate::net::{HeaderView, HttpTransport};
 use crate::out::{EXIT_FAILURE, EXIT_USAGE, Out};
@@ -164,7 +164,7 @@ pub struct App<'a, H, C, E, F> {
     pub session: SessionConfig,
     /// The same four secrets as `session.credentials`, wrapped so that neither
     /// token can reach a `Debug` or an error chain.
-    pub credentials: capi::Credentials,
+    pub credentials: game_api::Credentials,
     pub headers: HeaderConfig,
     pub overrides: &'a Overrides,
 }
@@ -193,7 +193,7 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
         overrides: &'a Overrides,
     ) -> Result<Self, CmdError> {
         let session = config::open_session(&cli).map_err(message)?;
-        let credentials = capi::Credentials {
+        let credentials = game_api::Credentials {
             commander_id: session.credentials.commander_id.clone(),
             machine_id: session.credentials.machine_id.clone(),
             machine_token: Secret::new(session.credentials.machine_token.clone()),
@@ -263,7 +263,7 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
     /// query is encrypted from the envelope alone and the origin is not part of
     /// it \[C24\].
     pub fn prepare(&self, endpoint: Endpoint, fields: Vec<Field>, stamp: Stamp) -> PreparedRequest {
-        capi::prepare(&self.overrides.origin, endpoint, self.session.method_override.as_deref(), fields, stamp, &self.headers)
+        game_api::prepare(&self.overrides.origin, endpoint, self.session.method_override.as_deref(), fields, stamp, &self.headers)
     }
 
     /// `send` (ts:1224), with the two tables wired in.
@@ -292,7 +292,7 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
         let stamp = self.stamp()?;
         let request = self.prepare(
             MARKET_LIST,
-            capi::list_fields(market_id, &self.credentials, stamp.frontier_time),
+            game_api::list_fields(market_id, &self.credentials, stamp.frontier_time),
             stamp,
         );
         Ok(self.send(&request, options).await)

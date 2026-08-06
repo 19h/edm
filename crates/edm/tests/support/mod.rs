@@ -112,7 +112,7 @@ pub(crate) fn json_reply(body: &str) -> Reply {
     reply(200, &[("content-type", "application/json")], body)
 }
 
-/// A Companion API 2xx: LZ4-framed, `ChaCha20`-sealed, base64.
+/// A game-internal API 2xx: LZ4-framed, `ChaCha20`-sealed, base64.
 pub(crate) fn sealed(document: &str) -> Reply {
     let nonce = Nonce::parse_arg(RESPONSE_NONCE).expect("twelve hex characters");
     let mut framed = b"EDDE".to_vec();
@@ -316,5 +316,5 @@ pub(crate) fn starsystem() -> String {
 /// through the ID64 codec.
 pub(crate) const ARDENT_COLONIA: &str = r#"{"systemName":"Colonia","systemAddress":3238296097059,"systemX":-9530.5,"systemY":-910.28125,"systemZ":19808.125}"#;
 
-/// The Companion API origin every fixture URL is built from.
-pub(crate) const CAPI: &str = "https://api.orerve.net";
+/// The game-internal API origin every fixture URL is built from.
+pub(crate) const game-internal API: &str = "https://api.orerve.net";

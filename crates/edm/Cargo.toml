@@ -1,6 +1,6 @@
 [package]
 name = "edm"
-description = "Frontier Companion API market client: poll a market, sweep a system, trade, and publish to EDDN."
+description = "Frontier game-internal API market client: poll a market, sweep a system, trade, and publish to EDDN."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true

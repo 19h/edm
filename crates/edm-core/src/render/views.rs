@@ -1,4 +1,4 @@
-//! Every table `market-request.ts` prints, as a value.
+//! Every table `game-internal-api.ts` prints, as a value.
 //!
 //! Each function here is one `emit*` from the TypeScript with the `console.log`
 //! taken out: it builds the [`Block`]s and returns them. That is what makes the
@@ -819,7 +819,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
     // market" would invite the reader to look for a decision that was not
     // taken here.
     rows.push(field_row(
-        "CAPI requests",
+        "game-internal API requests",
         if estimate.systems_to_read == 0 {
             format!("{}  (one per market)", int(estimate.requests))
         } else {
@@ -1050,10 +1050,10 @@ impl RouteCoverage {
         if self.markets_priced > 0 {
             notes.push(if self.cache_hits == 0 {
                 if self.ranked {
-                    "every price below was read live from the Companion API during this run"
+                    "every price below was read live from the game-internal API during this run"
                         .to_owned()
                 } else {
-                    "every price was read live from the Companion API during this run".to_owned()
+                    "every price was read live from the game-internal API during this run".to_owned()
                 }
             } else if fresh == 0 {
                 "every price below came from the cache, not from this run; --refresh re-reads them"
@@ -1150,14 +1150,14 @@ impl RouteCoverage {
 /// One market, as the sweep finishes it.
 ///
 /// Shaped after the ported sweep's `[k/N] Name (id)  HTTP s  outcome`
-/// (`market-request.ts:1540`, R83) rather than invented, because a commander
+/// (`game-internal-api.ts:1540`, R83) rather than invented, because a commander
 /// who has watched `edm market Colonia` should not have to learn a second
 /// format — but it is not that function and is not held to it: the id is
 /// dropped in favour of the system, which is what locates a station in a
 /// region sweep, and the outcome says how many rows are worth trading rather
 /// than how many rows there are.
 ///
-/// **Every Companion API market returns the same 391-entry commodity map**,
+/// **Every game-internal API market returns the same 391-entry commodity map**,
 /// most of it priced but idle, so a raw commodity count is the same number for
 /// every market in the galaxy and tells the reader nothing. Measured
 /// 2026-08-05.

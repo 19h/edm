@@ -1,6 +1,6 @@
 //! The Ardent client, held to the TypeScript module it replaced.
 //!
-//! `market-request.ts` reaches Ardent by `import()`ing
+//! `game-internal-api.ts` reaches Ardent by `import()`ing
 //! `/models/dev/edtrade/src/ardent.ts` at runtime and duck-typing four of its
 //! exports. Divergence C1 compiles those four in instead, because Rust cannot
 //! import TypeScript. This test is what stops that from being a leap of faith:

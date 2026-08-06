@@ -1,4 +1,4 @@
-//! Which markets are worth a Companion API request.
+//! Which markets are worth a game-internal API request.
 //!
 //! Every request this filter removes is one that is never sent, so this is the
 //! single decision that sets what a wide sweep costs. Measured against Ardent,
@@ -85,7 +85,7 @@ pub fn is_settlement(station_type: Option<&str>) -> bool {
     })
 }
 
-/// Apply the pre-CAPI filters.
+/// Apply the pre-game-internal-API filters.
 ///
 /// `centre` is the enumeration's reference point; stations are placed by
 /// [`crate::ardent::place`] before they get here, so a station whose system

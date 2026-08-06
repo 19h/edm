@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Generates the fixtures that pin `edm_core::js` to the JavaScript engine that
- * actually runs `market-request.ts`.
+ * actually runs `game-internal-api.ts`.
  *
  * These are measurements, not assertions. Where a fixture disagrees with the
  * Rust implementation, the fixture is right: it is what the original program

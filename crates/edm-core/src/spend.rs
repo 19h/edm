@@ -184,7 +184,7 @@ pub fn refusal_message(refusal: &Refusal, estimate: &Estimate, radius_ly: f64, m
             js::js_number(MAX_RADIUS_LY),
         ),
         Refusal::TooManyRequests => format!(
-            "Estimated {} Companion API requests, above the {} ceiling.\n\
+            "Estimated {} game-internal API requests, above the {} ceiling.\n\
              Narrow the sweep (--radius, --pad, --max-star-distance) or raise it with\n\
              --max-requests {}. Nothing has been sent.",
             js::format_integer(estimate.requests),
@@ -198,7 +198,7 @@ pub fn refusal_message(refusal: &Refusal, estimate: &Estimate, radius_ly: f64, m
 #[must_use]
 pub fn confirmation_message(estimate: &Estimate) -> String {
     format!(
-        "pass --yes to send {} requests to the Companion API",
+        "pass --yes to send {} requests to the game-internal API",
         js::format_integer(estimate.requests)
     )
 }

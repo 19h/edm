@@ -69,7 +69,7 @@ const CASES: [string, string[]][] = [
 const rows: string[] = [];
 for (const [name, argv] of CASES) {
   const proc = Bun.spawnSync([
-    "bun", "market-request.ts", ...argv, ...STAMP, ...CREDENTIALS, "--dry-run", "--json",
+    "bun", "game-internal-api.ts", ...argv, ...STAMP, ...CREDENTIALS, "--dry-run", "--json",
   ]);
   const stdout = proc.stdout.toString();
   if (proc.exitCode !== 0) {

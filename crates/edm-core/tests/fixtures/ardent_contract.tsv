@@ -1,4 +1,4 @@
-# the four ardent.ts exports market-request.ts duck-types, recorded from the real module
+# the four ardent.ts exports game-internal-api.ts duck-types, recorded from the real module
 # source: /models/dev/edtrade/src/ardent.ts
 # bun 1.2.3
 # kind<TAB>input (JSON)<TAB>output

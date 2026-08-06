@@ -17,7 +17,7 @@ path = "/2.0/elite/starsystem"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/starsystem-sweep.json"
 
 # Seven markets, one worker, no requeues: seven attempts, each ending at the

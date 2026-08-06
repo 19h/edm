@@ -1,4 +1,4 @@
-//! The Frontier wire codec, against `market-request.ts`.
+//! The Frontier wire codec, against `game-internal-api.ts`.
 //!
 //! Every base64 constant below was produced by running the TypeScript's own
 //! `encryptEnvelope`, `decryptResponse`, `decompressLz4Block` and

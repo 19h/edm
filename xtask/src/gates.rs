@@ -180,7 +180,7 @@ fn no_signal_handling(root: &Path) -> Result<()> {
 
 /// No credential-shaped literal anywhere in the tracked tree.
 ///
-/// The Companion API's machine and auth tokens are validated at exactly 80 and
+/// The game-internal API's machine and auth tokens are validated at exactly 80 and
 /// 2024 characters (ts:86, ts:90), so a leaked one is an unbroken printable run
 /// of exactly that length. Scanning for the *shape* rather than for known
 /// values is the point: a token nobody has seen yet is still caught.
@@ -217,7 +217,7 @@ fn no_committed_credentials(root: &Path) -> Result<()> {
 /// eighty-column table rule is eighty printable characters, and so is a line of
 /// the JSON corpus. Two more conditions turn the false positives off without
 /// weakening the check, because both are properties a token has and neither
-/// text nor a rule does — a restricted alphabet (the Companion API's tokens are
+/// text nor a rule does — a restricted alphabet (the game-internal API's tokens are
 /// base64-shaped, so `{`, `"`, `:` and `|` rule a run out) and enough distinct
 /// characters that a repeated separator cannot qualify.
 fn credential_runs(bytes: &[u8]) -> Vec<usize> {

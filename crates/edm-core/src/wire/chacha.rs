@@ -1,7 +1,7 @@
 //! `ChaCha20` under the one compile-time key.
 //!
 //! Frontier uses the IETF variant (RFC 8439): a 32-byte key, a 12-byte nonce
-//! and a 32-bit block counter that starts at zero. `market-request.ts` ships its
+//! and a 32-bit block counter that starts at zero. `game-internal-api.ts` ships its
 //! own implementation (ts:105-191); this delegates to the `chacha20` crate,
 //! which is the same function.
 

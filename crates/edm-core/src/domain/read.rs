@@ -1,6 +1,6 @@
 //! The coercions every payload read goes through.
 //!
-//! `market-request.ts` never trusts the Companion API's shape. It reads through
+//! `game-internal-api.ts` never trusts the game-internal API's shape. It reads through
 //! four total functions that substitute a default rather than failing, which is
 //! why a drifted payload degrades into empty tables instead of an exception.
 //! Reproducing them exactly matters more than it looks: several of the defaults
@@ -9,7 +9,7 @@
 use crate::js::json::{JsObject, JsValue};
 use crate::js::text;
 
-/// The reading half of `market-request.ts`'s payload helpers (ts:562-580).
+/// The reading half of `game-internal-api.ts`'s payload helpers (ts:562-580).
 pub trait Read {
     /// `readNumber` — a finite JSON number, else `0`.
     ///

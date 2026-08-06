@@ -153,7 +153,7 @@ pub(crate) struct Scenario {
     /// sent, and nothing in it distinguishes four requests spread over a second
     /// from four sent at once.
     pub(crate) expect_min_gap_ms: Option<u64>,
-    /// Exactly how many requests must reach the Companion API.
+    /// Exactly how many requests must reach the game-internal API.
     ///
     /// An exact count rather than a ceiling, so that "the spend gate refused and
     /// sent nothing" is a measurement and not an assumption — a scenario that

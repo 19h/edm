@@ -1,6 +1,6 @@
 //! Request pacing, as arithmetic.
 //!
-//! `market-request.ts:2988` has a `// Request pacing` section header with an
+//! `game-internal-api.ts:2988` has a `// Request pacing` section header with an
 //! **empty body**. A 429 is classified transient and requeued immediately, with
 //! no delay and no `Retry-After` read — so at concurrency 16 the client answers
 //! rate limiting by retrying harder. That is affordable for a seven-market

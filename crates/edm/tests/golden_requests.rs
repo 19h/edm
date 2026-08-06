@@ -12,7 +12,7 @@
 use edm_core::consts::{MARKET_TRADE, STARSYSTEM};
 use edm_core::domain::trade::{Kind, TradePlan};
 use edm_core::wire::Nonce;
-use edm::capi::{self, Credentials, HeaderConfig, Stamp};
+use edm::game_api::{self, Credentials, HeaderConfig, Stamp};
 
 fn credentials() -> Credentials {
     Credentials::load("F1234567", "machine-1", &"m".repeat(80), &"a".repeat(2024))
@@ -50,16 +50,16 @@ fn trade(
 }
 
 /// Builds the request each fixture row describes.
-fn build(name: &str) -> capi::PreparedRequest {
+fn build(name: &str) -> game_api::PreparedRequest {
     let credentials = credentials();
     let time = 1_700_000_000.0;
 
     match name {
-        "trade_buy" => capi::prepare(
+        "trade_buy" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
-            capi::trade_fields(
+            game_api::trade_fields(
                 &trade("4306502403", Kind::Buy, 128_049_204.0, 7.0, 7.0, 517.0, false),
                 &credentials,
                 time,
@@ -67,11 +67,11 @@ fn build(name: &str) -> capi::PreparedRequest {
             stamp(),
             &HeaderConfig::default(),
         ),
-        "trade_sell_stolen" => capi::prepare(
+        "trade_sell_stolen" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
-            capi::trade_fields(
+            game_api::trade_fields(
                 &trade("128667761", Kind::Sell, 128_049_152.0, 13.0, 130.0, 3340.0, true),
                 &credentials,
                 time,
@@ -82,11 +82,11 @@ fn build(name: &str) -> capi::PreparedRequest {
         // R53: `trade` never parses `--market-id`, so the leading zeros are on
         // the wire. A port that reached for a `u64` here would send
         // `4306502403` and the ciphertext would not match.
-        "trade_leading_zero_market" => capi::prepare(
+        "trade_leading_zero_market" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             MARKET_TRADE,
             None,
-            capi::trade_fields(
+            game_api::trade_fields(
                 &trade("0004306502403", Kind::Buy, 1.0, 1.0, 1.0, 1.0, false),
                 &credentials,
                 time,
@@ -94,31 +94,31 @@ fn build(name: &str) -> capi::PreparedRequest {
             stamp(),
             &HeaderConfig::default(),
         ),
-        "markets_by_address" => capi::prepare(
+        "markets_by_address" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             None,
-            capi::starsystem_fields(5_378_909_424_384.0, "en", 0.0, &credentials, time),
+            game_api::starsystem_fields(5_378_909_424_384.0, "en", 0.0, &credentials, time),
             stamp(),
             &HeaderConfig::default(),
         ),
         // R65: `--language` is unvalidated, so a non-ASCII value lengthens the
         // plaintext in bytes and shifts everything after it.
-        "markets_language" => capi::prepare(
+        "markets_language" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             None,
-            capi::starsystem_fields(10_477_373_803.0, "fr-Ø", 0.0, &credentials, time),
+            game_api::starsystem_fields(10_477_373_803.0, "fr-Ø", 0.0, &credentials, time),
             stamp(),
             &HeaderConfig::default(),
         ),
         // R66: the verb is uppercased by the session and changes only the
         // method, never the query.
-        "markets_method_override" => capi::prepare(
+        "markets_method_override" => game_api::prepare(
             edm_core::consts::API_ORIGIN,
             STARSYSTEM,
             Some("PUT"),
-            capi::starsystem_fields(10_477_373_803.0, "en", 0.0, &credentials, time),
+            game_api::starsystem_fields(10_477_373_803.0, "en", 0.0, &credentials, time),
             stamp(),
             &HeaderConfig::default(),
         ),

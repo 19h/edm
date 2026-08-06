@@ -6,7 +6,7 @@
 //! calls with printing in an order the parity harness diffs.
 
 pub mod ardent;
-pub mod capi;
+pub mod game_api;
 pub mod cmd;
 pub mod commander;
 pub mod eddn;

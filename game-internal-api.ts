@@ -32,8 +32,8 @@ const EDDN_SCHEMA = "https://eddn.edcd.io/schemas/commodity/3";
 const EDDN_SOFTWARE_NAME = "int-market-sync";
 /** MUST be incremented whenever the content of the messages we send changes. */
 const EDDN_SOFTWARE_VERSION = "1.0.0";
-/** docs/Developers.md:263-265 — commodity data taken from a live CAPI market endpoint. */
-const EDDN_GAME_VERSION = "CAPI-Live-market";
+/** docs/Developers.md:263-265 — commodity data taken from a live game-internal API market endpoint. */
+const EDDN_GAME_VERSION = "GameInternal-Live-market";
 /** Sweeps run as a pool of workers pulling from one queue, not at a fixed rate. */
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 16;
@@ -1026,10 +1026,10 @@ function switchValue(args: ParsedArguments, flag: string, fallback: boolean): bo
   return optionalSwitch(args, flag) ?? fallback;
 }
 
-const USAGE = `market-request.ts — Frontier market API client
+const USAGE = `game-internal-api.ts — Elite Dangerous game-internal API client
 
 Usage
-  bun market-request.ts [command] [options]
+  bun game-internal-api.ts [command] [options]
 
 Commands
   market [name]            ${MARKET_LIST.method} ${MARKET_LIST_PATH} — one market's commodity listing, or every
@@ -1105,16 +1105,16 @@ markets options
   --dump <file>            write the decoded starsystem payload for inspection
 
 Examples
-  bun market-request.ts market --market-id 4306502403
-  bun market-request.ts market Colonia --eddn
-  bun market-request.ts market --market-id 128667761 --eddn-test
-  bun market-request.ts markets "Hyades Sector NI-X a16-0"
-  bun market-request.ts markets --station "Jaques Station"
-  bun market-request.ts list --market-id 4306502403
-  bun market-request.ts trade --market-id 4306502403 --type buy --item silver --qty 10
-  bun market-request.ts trade --type sell --item 128049155 --qty 5 --unit-price 3340 --stolen
-  bun market-request.ts trade --type buy --item palladium,gold --cargo 1232 --fill
-  bun market-request.ts trade --type buy --item palladium,gold --cargo 1232 --fill --watch`;
+  bun game-internal-api.ts market --market-id 4306502403
+  bun game-internal-api.ts market Colonia --eddn
+  bun game-internal-api.ts market --market-id 128667761 --eddn-test
+  bun game-internal-api.ts markets "Hyades Sector NI-X a16-0"
+  bun game-internal-api.ts markets --station "Jaques Station"
+  bun game-internal-api.ts list --market-id 4306502403
+  bun game-internal-api.ts trade --market-id 4306502403 --type buy --item silver --qty 10
+  bun game-internal-api.ts trade --type sell --item 128049155 --qty 5 --unit-price 3340 --stolen
+  bun game-internal-api.ts trade --type buy --item palladium,gold --cargo 1232 --fill
+  bun game-internal-api.ts trade --type buy --item palladium,gold --cargo 1232 --fill --watch`;
 
 // ---------------------------------------------------------------------------
 // HTTP

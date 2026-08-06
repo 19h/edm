@@ -53,7 +53,7 @@ path = "/2.0/elite/market/list"
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-gold-source.json"
 
 # A 429 with a Retry-After, then the market answers. --verbose is what makes
@@ -65,5 +65,5 @@ headers = [["Retry-After", "1"]]
 
 [[route.reply]]
 status = 200
-encode = "capi"
+encode = "game_api"
 payload-file = "payloads/market-gold-sink.json"

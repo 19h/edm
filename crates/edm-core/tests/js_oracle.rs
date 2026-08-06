@@ -1,5 +1,5 @@
 //! The `js` kernel measured against the JavaScript engine that runs
-//! `market-request.ts`.
+//! `game-internal-api.ts`.
 //!
 //! Every fixture here was produced by `xtask/oracle/bless-js.ts` under Bun.
 //! When one of these fails, the fixture is right and the Rust is wrong — that

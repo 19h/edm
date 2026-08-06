@@ -1,4 +1,4 @@
-//! The batch trade loop, held to `market-request.ts:2091-2319`.
+//! The batch trade loop, held to `game-internal-api.ts:2091-2319`.
 //!
 //! Every test here drives the state machine with a scripted driver: the market
 //! listings are fixtures, the replies are a script, and the run is the `Vec` of

@@ -133,7 +133,7 @@ fn slice_prefix(s: &str, n: usize, metric: Metric) -> String {
     }
 }
 
-/// `clampText` (`market-request.ts:367`).
+/// `clampText` (`game-internal-api.ts:367`).
 ///
 /// The order of the three tests is observable: a value that already fits is
 /// returned untouched even when `width` is 1, and only then does a width of 1
@@ -163,7 +163,7 @@ pub enum Align {
     Right,
 }
 
-/// `padCell` (`market-request.ts:374`) — clamp, then pad to exactly `width`.
+/// `padCell` (`game-internal-api.ts:374`) — clamp, then pad to exactly `width`.
 #[must_use]
 pub fn pad(text: &str, width: usize, align: Align, metric: Metric) -> String {
     let clamped = clamp(text, width as isize, metric);
@@ -181,7 +181,7 @@ pub fn pad(text: &str, width: usize, align: Align, metric: Metric) -> String {
     out
 }
 
-/// `elide` (`market-request.ts:554`).
+/// `elide` (`game-internal-api.ts:554`).
 ///
 /// Faithful to a quirk: `text.slice(-tail)` with `tail == 0` is `slice(-0)`,
 /// which is `slice(0)` — the *whole* string, not the empty one. So

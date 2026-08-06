@@ -1,110 +1,172 @@
 # edm
 
-A client for Elite Dangerous' Companion API: poll a market, sweep every market
-in a system, execute trades, and publish commodity data to
-[EDDN](https://github.com/EDCD/EDDN).
+Turn live Elite Dangerous market data into routes you can fly, trades you can
+execute, and commodity updates you can share with the community.
 
-```
-edm market --market-id 4306502403        # one market's commodity listing
-edm market Colonia --eddn                # sweep a system, publish each market
-edm markets "Hyades Sector NI-X a16-0"   # what is dockable in a system
-edm trade --market-id 4306502403 --type buy --item silver --qty 10
-edm trade --type buy --item palladium,gold --cargo 1232 --fill --watch
-edm help
-```
+## Find profitable trade routes
 
-## What this is
+`edm route` surveys the markets around a system or station and ranks the best
+one-way trips, round trips, and repeatable loops. Results say where to go, what
+to carry, expected profit, travel time, and credits per hour. They also include
+ready-to-run `edm trade` commands for each leg.
 
-A Rust port of `market-request.ts`, which is still in this repository and is not
-going anywhere. It is the specification, the oracle, and the tie-breaker: when a
-question comes up about what the program should do, the answer is whatever that
-file does when you run it.
+Shape the search around the ship and the trip you want to fly:
 
-The port is not a rewrite in spirit. Every observable byte — stdout, stderr, the
-exit code, the bytes on the wire — is reproduced, and the places where it
-deliberately is not are enumerated in [`PORTING.md`](PORTING.md) with a reason
-each. That register is the contract; anything that differs and is not listed
-there is a bug.
-
-## Layout
-
-```
-crates/edm-core/    pure: no I/O, no clock, no entropy, no network
-  js/               ECMAScript semantics Rust does not share
-  wire/             ChaCha20, base64, raw LZ4 blocks
-  render/           the fitted table, and every view built from it
-  cli/              the command-line grammar and per-command configuration
-  domain/           the market model, ID64 codec, EDDN messages, trade rules
-crates/edm/         everything impure, and the command entry points
-xtask/              fixture generators, the mock server, the parity harness
-```
-
-`edm-core`'s purity is checked rather than asserted: `cargo xtask gates` fails
-the build if `tokio`, `reqwest`, `rustix` or `getrandom` ever appear in its
-dependency tree. The point is that every behaviour in the parity register stays
-reachable from a plain `#[test]`, with no runtime and no sockets.
-
-## Why there is a `js` module
-
-The program's observable behaviour is inherited from JavaScript semantics that
-Rust does not share, and the differences are not cosmetic:
-
-- **`Number::toString`** — `1e21` prints as `1e+21`, not as twenty-one zeros;
-  `-0` prints as `0`; an integral double prints without a decimal point. That
-  last one is not a nicety: EDDN validates its schema with CPython, where
-  `isinstance(123.0, int)` is `False`, so a payload serialized by `serde_json`
-  would be rejected with HTTP 400 on **every** upload — and the EDDN
-  specification forbids retrying that.
-- **Object key order** — `Object.entries()` hoists canonical array-index keys
-  into ascending numeric order ahead of everything else. Commodity ids are
-  indices; market ids are past the 2³²−2 limit and are not. So one map is
-  silently re-sorted and the other keeps document order, and that ordering
-  reaches the sweep queue, the progress lines and the EDDN commodity array.
-- **String length** — the renderer measures in UTF-16 code units, because that
-  is what `String.prototype.length` counts.
-- **Collation** — every table sorts with `localeCompare`. Byte order would put
-  every uppercase letter before every lowercase one.
-
-These are concentrated in `edm_core::js` and pinned by fixtures generated from
-the same Bun build that runs the original. Measuring an engine beats reasoning
-about one: the first run of those fixtures found that `toFixed(1)` was keeping a
-negative zero the specification discards, and that a hand-written CLDR collation
-model was wrong in six distinct ways.
-
-## Verifying it
+- Set cargo capacity, available credits, laden jump range, and landing-pad size.
+- Limit distance from the arrival star, supply, demand, commodity category, or
+  station type.
+- Exclude carriers, settlements, or illegal commodities unless you explicitly
+  want them considered.
+- Search a single hop, a round trip, the best loop of any length, or a loop with
+  a fixed maximum number of stops.
+- See whether a result is proven optimal or affected by estimates, incomplete
+  coverage, or a search deadline.
 
 ```bash
-cargo test --workspace       # units, property tests, snapshots, oracle fixtures
-cargo clippy --workspace --all-targets -- -D warnings
-cargo xtask gates            # purity, no-signal, secret scan
-cargo xtask parity           # the acceptance gate: byte-diff against Bun
+edm route Sol
+edm route "Shinrarta Dezhra" --radius 50 --cargo 784 --shape loop
+edm route Colonia --cargo 1232 --credits 500000000 --shape loop:4 --yes
+edm route Sol --radius 15 --dry-run
 ```
 
-`cargo xtask parity` is the definition of done. It runs the same argv through
-the TypeScript original and the Rust binary against the same mock Frontier,
-Ardent and EDDN server, and diffs stdout, stderr, the exit code, any `--dump`
-file, and the recorded wire log. Determinism comes from the program's own flags:
-`--nonce`, `--f-time` and `--request-time` pin the request stamp, so the
-encrypted query is byte-identical on both sides.
+The route planner can use local Journal, Status, and Cargo files to pick up your
+current system, free cargo space, balance, and jump range. Command-line values
+always take priority.
 
-`cargo xtask bless` regenerates the oracle fixtures. Review that diff carefully —
-each fixture records the `bun --version` that produced it, and a change there
-means the reference behaviour moved.
+## How a route search works
+
+The complete route-search path is:
+
+`reference system -> Ardent discovery -> market filters -> cache check -> request plan -> live prices -> optional EDDN relay -> route ranking`
+
+1. **Resolve the reference.** The supplied system or station name is resolved
+   through Ardent to a system, address, and galactic coordinates. When no
+   reference is supplied, local commander state can provide the current system.
+
+2. **Discover the region.** Ardent is queried for systems inside the requested
+   radius and for the markets in each system. If a nearby-system response hits
+   Ardent's result limit, `edm` continues from additional systems until it has
+   covered the radius or exhausted the configured discovery budget. The output
+   reports how far the resulting survey is known to be complete.
+
+3. **Reduce the candidate set.** Stations and markets are filtered before live
+   price requests are made. This applies constraints such as landing-pad size,
+   distance from the arrival star, station type, carriers, and settlements.
+   Slowly changing Ardent system and station data is cached locally so repeated
+   searches do not need to rediscover the same region from scratch.
+
+4. **Check the price cache and price the run.** Every remaining market is
+   checked for a fresh, quantity-aware listing in the local cache. Cache hits
+   are included in the search without another request. Missing, stale, or
+   corrupt entries become live polling jobs. Before each authenticated Frontier
+   phase, `edm` prints its measured request count and estimated cost;
+   `--dry-run`, `--max-requests`, and the `--yes` confirmation gate can stop the
+   run before that work begins.
+
+5. **Fetch authoritative market prices.** Uncached markets are polled from the
+   Frontier game APIs with authenticated requests. The sweep observes the
+   configured concurrency, rate, retry, and deadline limits, backs off when the
+   service asks it to, and stops escalating failures if its circuit breaker
+   trips. `--verify-systems` adds separately gated official topology and bulk
+   market-data checks before the exact per-market reads.
+
+6. **Cache and optionally share each fresh listing.** Every valid live market
+   response is written to the price cache immediately, so an interrupted sweep
+   still preserves completed work. With `--eddn` or `--eddn-test`, that fresh
+   listing is also converted to an EDDN commodity message and submitted through
+   a separate rate limiter. Listings loaded from the price cache are never
+   relayed, because doing so would present an older observation as newly read;
+   markets relayed recently by this machine are suppressed as well.
+
+7. **Build and rank flyable routes.** The collected listings are converted into
+   a trade graph, constrained by the selected ship, balance, supply, demand,
+   commodity, and station rules, then searched for the requested route shape.
+   The final output includes ranked routes, ready-to-run trade commands, and a
+   coverage report showing cache hits, successful and failed market reads,
+   EDDN activity, incomplete discovery, and whether the result was proven or
+   cut short by the deadline.
+
+The default cache lives under `$XDG_CACHE_HOME/edm/route` (or
+`$HOME/.cache/edm/route`). Use `--max-age` to control price freshness,
+`--refresh` to poll again while warming the cache with new results, or
+`--no-cache` to bypass both cache reads and writes.
+
+## Inspect markets and trading locations
+
+Read one market's commodity listing, sweep every trading market in a system, or
+resolve a system or station name to the dockable markets around it.
+
+```bash
+edm market --market-id 4306502403
+edm market Colonia --detail
+edm markets "Hyades Sector NI-X a16-0" --trading
+edm markets --station "Jaques Station"
+```
+
+Market sweeps can run concurrently, retry transient failures, include carriers
+or non-trading markets on request, and return either fitted terminal tables or
+JSON for downstream tools.
+
+## Execute controlled trades
+
+Buy or sell by commodity name or ID. `edm` can look up the current price, clamp
+orders to stock, holdings, cargo space, or available credits, and show the
+resolved request before sending it.
+
+```bash
+edm trade --market-id 4306502403 --type buy --item silver --qty 10
+edm trade --type sell --item 128049155 --qty 5 --unit-price 3340 --stolen
+edm trade --type buy --item palladium,gold --cargo 1232 --fill
+edm trade --type buy --item palladium,gold --cargo 1232 --fill --watch
+```
+
+Batch trades work through a commodity list in order. Fill mode can spend the
+remaining hold space across that list, while watch mode can repeat attempts at
+a chosen interval until the hold is full or an attempt limit is reached.
+
+## Publish fresh prices to EDDN
+
+Share market data with the [Elite Dangerous Data
+Network](https://github.com/EDCD/EDDN) while sweeping a system or route, or run a
+dedicated refresh for selected markets and systems.
+
+```bash
+edm market Colonia --eddn
+edm eddn market --market-id 4306502403
+edm eddn market --from-file stale-systems.txt
+edm eddn market --from-file stale-systems.txt --dry-run
+```
+
+A refresh file accepts one market ID or system name per line. Repeats are
+removed, comments are allowed, and systems expand to all of their markets.
+Uploads are separately paced, recently relayed markets are suppressed, and
+`--eddn-test` exercises EDDN's test schema without relaying the data onward.
+
+## Automate safely
+
+- Use `--json` for machine-readable market and route output.
+- Use `--dry-run` to inspect requests or price a regional survey before it
+  starts.
+- Bound large jobs with request ceilings, deadlines, rate limits, and explicit
+  confirmation.
+- Reuse recent route data from the local cache, or force a refresh when current
+  prices matter more.
+- Add `--verbose` to see throttling, retries, pacing changes, and early-stop
+  reasons.
+
+`edm` can execute trades against a live commander account. Start with
+`--dry-run`, especially when testing trade, sweep, or publishing options.
 
 ## Credentials
 
-Four values, by flag or environment:
+Provide credentials as flags or environment variables:
 
-| flag | environment | notes |
+| Flag | Environment variable | Requirement |
 |---|---|---|
-| `--cmdr-id` | `COMMANDER_ID` | |
-| `--machine-id` | `MACHINE_ID` | |
-| `--machine-token` | `MACHINE_TOKEN` | exactly 80 characters |
-| `--auth-token` | `AUTH_TOKEN` | exactly 2024 characters |
+| `--cmdr-id` | `COMMANDER_ID` | Commander ID |
+| `--machine-id` | `MACHINE_ID` | Machine ID |
+| `--machine-token` | `MACHINE_TOKEN` | Exactly 80 characters |
+| `--auth-token` | `AUTH_TOKEN` | Exactly 2024 characters |
 
-The two tokens are held in a `Secret`, which has no `Display`, no `Serialize`,
-no `Deref` and no `Clone`; its `Debug` prints a length; and its buffer is zeroed
-on drop. The process disables core dumps and clears its dumpable flag before it
-reads any of them.
-
-`edm` runs with real credentials against a live account. Start with `--dry-run`.
+Run `edm help`, `edm route --help`, or `edm eddn --help` for the complete option
+reference.

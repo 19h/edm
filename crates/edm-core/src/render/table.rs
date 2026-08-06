@@ -1,4 +1,4 @@
-//! `renderTable` (`market-request.ts:402`) — column fitting and the ASCII frame.
+//! `renderTable` (`game-internal-api.ts:402`) — column fitting and the ASCII frame.
 //!
 //! The table is drawn to a fixed width. When the natural widths do not fit, the
 //! renderer first squeezes columns that declared a floor, and only when nothing
@@ -126,13 +126,13 @@ pub struct Fit {
 }
 
 /// Outer width of the frame: each column costs its width plus `"| "` and `" "`,
-/// and the frame is closed by a final `"|"` (`market-request.ts:393`).
+/// and the frame is closed by a final `"|"` (`game-internal-api.ts:393`).
 #[must_use]
 pub fn frame_width(widths: &[usize]) -> usize {
     widths.iter().map(|width| width + 3).sum::<usize>() + 1
 }
 
-/// `measureColumns` (`market-request.ts:380`).
+/// `measureColumns` (`game-internal-api.ts:380`).
 ///
 /// The order of the last two steps is observable: `maxWidth` clips the measured
 /// content **before** `minWidth` raises the floor, so a column with
@@ -166,7 +166,7 @@ pub fn fit(columns: &[Column], rows: &[Row<'_>], available: usize) -> Fit {
     fit_with(columns, rows, available, Metric::Utf16)
 }
 
-/// The fitting loop of `renderTable` (`market-request.ts:411`) [R27].
+/// The fitting loop of `renderTable` (`game-internal-api.ts:411`) [R27].
 ///
 /// Three details of this look like bugs and are reproduced deliberately,
 /// because every column width in every table depends on them:
@@ -246,7 +246,7 @@ pub struct Rendered {
     pub fit: Fit,
 }
 
-/// `renderTable` (`market-request.ts:402`) — fit, then draw.
+/// `renderTable` (`game-internal-api.ts:402`) — fit, then draw.
 ///
 /// The row state machine [R30] is the subtle half. `previousWasRule` starts
 /// `true` because the header rule has just been drawn, so a leading `Rule` or

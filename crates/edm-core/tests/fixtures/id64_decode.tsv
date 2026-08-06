@@ -1,5 +1,5 @@
 # decodeSystemAddress — address<TAB>JSON parts, or ERR:<message>
-# sliced verbatim from market-request.ts:2348-2445 under bun 1.2.3
+# sliced verbatim from game-internal-api.ts:2348-2445 under bun 1.2.3
 5378909424384	{"massCode":0,"massCodeLetter":"a","boxelSize":10,"sector":{"x":39,"y":31,"z":18},"boxel":{"x":17,"y":126,"z":96},"index":0,"origin":{"x":105,"y":-45,"z":-105}}
 0	{"massCode":0,"massCodeLetter":"a","boxelSize":10,"sector":{"x":0,"y":0,"z":0},"boxel":{"x":0,"y":0,"z":0},"index":0,"origin":{"x":-49985,"y":-40985,"z":-24105}}
 1	{"massCode":1,"massCodeLetter":"b","boxelSize":20,"sector":{"x":0,"y":0,"z":0},"boxel":{"x":0,"y":0,"z":0},"index":0,"origin":{"x":-49985,"y":-40985,"z":-24105}}

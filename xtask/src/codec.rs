@@ -53,26 +53,26 @@ pub(crate) fn lz4_literals(data: &[u8]) -> Vec<u8> {
 pub(crate) enum Encoding {
     /// Sent exactly as written.
     Raw,
-    /// The full Companion API pipeline: LZ4, `EDDE` frame, ChaCha20, base64.
-    Capi,
+    /// The full game-internal API pipeline: LZ4, `EDDE` frame, ChaCha20, base64.
+    GameApi,
     /// Same, minus the frame — the shape `decodeOpaqueBody`'s unframed path
     /// accepts and `decryptResponse` rejects with `MissingFrame` **[R59]**.
-    CapiUnframed,
+    GameApiUnframed,
     /// ChaCha20 and base64 over a body that is *not* an LZ4 block behind a
     /// frame, so the 2xx path fails inside the decompressor.
-    CapiCorruptBlock,
+    GameApiCorruptBlock,
 }
 
 impl Encoding {
     pub(crate) fn parse(name: &str) -> Result<Self> {
         Ok(match name {
             "raw" => Self::Raw,
-            "capi" => Self::Capi,
-            "capi-unframed" => Self::CapiUnframed,
-            "capi-corrupt-block" => Self::CapiCorruptBlock,
+            "game_api" => Self::GameApi,
+            "game-api-unframed" => Self::GameApiUnframed,
+            "game-api-corrupt-block" => Self::GameApiCorruptBlock,
             other => bail!(
                 "unknown encoding `{other}` \
-                 (raw, capi, capi-unframed, capi-corrupt-block)"
+                 (raw, game_api, game-api-unframed, game-api-corrupt-block)"
             ),
         })
     }
@@ -96,15 +96,15 @@ pub(crate) fn seal(plaintext: &str, encoding: Encoding, nonce: &str) -> Result<S
     let raw = plaintext.as_bytes();
     let inner = match encoding {
         Encoding::Raw => unreachable!("handled above"),
-        Encoding::Capi => frame(&lz4_literals(raw), raw.len()),
-        Encoding::CapiUnframed => raw.to_vec(),
+        Encoding::GameApi => frame(&lz4_literals(raw), raw.len()),
+        Encoding::GameApiUnframed => raw.to_vec(),
         // A frame whose block claims a fifteen-byte literal run that is not
         // there: `Invalid LZ4 literal length`.
-        Encoding::CapiCorruptBlock => frame(&[0xF0, 0x00], raw.len()),
+        Encoding::GameApiCorruptBlock => frame(&[0xF0, 0x00], raw.len()),
     };
     Ok(Sealed {
         bytes: wire::seal_query(&inner, &nonce).into_bytes(),
-        uncompressed: matches!(encoding, Encoding::Capi | Encoding::CapiCorruptBlock)
+        uncompressed: matches!(encoding, Encoding::GameApi | Encoding::GameApiCorruptBlock)
             .then_some(raw.len()),
     })
 }
@@ -162,9 +162,9 @@ mod tests {
     const NONCE: &str = "0123456789ab";
 
     #[test]
-    fn a_sealed_capi_body_opens_with_the_real_decoder() {
+    fn a_sealed_game_api_body_opens_with_the_real_decoder() {
         let payload = r#"{"lastStarport":{"commodities":[]}}"#;
-        let sealed = seal(payload, Encoding::Capi, NONCE).unwrap();
+        let sealed = seal(payload, Encoding::GameApi, NONCE).unwrap();
         let text = String::from_utf8(sealed.bytes).unwrap();
         let nonce = Nonce::from_response_header(NONCE).unwrap();
         let opened = wire::open_response(&text, &nonce, sealed.uncompressed.unwrap()).unwrap();
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn long_literal_runs_use_the_extended_length() {
         let payload = "x".repeat(1000);
-        let sealed = seal(&payload, Encoding::Capi, NONCE).unwrap();
+        let sealed = seal(&payload, Encoding::GameApi, NONCE).unwrap();
         let text = String::from_utf8(sealed.bytes).unwrap();
         let nonce = Nonce::from_response_header(NONCE).unwrap();
         assert_eq!(wire::open_response(&text, &nonce, 1000).unwrap(), payload);
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn an_unframed_body_is_refused_by_the_2xx_path_and_read_by_the_opaque_one() {
-        let sealed = seal("plain text", Encoding::CapiUnframed, NONCE).unwrap();
+        let sealed = seal("plain text", Encoding::GameApiUnframed, NONCE).unwrap();
         let text = String::from_utf8(sealed.bytes).unwrap();
         let nonce = Nonce::from_response_header(NONCE).unwrap();
         assert_eq!(

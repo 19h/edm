@@ -54,7 +54,7 @@ pub struct FeedConfig {
     pub test: bool,
     /// How long a market stays suppressed after this machine relayed it.
     pub eddn_max_age_minutes: f64,
-    /// Messages per second to EDDN, paced apart from the Companion API.
+    /// Messages per second to EDDN, paced apart from the game-internal API.
     pub eddn_rate_per_second: f64,
     pub rate_per_second: f64,
     pub workers: u32,
@@ -81,7 +81,7 @@ pub fn feed_usage() -> String {
 Usage
   edm eddn market (--market-id <id> | --from-file <path>)
 
-Reads every named market live from the Companion API and relays it to EDDN.
+Reads every named market live from the game-internal API and relays it to EDDN.
 Built for filling in systems whose data has gone stale: you say which, rather
 than hoping a route search happens to pass through them.
 
@@ -105,7 +105,7 @@ Sending
   --eddn-test              the gateway accepts these and does not relay them on
   --eddn-max-age <m>       suppress a repeat of the same market for this long,
                            default {eddn_age}
-  --rps <n>                Companion API requests per second, default {rps}
+  --rps <n>                game-internal API requests per second, default {rps}
   --eddn-rps <n>           messages per second to EDDN, default {eddn_rps}, and
                            paced separately: they ride inside the market poll,
                            so --rps used to set this too. A 565-market import at

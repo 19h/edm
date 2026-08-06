@@ -1,6 +1,6 @@
 //! A local copy of what Ardent said about the galaxy's shape.
 //!
-//! The price cache holds Companion API listings, which go stale in minutes and
+//! The price cache holds game-internal API listings, which go stale in minutes and
 //! cost an authenticated request each. This holds the *other* half of a sweep,
 //! and it was not cached at all: the `/nearby` pages that enumerate a region
 //! and the `/markets` lists that say which stations are in it. At radius 200

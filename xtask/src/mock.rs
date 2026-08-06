@@ -8,7 +8,7 @@
 //! cannot produce the malformed cases cannot prove the client handles them.
 //!
 //! One port serves three roles, routed by path prefix, because the scenarios
-//! need to watch a Companion API poll and an EDDN post interleave inside a
+//! need to watch a game-internal API poll and an EDDN post interleave inside a
 //! single sweep.
 //!
 //! Every request is recorded to a wire log in plain text. Plain text and not
@@ -304,7 +304,7 @@ pub(crate) fn format_timing(arrivals: &[Arrival]) -> String {
     out
 }
 
-/// The shortest interval between two consecutive Companion API arrivals.
+/// The shortest interval between two consecutive game-internal API arrivals.
 ///
 /// `None` when fewer than two arrived, which is a scenario with nothing to
 /// measure rather than a scenario that paced perfectly — the caller reports the
@@ -409,7 +409,7 @@ fn choose(
     let Some(profile) = profile else {
         return (None, Some(format!("no profile owns the path {}", request.path)));
     };
-    // The market id lives inside the encrypted query, so a Companion API route
+    // The market id lives inside the encrypted query, so a game-internal API route
     // that wants to tell one poll from another has to be given the plaintext.
     let envelope = (profile == Profile::Frontier)
         .then(|| {

@@ -1,4 +1,4 @@
-//! Every table the program prints, held to `market-request.ts`.
+//! Every table the program prints, held to `game-internal-api.ts`.
 //!
 //! The snapshots are taken at three widths because the interesting failures are
 //! width-dependent: 48 is the floor the terminal width is clamped to and the
@@ -541,7 +541,7 @@ fn zero_renders_as_a_dash_or_a_zero_depending_on_the_cell() {
 }
 
 /// `formatBracketMeter` clamps to 0..3 before it draws, so a payload carrying a
-/// bracket of 4 — which the Companion API does emit — renders `###` rather than
+/// bracket of 4 — which the game-internal API does emit — renders `###` rather than
 /// widening the column.
 #[test]
 fn the_bracket_meter_clamps() {
@@ -807,7 +807,7 @@ fn a_complete_sweep_carries_no_warnings() {
     };
     let notes = coverage.notes();
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].contains("read live from the Companion API"), "{notes:?}");
+    assert!(notes[0].contains("read live from the game-internal API"), "{notes:?}");
 }
 
 /// A sweep that found nothing says nothing, rather than claiming live prices it
@@ -896,7 +896,7 @@ fn line(overrides: impl Fn(&mut views::SweepLine<'_>)) -> String {
     views::sweep_line(&line)
 }
 
-/// The count that means something. Every Companion API market returns the same
+/// The count that means something. Every game-internal API market returns the same
 /// 391-entry commodity map, most of it priced but idle, so a commodity count is
 /// identical for every market in the galaxy; what varies is how many rows have
 /// stock or demand behind them.

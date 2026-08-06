@@ -2,10 +2,10 @@
 //! interpolated into the usage text and must not drift from the behaviour they
 //! describe.
 
-/// Where the Companion API lives.
+/// Where the game-internal API lives.
 pub const API_ORIGIN: &str = "https://api.orerve.net";
 
-/// One Companion API route.
+/// One game-internal API route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Endpoint {
     pub path: &'static str,
@@ -53,8 +53,8 @@ pub const EDDN_SCHEMA: &str = "https://eddn.edcd.io/schemas/commodity/3";
 pub const EDDN_SOFTWARE_NAME: &str = "edm";
 /// MUST be incremented whenever the content of the messages we send changes.
 pub const EDDN_SOFTWARE_VERSION: &str = "1.0.0";
-/// `docs/Developers.md:263` — commodity data taken from a live CAPI endpoint.
-pub const EDDN_GAME_VERSION: &str = "CAPI-Live-market";
+/// `docs/Developers.md:263` — commodity data taken from a live game-internal API endpoint.
+pub const EDDN_GAME_VERSION: &str = "GameInternal-Live-market";
 
 /// Sweeps run as a pool of workers pulling from one queue, not at a fixed rate.
 pub const DEFAULT_CONCURRENCY: u32 = 5;
@@ -70,7 +70,7 @@ pub const DEFAULT_USER_AGENT: &str = "EDGame/11.0/Win64";
 /// Ardent is the only route that maps a market id back to its names.
 pub const ARDENT_BASE_URL: &str = "https://api.ardent-insight.com/v2";
 
-/// The credential field widths the Companion API expects.
+/// The credential field widths the game-internal API expects.
 pub const MACHINE_TOKEN_LENGTH: usize = 80;
 /// The shortest `authToken` that is plausibly a token rather than a truncated
 /// paste.

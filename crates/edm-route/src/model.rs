@@ -1,6 +1,6 @@
 //! The instance: markets and their rows, the ship, and the search limits.
 //!
-//! Nothing here reads a file or a socket. The I/O layer decodes a Companion API
+//! Nothing here reads a file or a socket. The I/O layer decodes a game-internal API
 //! payload into [`RawCommodity`] rows and hands them to [`Market::from_rows`],
 //! which is also where the ingest invariants are checked and counted.
 
@@ -142,10 +142,10 @@ pub struct Market {
     pub demand: Vec<Demand>,
 }
 
-/// One row of a decoded Companion API commodity map.
+/// One row of a decoded game-internal API commodity map.
 ///
 /// Deliberately close to the wire shape so the I/O layer does no interpreting.
-/// The Companion API's `buyPrice` is what the commander pays to take a ton off
+/// The game-internal API's `buyPrice` is what the commander pays to take a ton off
 /// the station, and `sellPrice` is what the station pays to take one on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawCommodity {
@@ -167,7 +167,7 @@ pub struct RawCommodity {
     pub demand: i64,
     /// Demand bracket, 0–3.
     pub demand_bracket: i64,
-    /// The Companion API's `categoryname` — `Metals`, `Minerals`, `Foods`,
+    /// The game-internal API's `categoryname` — `Metals`, `Minerals`, `Foods`,
     /// `Salvage`, and a dozen more. Carried so a search can be restricted to
     /// the kinds of cargo a commander is willing to haul.
     pub category: String,
@@ -175,7 +175,7 @@ pub struct RawCommodity {
     /// **here**.
     ///
     /// Per market, not per commodity: Slaves are illegal in most jurisdictions
-    /// and legal in Imperial space, and the Companion API says which by leaving
+    /// and legal in Imperial space, and the game-internal API says which by leaving
     /// `legality` empty. A market that calls a commodity illegal will refuse an
     /// ordinary trade in it — measured 2026-08-05, HTTP 401 "Cannot sell
     /// illegal goods" — and can only take it across a black market, which is a
@@ -617,7 +617,7 @@ mod legality_tests {
     }
 
     /// The same commodity at a market that does not forbid it — Slaves are
-    /// legal in Imperial space, and the Companion API says so by leaving
+    /// legal in Imperial space, and the game-internal API says so by leaving
     /// `legality` empty. Six stations within 37 Ly of that one take them.
     #[test]
     fn the_same_commodity_is_tradable_where_it_is_legal() {

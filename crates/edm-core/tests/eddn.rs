@@ -192,7 +192,7 @@ fn the_test_schema_is_a_suffix() {
     );
 }
 
-/// The Companion API sends fractional quantities and EDDN's schema does not
+/// The game-internal API sends fractional quantities and EDDN's schema does not
 /// accept them.
 ///
 /// `Water` with a demand of `113.47560000000001` is a real row from a real
@@ -232,7 +232,7 @@ fn a_fractional_quantity_is_truncated_the_way_every_other_uploader_truncates_it(
 }
 
 /// A bracket is not a quantity. The schema's `levelType` is the enum
-/// `[0, 1, 2, 3, ""]`, and every value the Companion API has been observed to
+/// `[0, 1, 2, 3, ""]`, and every value the game-internal API has been observed to
 /// send is already in it — 29,152 markets scanned, not one outside. Truncating
 /// an unexpected value would turn it into a plausible wrong one instead of a
 /// loud failure.

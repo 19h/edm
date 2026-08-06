@@ -7,7 +7,7 @@
 //!
 //! None of the expectations below were reasoned out. Every row, and a further
 //! 8,624 generated command lines and 869 generated flag/environment pairs, were
-//! diffed against `market-request.ts`'s own `parseArguments` and accessors
+//! diffed against `game-internal-api.ts`'s own `parseArguments` and accessors
 //! executed under bun 1.2.3 — the same build the `js` fixtures are blessed
 //! from. The generator lives outside the crate because `edm-core` may not
 //! depend on a JavaScript runtime; `cargo xtask parity` is where that harness
@@ -607,7 +607,7 @@ fn r48_help_is_reachable_from_an_unknown_command() {
 // USAGE
 // ---------------------------------------------------------------------------
 
-/// The interpolations `market-request.ts:1029-1117` performs, and what each
+/// The interpolations `game-internal-api.ts:1029-1117` performs, and what each
 /// one renders to.
 fn usage_substitutions() -> Vec<(&'static str, String)> {
     vec![
@@ -630,8 +630,8 @@ fn usage_substitutions() -> Vec<(&'static str, String)> {
 
 /// Lifts the `USAGE` template literal straight out of the specification.
 fn usage_template() -> String {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../market-request.ts");
-    let source = std::fs::read_to_string(path).expect("market-request.ts sits at the workspace root");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../game-internal-api.ts");
+    let source = std::fs::read_to_string(path).expect("game-internal-api.ts sits at the workspace root");
     let opened = source.split_once("const USAGE = `").expect("USAGE is a template literal").1;
     opened.split_once("`;").expect("the template literal is closed").0.to_owned()
 }

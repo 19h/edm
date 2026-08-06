@@ -74,7 +74,7 @@ pub struct Outcome {
     pub absent: bool,
     /// Rows worth trading, for the progress line.
     ///
-    /// Not the commodity count: **every Companion API market returns the same
+    /// Not the commodity count: **every game-internal API market returns the same
     /// 391-entry map**, most of it priced but idle, so that number is identical
     /// for every market in the galaxy and tells a reader nothing.
     pub tradable: Option<usize>,

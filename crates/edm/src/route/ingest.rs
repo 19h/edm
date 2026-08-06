@@ -1,4 +1,4 @@
-//! From a decrypted Companion API listing to the optimiser's model.
+//! From a decrypted game-internal API listing to the optimiser's model.
 //!
 //! One direction, no interpretation. `edm-route` is exact-integer arithmetic
 //! over a wire shape that is `f64` all the way down, so this is where the two

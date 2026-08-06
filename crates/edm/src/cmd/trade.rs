@@ -19,7 +19,7 @@ use edm_core::js::json::JsValue;
 use edm_core::js::{format_quantity, js_number};
 use edm_core::render::{Block, Row, columns, views};
 
-use crate::capi::{self, Field};
+use crate::game_api::{self, Field};
 use crate::exchange::SendOptions;
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs};
@@ -298,7 +298,7 @@ fn loop_config(
 /// `marketId` is a string and reaches the wire verbatim — `trade` never parses
 /// it, so `0004306502403` keeps its leading zeros \[R53\]. The booleans go as
 /// `1`/`0` **numbers**, not as strings.
-fn trade_fields(plan: &TradePlan, credentials: &capi::Credentials, frontier_time: f64) -> Vec<Field> {
+fn trade_fields(plan: &TradePlan, credentials: &game_api::Credentials, frontier_time: f64) -> Vec<Field> {
     let mut fields = vec![
         Field::text("cmdrId", credentials.commander_id.clone()),
         Field::text("marketId", plan.market_id.clone()),
@@ -310,7 +310,7 @@ fn trade_fields(plan: &TradePlan, credentials: &capi::Credentials, frontier_time
         Field::number("qty", plan.qty),
         Field::number("finalQty", plan.final_qty),
     ];
-    fields.extend(capi::credential_fields(credentials, frontier_time));
+    fields.extend(game_api::credential_fields(credentials, frontier_time));
     fields
 }
 
@@ -434,8 +434,8 @@ mod tests {
     use super::*;
     use crate::secret::Secret;
 
-    fn credentials() -> capi::Credentials {
-        capi::Credentials {
+    fn credentials() -> game_api::Credentials {
+        game_api::Credentials {
             commander_id: "F1234567".to_owned(),
             machine_id: "machine-1".to_owned(),
             machine_token: Secret::new("m".repeat(80)),
@@ -458,7 +458,7 @@ mod tests {
             qty: 10.0,
             final_qty: 10.0,
         };
-        let plaintext = capi::serialize_envelope(&trade_fields(&plan, &credentials(), 1.0));
+        let plaintext = game_api::serialize_envelope(&trade_fields(&plan, &credentials(), 1.0));
         assert!(plaintext.starts_with(
             "cmdrId=F1234567&marketId=0004306502403&transactionType=buy&commodityId=128049204&blackMarket=0&stolen=1&unitPrice=9000&qty=10&finalQty=10&"
         ));

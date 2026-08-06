@@ -21,7 +21,7 @@ pub fn route_usage() -> String {
 Usage
   edm route <system|station> [options]
 
-Sweeps every market within a radius for live Companion API prices, then finds
+Sweeps every market within a radius for live game-internal API prices, then finds
 the most profitable routes in that data. The loop search is exact: it returns
 the best repeatable route there is, not the best one it happened to find.
 
