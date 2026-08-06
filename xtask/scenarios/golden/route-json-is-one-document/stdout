@@ -12,11 +12,22 @@
     "requestsSent": 2,
     "throttled": 0,
     "elapsedSeconds":<ELAPSED>,
+    "oldestMarketObservedAt": null,
+    "newestMarketObservedAt": null,
+    "marketObservationTimeUnknown": 2,
     "completeToLy": null,
     "breakerTripped": false,
     "rowsSkippedNonIntegral": 0,
+    "listingsSkippedInvalidIdentity": 0,
+    "specialOpportunities": {
+      "rescueSystems": 0,
+      "colonisationMarkets": 0,
+      "statefulMarkets": 0,
+      "commodityOverrideMarkets": 0
+    },
     "notes": [
-      "every price below was read live from the Companion API during this run"
+      "every price below was read live from the Companion API during this run",
+      "2 priced listings have no underlying market timestamp; retrieval time was not substituted"
     ]
   },
   "single": [],
@@ -60,7 +71,8 @@
           "limitedBy": "cargo",
           "distanceLy": 0,
           "millis": 136967,
-          "demandAssumed": false
+          "demandAssumed": false,
+          "priceProvenance": "verifiedListing"
         },
         {
           "from": {
@@ -81,7 +93,8 @@
           "limitedBy": "cargo",
           "distanceLy": 0,
           "millis": 136967,
-          "demandAssumed": false
+          "demandAssumed": false,
+          "priceProvenance": "verifiedListing"
         }
       ]
     }

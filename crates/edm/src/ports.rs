@@ -50,6 +50,8 @@ pub trait Fs {
     fn write(&self, path: &Path, contents: &str) -> std::io::Result<()>;
     fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    /// Deterministic immediate children of a directory, sorted by path.
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<std::path::PathBuf>>;
     fn exists(&self, path: &Path) -> bool;
 }
 
@@ -123,6 +125,14 @@ impl Fs for RealFs {
 
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(path)
+    }
+
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+        let mut entries = std::fs::read_dir(path)?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .collect::<Vec<_>>();
+        entries.sort();
+        Ok(entries)
     }
 
     fn exists(&self, path: &Path) -> bool {
@@ -236,6 +246,26 @@ impl Fs for RecordingFs {
 
     fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
+    }
+
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+        let mut entries = self
+            .0
+            .borrow()
+            .iter()
+            .filter_map(|(candidate, _)| {
+                (candidate.parent() == Some(path)).then_some(candidate.clone())
+            })
+            .collect::<Vec<_>>();
+        entries.sort();
+        entries.dedup();
+        if entries.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                path.display().to_string(),
+            ));
+        }
+        Ok(entries)
     }
 
     fn exists(&self, path: &Path) -> bool {

@@ -216,6 +216,71 @@ pub fn starsystem_fields(
     fields
 }
 
+/// Read-only finance-resource envelope, as emitted by the game.
+#[must_use]
+pub fn finance_fields(credentials: &Credentials, frontier_time: f64) -> Vec<Field> {
+    let mut fields = vec![Field::text("cmdrId", credentials.commander_id.clone())];
+    fields.extend(credential_fields(credentials, frontier_time));
+    fields
+}
+
+/// Read-only commodity-catalogue envelope. The observed client omits cmdrId.
+#[must_use]
+pub fn commodity_resource_fields(credentials: &Credentials, frontier_time: f64) -> Vec<Field> {
+    credential_fields(credentials, frontier_time)
+}
+
+/// Read-only bulk market-data envelope.
+///
+/// Addresses are serialized as one exact comma-separated decimal string: no
+/// `f64`, no repeated field and no spaces. Five is the official client's batch
+/// policy even though the server has accepted larger probes.
+pub fn marketdata_fields(
+    system_addresses: &[u64],
+    credentials: &Credentials,
+    frontier_time: f64,
+) -> Result<Vec<Field>, String> {
+    if system_addresses.is_empty() {
+        return Err("marketdata needs at least one system address".to_owned());
+    }
+    if system_addresses.len() > edm_core::consts::MARKETDATA_BATCH_MAX {
+        return Err(format!(
+            "marketdata accepts at most {} system addresses per client batch",
+            edm_core::consts::MARKETDATA_BATCH_MAX
+        ));
+    }
+    if system_addresses.contains(&0) {
+        return Err("marketdata system addresses must be nonzero".to_owned());
+    }
+    let joined = system_addresses
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut fields = vec![
+        Field::text("cmdrId", credentials.commander_id.clone()),
+        Field::text("systemAddr", joined),
+    ];
+    fields.extend(credential_fields(credentials, frontier_time));
+    Ok(fields)
+}
+
+/// One daily-digest page. The observed endpoint has no commander id.
+#[must_use]
+pub fn daily_digest_fields(
+    language: &str,
+    page_number: u32,
+    credentials: &Credentials,
+    frontier_time: f64,
+) -> Vec<Field> {
+    let mut fields = vec![
+        Field::text("language", language),
+        Field::number("pageNumber", f64::from(page_number)),
+    ];
+    fields.extend(credential_fields(credentials, frontier_time));
+    fields
+}
+
 /// `tradeEnvelopeFields` (ts:246).
 ///
 /// The booleans go on the wire as `1`/`0`, and `finalQty` is the size the
@@ -481,5 +546,49 @@ mod tests {
         assert!(!query.is_empty());
         assert!(query.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)));
         assert!(request.url.starts_with("https://api.orerve.net/2.0/elite/market/list?"));
+    }
+    #[test]
+    fn read_only_envelopes_keep_observed_order_and_exact_addresses() {
+        let c = credentials();
+        assert_eq!(
+            serialize_envelope(&finance_fields(&c, 7.0))
+                .split('&')
+                .map(|f| f.split('=').next().unwrap())
+                .collect::<Vec<_>>(),
+            ["cmdrId", "fTime", "machineId", "machineToken", "authToken"]
+        );
+        assert_eq!(
+            serialize_envelope(&commodity_resource_fields(&c, 7.0))
+                .split('&')
+                .map(|f| f.split('=').next().unwrap())
+                .collect::<Vec<_>>(),
+            ["fTime", "machineId", "machineToken", "authToken"]
+        );
+        let fields = marketdata_fields(&[11_665_265_337_753, 9_007_199_254_740_993], &c, 7.0)
+            .expect("valid batch");
+        let text = serialize_envelope(&fields);
+        assert!(
+            text.starts_with("cmdrId=F1234567&systemAddr=11665265337753,9007199254740993&fTime=7&"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("9007199254740992"),
+            "must not round through f64: {text}"
+        );
+
+        let digest = serialize_envelope(&daily_digest_fields("en", 38, &c, 7.0));
+        assert!(
+            digest.starts_with("language=en&pageNumber=38&fTime=7&"),
+            "{digest}"
+        );
+    }
+
+    #[test]
+    fn marketdata_batch_policy_is_enforced_before_any_request() {
+        let c = credentials();
+        assert!(marketdata_fields(&[], &c, 0.0).is_err());
+        assert!(marketdata_fields(&[0], &c, 0.0).is_err());
+        assert!(marketdata_fields(&[1, 2, 3, 4, 5], &c, 0.0).is_ok());
+        assert!(marketdata_fields(&[1, 2, 3, 4, 5, 6], &c, 0.0).is_err());
     }
 }

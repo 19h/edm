@@ -695,7 +695,7 @@ fn the_plan_shows_the_request_split() {
     let text = cells(&route_plan_blocks(&estimate)).concat().join("\n");
     // 135 markets, not the 157 found: the 22 still-fresh cached ones cost
     // nothing, and a plan that priced them would overstate what it will spend.
-    assert!(text.contains("253  = 118 starsystem + 135 market"), "{text}");
+    assert!(text.contains("253  = 118 official batch + 135 market"), "{text}");
 }
 
 /// An enumeration that could not close its frontier says so in the radius row
@@ -739,9 +739,28 @@ fn sample_coverage() -> views::RouteCoverage {
         requests_sent: 267,
         throttled: 3,
         elapsed_seconds: 71.0,
+        oldest_observed_ms: None,
+        newest_observed_ms: None,
+        observation_time_unknown: 0,
+        measured_at_ms: 0.0,
         truncated_to_ly: None,
         breaker_tripped: false,
     }
+}
+
+#[test]
+fn coverage_reports_underlying_observation_span_and_unknown_times() {
+    let mut coverage = sample_coverage();
+    coverage.oldest_observed_ms = Some(1_700_000_000_000.0);
+    coverage.newest_observed_ms = Some(1_700_000_120_000.0);
+    coverage.measured_at_ms = 1_700_000_600_000.0;
+    coverage.observation_time_unknown = 2;
+    let notes = coverage.notes().join("
+");
+    assert!(notes.contains("observations span"), "{notes}");
+    assert!(notes.contains("10 minutes old"), "{notes}");
+    assert!(notes.contains("2 priced listings have no underlying market timestamp"), "{notes}");
+    assert!(!notes.contains("read at one instant"), "{notes}");
 }
 
 #[test]

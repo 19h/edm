@@ -815,7 +815,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         rows.push(field_row("cached and still fresh", int(estimate.cached_fresh as f64)));
     }
     // The split is only worth showing when there are two kinds. By default a
-    // sweep reads no starsystem payloads at all, and "= 0 starsystem + 135
+    // sweep reads no official discovery batches at all, and "= 0 official + 135
     // market" would invite the reader to look for a decision that was not
     // taken here.
     rows.push(field_row(
@@ -824,7 +824,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
             format!("{}  (one per market)", int(estimate.requests))
         } else {
             format!(
-                "{}  = {} starsystem + {} market",
+                "{}  = {} official batch + {} market",
                 int(estimate.requests),
                 int(estimate.systems_to_read as f64),
                 int(estimate.markets_to_poll as f64)
@@ -1020,6 +1020,14 @@ pub struct RouteCoverage {
     pub requests_sent: usize,
     pub throttled: usize,
     pub elapsed_seconds: f64,
+    /// Oldest/newest underlying market observation timestamps represented in
+    /// the ranking. Retrieval and cache time are deliberately not substituted.
+    pub oldest_observed_ms: Option<f64>,
+    pub newest_observed_ms: Option<f64>,
+    /// Listings whose underlying observation time was not published.
+    pub observation_time_unknown: usize,
+    /// Instant at which this coverage statement was assembled, for age facts.
+    pub measured_at_ms: f64,
     /// Set when the enumeration could not close the frontier.
     pub truncated_to_ly: Option<f64>,
     pub breaker_tripped: bool,
@@ -1057,6 +1065,40 @@ impl RouteCoverage {
                     crate::js::format_integer(self.markets_priced as f64),
                 )
             });
+        }
+
+        if let Some(oldest) = self.oldest_observed_ms {
+            let age_minutes = (js::js_max(self.measured_at_ms - oldest, 0.0) / 60_000.0).floor();
+            let oldest_text = crate::js::time::iso8601_from_ms(oldest)
+                .unwrap_or_else(|| crate::js::js_number(oldest));
+            let newest_text = self
+                .newest_observed_ms
+                .filter(|newest| *newest != oldest)
+                .map(|newest| {
+                    crate::js::time::iso8601_from_ms(newest)
+                        .unwrap_or_else(|| crate::js::js_number(newest))
+                });
+            notes.push(match newest_text {
+                Some(newest) => format!(
+                    "underlying market observations span {oldest_text} to {newest}; the oldest is {} minutes old",
+                    crate::js::format_integer(age_minutes),
+                ),
+                None => format!(
+                    "underlying market observation time is {oldest_text} ({} minutes old)",
+                    crate::js::format_integer(age_minutes),
+                ),
+            });
+        }
+        if self.observation_time_unknown > 0 {
+            let (count, verb) = plural(
+                self.observation_time_unknown,
+                "priced listing",
+                "has",
+                "have",
+            );
+            notes.push(format!(
+                "{count} {verb} no underlying market timestamp; retrieval time was not substituted"
+            ));
         }
 
         if self.markets_absent > 0 {

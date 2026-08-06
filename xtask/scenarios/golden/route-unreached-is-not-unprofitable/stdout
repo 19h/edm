@@ -84,7 +84,7 @@ enumerating systems within 10 Ly of Sol...
 +----------------+--------------+
 | content-length | 0            |
 +----------------+--------------+
-[1/2] Titan City (Sol)  HTTP 500  no listing  after 8 attempts
+[2/2] Titan City (Sol)  HTTP 500  no listing  after 8 attempts
 == ROUTE COVERAGE ==================================================================================
 +----------------+--------------+
 | Field          | Value        |
@@ -96,6 +96,7 @@ enumerating systems within 10 Ly of Sol...
 | elapsed        | <ELAPSED>    |
 +----------------+--------------+
    every price below was read live from the Companion API during this run
+   1 priced listing has no underlying market timestamp; retrieval time was not substituted
    1 market in radius was not reached and is absent from the ranking, not ranked low
 == BEST ROUND TRIPS ================================================================================
    no profitable round trip in this data

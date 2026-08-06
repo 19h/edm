@@ -56,6 +56,7 @@ pub(crate) fn at(id: i64, x: f64, arrival_ls: f64, supply: &[Row], demand: &[Row
                 commodity: CommodityId(commodity),
                 sell_price: Credits(price),
                 qty: DemandQty::Published(Tons(qty)),
+                bulk: None,
             })
             .collect(),
     }

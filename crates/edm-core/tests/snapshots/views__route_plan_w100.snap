@@ -16,7 +16,7 @@ expression: "emit(blocks, width)"
 |   - beyond 2,000 Ls     | -22   (--max-star-distance to keep)            |
 | markets to poll         | 135                                            |
 | cached and still fresh  | 22                                             |
-| CAPI requests           | 253  = 118 starsystem + 135 market             |
+| CAPI requests           | 253  = 118 official batch + 135 market         |
 | estimated transfer      | 42-78 MB  (prior: 500 KB/system, 20 KB/market) |
 | pacing                  | 4 req/s                                        |
 | estimated wall clock    | 64s                                            |

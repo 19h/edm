@@ -1099,6 +1099,15 @@ pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 /// meaningless without somewhere to search around — and because a run that is
 /// going to fail should fail before it has printed anything.
 pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
+    route_config_with_reference(cli, None)
+}
+
+/// Route configuration with a local commander location as the lowest-priority
+/// reference. Explicit `--system` and positional names always win.
+pub fn route_config_with_reference(
+    cli: &Cli<'_>,
+    local_reference: Option<&str>,
+) -> Result<RouteConfig, CliError> {
     // A positional beginning with `-` is a mistyped flag, not part of a name.
     //
     // The ported grammar recognises only `--name` and `-h`, so any other
@@ -1116,6 +1125,7 @@ pub fn route_config(cli: &Cli<'_>) -> Result<RouteConfig, CliError> {
     let reference = match cli.optional_value(Flag::System, None) {
         Some(system) => system.to_owned(),
         None if !positional.is_empty() => positional.to_owned(),
+        None if local_reference.is_some() => local_reference.unwrap_or_default().to_owned(),
         None => {
             return Err("route needs a system or station name to search around"
                 .to_owned()

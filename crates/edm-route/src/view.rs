@@ -105,7 +105,12 @@ pub fn legs(route: &Route, markets: &[Market], commodities: &Commodities) -> Vec
                     .into(),
                 js::format_integer(choice.units.0 as f64).into(),
                 money(choice.buy_price.0).into(),
-                money(choice.sell_price.0).into(),
+                format!(
+                    "{}{}",
+                    money(choice.sell_price.0),
+                    if choice.bulk_estimated { " (est.)" } else { "" },
+                )
+                .into(),
                 money(choice.profit.0).into(),
                 limiter(choice.limiter).to_owned().into(),
                 format!("{} Ly", js::to_fixed_1(leg.distance_ly)).into(),
@@ -361,8 +366,10 @@ fn explain(caveat: Caveat) -> &'static str {
         // of a listing read a second ago. Saying "cache" here contradicted the
         // coverage block's "read live during this run" two lines above it.
         Caveat::StaleListing => {
-            "prices were read at one instant and are already ageing; another commander may have \
-             traded them since"
+            "market observations are ageing independently; another commander may have traded them since"
+        }
+        Caveat::BulkPriceEstimated => {
+            "destination prices use an empirical cargo-quantity estimate, not an executable quote"
         }
         Caveat::JumpGraphUnmodelled => {
             "distances are straight lines; the real jump graph may be longer"
@@ -429,6 +436,7 @@ mod tests {
             Caveat::StockDepletion,
             Caveat::DemandUnpublished,
             Caveat::StaleListing,
+            Caveat::BulkPriceEstimated,
             Caveat::JumpGraphUnmodelled,
             Caveat::CreditCapBinds,
             Caveat::SingleHopNotRepeatable,

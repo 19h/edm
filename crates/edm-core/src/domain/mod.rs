@@ -1,7 +1,11 @@
 //! The market model: what a Companion API payload means once it has been read.
 
 pub mod batch;
+pub mod commander;
+pub mod digest;
 pub mod eddn;
+pub mod marketdata;
+pub mod resources;
 pub mod id64;
 pub mod read;
 pub mod starsystem;

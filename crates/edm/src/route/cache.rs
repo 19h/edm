@@ -85,7 +85,9 @@ impl Cache {
     /// text the program prints and the wire carries — a market cached by one
     /// path and looked up by another would be a silent permanent miss.
     fn path(&self, market_id: f64) -> PathBuf {
-        self.root.join(format!("{}.json", js::js_number(market_id)))
+        self.root
+            .join(PROVIDER_NAMESPACE)
+            .join(format!("{}.json", js::js_number(market_id)))
     }
 
     /// A cached listing, if there is a fresh one.
@@ -102,8 +104,15 @@ impl Cache {
         let Some(entry) = decode(&text) else {
             return Lookup::Corrupt;
         };
-        if now_ms - entry.read_at_ms > self.max_age_ms {
-            return Lookup::Stale { age_ms: now_ms - entry.read_at_ms };
+        let age_ms = now_ms - entry.read_at_ms;
+        // A future timestamp is not a fresh observation. It is either corrupt
+        // data or a clock anomaly, and accepting it would extend the cache
+        // lifetime beyond the configured freshness bound.
+        if !age_ms.is_finite() || age_ms < 0.0 {
+            return Lookup::Corrupt;
+        }
+        if age_ms > self.max_age_ms {
+            return Lookup::Stale { age_ms };
         }
         Lookup::Fresh(entry)
     }
@@ -114,10 +123,12 @@ impl Cache {
         if !self.enabled {
             return;
         }
-        if fs.create_dir_all(&self.root).is_err() {
+        let provider_root = self.root.join(PROVIDER_NAMESPACE);
+        if fs.create_dir_all(&provider_root).is_err() {
             return;
         }
         let entry = JsObject::from_document_order(vec![
+            ("provider".into(), JsValue::Str(PROVIDER_NAMESPACE.into())),
             ("marketId".into(), JsValue::Num(market_id)),
             ("readAt".into(), JsValue::Num(now_ms)),
             ("version".into(), JsValue::Num(f64::from(FORMAT_VERSION))),
@@ -130,7 +141,10 @@ impl Cache {
 /// Bumped whenever the stored shape changes. An entry from an older version is
 /// a miss rather than a parse error, so an upgrade costs one sweep instead of
 /// requiring anyone to remember to clear a directory.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
+/// Cache namespace for authoritative quantity-aware `/market/list` quotes.
+/// Candidate marketdata and future providers must use different roots.
+const PROVIDER_NAMESPACE: &str = "frontier-market-list";
 
 /// One banked listing.
 #[derive(Clone, Debug, PartialEq)]
@@ -181,6 +195,9 @@ fn decode(text: &str) -> Option<Entry> {
     // A version from the future is unreadable by definition; one from the past
     // may have a different shape. Either way, re-read it.
     if object.get("version") != Some(&JsValue::Num(f64::from(FORMAT_VERSION))) {
+        return None;
+    }
+    if object.get("provider").and_then(JsValue::as_str) != Some(PROVIDER_NAMESPACE) {
         return None;
     }
     let JsValue::Num(market_id) = *object.get("marketId")? else {
@@ -277,6 +294,28 @@ mod tests {
         fs.write(&cache.path(9.0), "{\"marketId\":9,\"readAt\":1,\"version\":0,\"payload\":{}}")
             .expect("in memory");
 
+        assert_eq!(cache.get(&fs, 9.0, 2.0), Lookup::Corrupt);
+    }
+
+    /// A timestamp ahead of this process's clock must not remain "fresh" for
+    /// the duration of the skew (or forever after a poisoned cache write).
+    #[test]
+    fn a_future_timestamp_is_corrupt_not_fresh() {
+        let fs = RecordingFs::default();
+        let cache = cache();
+        cache.put(&fs, 9.0, &payload("Future"), 10_000.0);
+        assert_eq!(cache.get(&fs, 9.0, 1_000.0), Lookup::Corrupt);
+    }
+
+    #[test]
+    fn another_providers_entry_never_satisfies_market_list() {
+        let fs = RecordingFs::default();
+        let cache = cache();
+        fs.write(
+            &cache.path(9.0),
+            r#"{"provider":"frontier-marketdata","marketId":9,"readAt":1,"version":2,"payload":{}}"#,
+        )
+        .expect("in memory");
         assert_eq!(cache.get(&fs, 9.0, 2.0), Lookup::Corrupt);
     }
 

@@ -90,6 +90,17 @@ fn one(route: &Route, markets: &[Market], commodities: &Commodities) -> JsValue 
                             ("distanceLy", JsValue::Num(leg.distance_ly)),
                             ("millis", num(leg.millis.0)),
                             ("demandAssumed", JsValue::Bool(leg.choice.demand_assumed)),
+                            (
+                                "priceProvenance",
+                                JsValue::Str(
+                                    if leg.choice.bulk_estimated {
+                                        "empiricalBulkEstimate"
+                                    } else {
+                                        "verifiedListing"
+                                    }
+                                    .into(),
+                                ),
+                            ),
                         ])
                     })
                     .collect(),
@@ -150,6 +161,7 @@ const fn caveat(caveat: Caveat) -> &'static str {
         Caveat::StockDepletion => "stockDepletion",
         Caveat::DemandUnpublished => "demandUnpublished",
         Caveat::StaleListing => "staleListing",
+        Caveat::BulkPriceEstimated => "bulkPriceEstimated",
         Caveat::JumpGraphUnmodelled => "jumpGraphUnmodelled",
         Caveat::CreditCapBinds => "creditCapBinds",
         Caveat::SingleHopNotRepeatable => "singleHopNotRepeatable",
@@ -225,6 +237,7 @@ mod tests {
             Caveat::StockDepletion,
             Caveat::DemandUnpublished,
             Caveat::StaleListing,
+            Caveat::BulkPriceEstimated,
             Caveat::JumpGraphUnmodelled,
             Caveat::CreditCapBinds,
             Caveat::SingleHopNotRepeatable,
@@ -238,4 +251,25 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), names.len());
     }
+
+    #[test]
+    fn each_leg_names_whether_its_price_is_verified_or_empirical() {
+        let mut route = crate::fixture::proved_round_trip();
+        route.legs[0].choice.bulk_estimated = true;
+        let JsValue::Obj(document) = one(&route, &[], &Commodities::new()) else {
+            panic!("route object")
+        };
+        let Some(JsValue::Arr(legs)) = document.get("legs") else { panic!("legs") };
+        let JsValue::Obj(first) = &legs[0] else { panic!("first leg") };
+        assert_eq!(
+            first.get("priceProvenance").and_then(JsValue::as_str),
+            Some("empiricalBulkEstimate")
+        );
+        let JsValue::Obj(second) = &legs[1] else { panic!("second leg") };
+        assert_eq!(
+            second.get("priceProvenance").and_then(JsValue::as_str),
+            Some("verifiedListing")
+        );
+    }
+
 }

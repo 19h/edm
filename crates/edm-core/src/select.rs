@@ -174,6 +174,18 @@ fn allowed_type(kind: Option<&str>, config: &RouteConfig) -> bool {
             allowed.iter().any(|wanted| wanted.eq_ignore_ascii_case(kind))
         });
     }
+    // The opt-in switches are themselves explicit type admissions. Previously
+    // they only bypassed the first rejection and immediately failed the default
+    // starport set below, so `--include-carriers` and `--settlements` did not
+    // actually include what their names and exclusion notes promised.
+    if config.include_carriers && is_carrier(kind) {
+        return true;
+    }
+    if config.include_settlements && is_settlement(kind) {
+        // Odyssey settlements have small pads only. Opting the station family
+        // in does not make it reachable by the default large-pad ship.
+        return config.pad == Pad::Small;
+    }
     match config.pad {
         Pad::Large => is_starport(kind),
         // A medium or small ship can use an outpost, so the set widens rather
@@ -203,6 +215,7 @@ mod tests {
             market_id: x,
             station_name: format!("{kind} {x}"),
             system_name: "Somewhere".to_owned(),
+            system_address: x,
             station_type: Some(kind.to_owned()),
             max_landing_pad_size: Some(3.0),
             distance_to_arrival: Some(100.0),
@@ -342,4 +355,32 @@ mod tests {
         }
         assert!(!is_settlement(None), "an unreported type is not a settlement");
     }
+
+    /// Opting a type in must survive both halves of the filter. These switches
+    /// used to bypass their named rejection and then fail the generic
+    /// starport test immediately afterwards.
+    #[test]
+    fn carrier_and_settlement_opt_ins_really_admit_their_types() {
+        let carrier = select(
+            vec![at("FleetCarrier", 1.0)],
+            &config(&["route", "Sol", "--include-carriers"]),
+            &ORIGIN,
+        );
+        assert_eq!(carrier.keep.len(), 1);
+
+        let settlement = select(
+            vec![at("OnFootSettlement", 1.0)],
+            &config(&["route", "Sol", "--settlements", "--pad", "small"]),
+            &ORIGIN,
+        );
+        assert_eq!(settlement.keep.len(), 1);
+
+        let too_large = select(
+            vec![at("OnFootSettlement", 1.0)],
+            &config(&["route", "Sol", "--settlements"]),
+            &ORIGIN,
+        );
+        assert!(too_large.keep.is_empty(), "the default large ship cannot use a settlement");
+    }
+
 }

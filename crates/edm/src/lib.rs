@@ -8,6 +8,7 @@
 pub mod ardent;
 pub mod capi;
 pub mod cmd;
+pub mod commander;
 pub mod eddn;
 pub mod exchange;
 pub mod sweep;

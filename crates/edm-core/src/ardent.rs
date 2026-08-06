@@ -361,6 +361,13 @@ pub struct ArdentStation {
     pub market_id: f64,
     pub station_name: String,
     pub system_name: String,
+    /// Frontier's stable 64-bit system address.
+    ///
+    /// **Not present in Ardent's `/markets` row.** Like the coordinates, the
+    /// caller fills it from the system enumeration with [`place`]. Keeping it
+    /// beside the coordinates prevents the optimiser from collapsing every
+    /// market into the synthetic address zero.
+    pub system_address: f64,
     /// Ardent's `stationType`. The only field here worth filtering on — see
     /// [`is_starport`].
     pub station_type: Option<String>,
@@ -390,8 +397,9 @@ pub struct ArdentStation {
 ///
 /// See [`ArdentStation::coordinates`] for why this is a separate step and not
 /// something the parser can do.
-pub fn place(stations: &mut [ArdentStation], coordinates: Coordinates) {
+pub fn place(stations: &mut [ArdentStation], system_address: f64, coordinates: Coordinates) {
     for station in stations {
+        station.system_address = system_address;
         station.coordinates = coordinates;
     }
 }
@@ -408,6 +416,7 @@ pub fn parse_system_markets(value: &JsValue) -> Vec<ArdentStation> {
                 market_id: finite(record, "marketId")?,
                 station_name: record.get("stationName")?.as_str()?.to_owned(),
                 system_name: record.get("systemName")?.as_str()?.to_owned(),
+                system_address: f64::NAN,
                 station_type: record.get("stationType").and_then(JsValue::as_str).map(str::to_owned),
                 max_landing_pad_size: finite(record, "maxLandingPadSize"),
                 distance_to_arrival: finite(record, "distanceToArrival"),
@@ -571,7 +580,7 @@ mod tests {
 
         let sol = Coordinates { x: 0.0, y: 0.0, z: 0.0 };
         assert!(separation_ly(&sol, &stations[0].coordinates).is_nan());
-        place(&mut stations, sol);
+        place(&mut stations, 10_477_373_803.0, sol);
         assert_eq!(separation_ly(&sol, &stations[0].coordinates), 0.0);
     }
 

@@ -378,6 +378,8 @@ pub enum GiveUpReason {
     BudgetExhausted,
     AttemptCap,
     RunDeadline,
+    /// The shared circuit breaker opened before this queued job could run.
+    CircuitBreaker,
 }
 
 impl Budget {

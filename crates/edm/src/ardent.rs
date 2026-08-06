@@ -199,7 +199,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
             fetched
         };
         let mut stations = ardent::parse_system_markets(&body);
-        ardent::place(&mut stations, system.coordinates);
+        ardent::place(&mut stations, system.address, system.coordinates);
         Ok(stations)
     }
 
@@ -221,7 +221,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
             fetched
         };
         let mut stations = ardent::parse_system_markets(&body);
-        ardent::place(&mut stations, system.coordinates);
+        ardent::place(&mut stations, system.address, system.coordinates);
         Ok(stations)
     }
 
@@ -246,7 +246,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
     ) -> Result<Vec<ardent::ArdentStation>, Refusal> {
         let url = ardent::system_markets_url(self.base, &system.name);
         let mut stations = ardent::parse_system_markets(&self.fetch_json_status(&url).await?);
-        ardent::place(&mut stations, system.coordinates);
+        ardent::place(&mut stations, system.address, system.coordinates);
         Ok(stations)
     }
 

@@ -89,7 +89,9 @@ pub struct Tally {
     pub markets_failed: usize,
     /// Answered, and definitively empty. See [`Outcome::absent`].
     pub markets_absent: usize,
-    /// Never attempted, because the run's `--deadline` had already passed.
+    /// Systems never attempted because the run's `--deadline` had passed.
+    pub systems_out_of_time: usize,
+    /// Markets never attempted because the run's `--deadline` had passed.
     pub markets_out_of_time: usize,
     /// Set when the breaker stopped the run before the queue drained.
     pub abandoned: usize,
@@ -216,7 +218,21 @@ where
                 // The run's own clock, checked where the time is actually
                 // spent. See `Pacer::past_deadline`.
                 if pool.pacer.past_deadline() {
-                    tally.borrow_mut().markets_out_of_time += 1;
+                    {
+                        let mut counts = tally.borrow_mut();
+                        match &ticket.job {
+                            Job::System { .. } => counts.systems_out_of_time += 1,
+                            Job::Market { .. } => counts.markets_out_of_time += 1,
+                        }
+                    }
+                    count_failure(tally, &ticket.job);
+                    completed.set(completed.get() + 1);
+                    abandoned.borrow_mut().push(Abandoned {
+                        job: ticket.job,
+                        reason: GiveUpReason::RunDeadline,
+                        attempts: ticket.attempts,
+                        status: None,
+                    });
                     retire(outstanding, tx);
                     continue;
                 }
@@ -226,6 +242,14 @@ where
                         trace(&PaceEvent::BreakerTripped { reason: &format!("{reason:?}") });
                     }
                     tally.borrow_mut().abandoned += 1;
+                    count_failure(tally, &ticket.job);
+                    completed.set(completed.get() + 1);
+                    abandoned.borrow_mut().push(Abandoned {
+                        job: ticket.job,
+                        reason: GiveUpReason::CircuitBreaker,
+                        attempts: ticket.attempts,
+                        status: None,
+                    });
                     retire(outstanding, tx);
                     continue;
                 }
@@ -304,6 +328,7 @@ where
                                     reason: &format!("{reason:?}"),
                                 });
                             }
+                            completed.set(completed.get() + 1);
                             if let Some(report) = pool.report {
                                 report(&ticket.job, &outcome, ticket.attempts, completed.get());
                             }
@@ -551,7 +576,7 @@ mod tests {
         let tries = Cell::new(0usize);
 
         let jobs: Vec<Job> = (0..40).map(|n| market(f64::from(n), "X", "Y")).collect();
-        let (tally, _) = block_on(run(&pool, jobs, |_| {
+        let (tally, abandoned) = block_on(run(&pool, jobs, |_| {
             tries.set(tries.get() + 1);
             async { Outcome { status: Some(500), ok: false, ..Outcome::default() } }
         }));
@@ -559,7 +584,9 @@ mod tests {
         assert!(pacer.tripped().is_some(), "the breaker must have tripped");
         assert!(tries.get() < 40, "it stopped early: {} of 40", tries.get());
         assert!(tally.abandoned > 0);
-        assert_eq!(tally.markets_failed + tally.abandoned, 40, "every job accounted for");
+        assert_eq!(tally.markets_failed, 40, "every job is a typed terminal failure");
+        assert_eq!(abandoned.len(), 40);
+        assert!(abandoned.iter().any(|a| a.reason == GiveUpReason::CircuitBreaker));
     }
 
     /// An empty region is not an error and costs nothing.
@@ -654,6 +681,36 @@ mod deadline_tests {
             20,
             "every job is accounted for: {tally:?}"
         );
-        assert!(abandoned.is_empty(), "nothing failed, so nothing was given up on");
+        assert_eq!(abandoned.len(), tally.markets_out_of_time);
+        assert!(abandoned.iter().all(|a| a.reason == GiveUpReason::RunDeadline));
     }
+
+    #[test]
+    fn deadline_retirement_keeps_system_and_market_failures_typed() {
+        let bed = Bed::default();
+        let entropy = CountingEntropy::default();
+        let out = Out::capturing(200, Metric::Utf16, false);
+        let pacing = Pacing {
+            budget: Budget { per_job_ms: 1.0, hard_attempts: 1, run_deadline_ms: 0.0 },
+            ..Pacing::default()
+        };
+        let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
+        let pool = Pool { pacer: &pacer, out: &out, workers: 1, quiet: true, report: None, trace: None };
+        let jobs = vec![
+            Job::System { name: "Sol".to_owned(), address: 1.0 },
+            Job::Market { market_id: 2.0, station: "Galileo".to_owned(), system: "Sol".to_owned() },
+        ];
+        let (tally, abandoned) = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("a current-thread runtime")
+            .block_on(run(&pool, jobs, |_| async { panic!("deadline must prevent attempts") }));
+
+        assert_eq!(tally.systems_failed, 1);
+        assert_eq!(tally.systems_out_of_time, 1);
+        assert_eq!(tally.markets_failed, 1);
+        assert_eq!(tally.markets_out_of_time, 1);
+        assert_eq!(abandoned.len(), 2);
+    }
+
 }

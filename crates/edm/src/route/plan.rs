@@ -201,7 +201,7 @@ mod tests {
     fn a_refusal_shows_its_own_arithmetic() {
         let (_, text) = run(&["route", "Sol", "--max-requests", "100"], &survey(200, 400));
         assert!(text.contains("ROUTE PLAN"), "{text}");
-        assert!(text.contains("600  = 200 starsystem + 400 market"), "{text}");
+        assert!(text.contains("600  = 200 official batch + 400 market"), "{text}");
     }
 
     /// And it is refused before a single Ardent query, not after the region has

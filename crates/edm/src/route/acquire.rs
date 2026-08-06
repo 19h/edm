@@ -47,6 +47,9 @@ pub struct Listing {
     /// *original* read, not of the run that reused it — a price is as old as
     /// the price, whatever fetched it.
     pub read_at_ms: f64,
+    /// Timestamp attached to the underlying market observation, when the
+    /// payload supplies one. This is distinct from retrieval/cache time.
+    pub observed_at_ms: Option<f64>,
     pub from_cache: bool,
 }
 
@@ -177,21 +180,40 @@ pub fn prepare<F: Fs>(
     let mut prepared = Prepared { cached: Vec::with_capacity(markets.len()), ..Prepared::default() };
     for market in markets {
         let lookup = cache.get(fs, market.market_id, now_ms);
-        lookup.tally(&mut prepared.hits);
-        match lookup.entry() {
-            Some(entry) => prepared.cached.push(Listing {
-                market_id: market.market_id,
-                station_name: market.station_name.clone(),
-                system_name: market.system_name.clone(),
-                document: entry.payload,
-                read_at_ms: entry.read_at_ms,
-                from_cache: true,
-            }),
-            None => prepared.to_poll.push(Job::Market {
-                market_id: market.market_id,
-                station: market.station_name.clone(),
-                system: market.system_name.clone(),
-            }),
+        match lookup {
+            crate::route::cache::Lookup::Fresh(entry)
+                if edm_core::domain::parse_market_snapshot(&entry.payload).is_some() =>
+            {
+                prepared.hits.fresh += 1;
+                prepared.cached.push(Listing {
+                    market_id: market.market_id,
+                    station_name: market.station_name.clone(),
+                    system_name: market.system_name.clone(),
+                    observed_at_ms: market_observed_at_ms(&entry.payload),
+                    document: entry.payload,
+                    read_at_ms: entry.read_at_ms,
+                    from_cache: true,
+                });
+            }
+            crate::route::cache::Lookup::Fresh(_) => {
+                // A structurally valid envelope with an unusable payload is a
+                // corrupt cache entry, not a hit. Counting it as fresh made
+                // source notes claim more cached prices than were ranked.
+                prepared.hits.corrupt += 1;
+                prepared.to_poll.push(Job::Market {
+                    market_id: market.market_id,
+                    station: market.station_name.clone(),
+                    system: market.system_name.clone(),
+                });
+            }
+            other => {
+                other.tally(&mut prepared.hits);
+                prepared.to_poll.push(Job::Market {
+                    market_id: market.market_id,
+                    station: market.station_name.clone(),
+                    system: market.system_name.clone(),
+                });
+            }
         }
     }
     prepared
@@ -358,6 +380,9 @@ where
         return Outcome { status: None, ok: false, ..Outcome::default() };
     };
     let retry_after = exchange.headers.get("retry-after");
+    if !(200..300).contains(&exchange.status) {
+        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+    }
     let document = exchange.decrypted.as_deref().and_then(|text| JsValue::parse(text).ok());
     let Some(JsValue::Obj(payload)) = document else {
         return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
@@ -445,6 +470,9 @@ where
             ..Outcome::default()
         };
     }
+    if !(200..300).contains(&exchange.status) {
+        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+    }
 
     let Some(document) = document else {
         // A 200 that does not decrypt to a market listing is not a success.
@@ -463,6 +491,7 @@ where
         market_id,
         station_name: station.to_owned(),
         system_name: system.to_owned(),
+        observed_at_ms: market_observed_at_ms(&document),
         document,
         read_at_ms: now,
         from_cache: false,
@@ -574,6 +603,18 @@ async fn publish<H, C, E, F, T>(
     }
 }
 
+/// The market simulation/update timestamp carried by a listing.
+///
+/// Cache retrieval never rewrites it: a cached payload remains as old as the
+/// observation it contains. Unknown, non-finite and negative timestamps stay
+/// explicit rather than being relabelled "now".
+fn market_observed_at_ms(document: &JsValue) -> Option<f64> {
+    let root = document.as_record()?;
+    let modified = root.get("lastModified")?.as_record()?;
+    let seconds = modified.get("sec")?.as_f64()?;
+    (seconds.is_finite() && seconds >= 0.0).then_some(seconds * 1_000.0)
+}
+
 /// Rows this market will actually sell or buy.
 ///
 /// Every Companion API market returns the same 391-entry commodity map — most
@@ -591,4 +632,37 @@ fn tradable_rows(document: &JsValue) -> usize {
             })
             .count()
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::RecordingFs;
+    use edm_core::domain::id64::Coordinates;
+    use std::path::PathBuf;
+
+    #[test]
+    fn an_unusable_cached_payload_is_repolled_not_counted_fresh() {
+        let fs = RecordingFs::default();
+        let cache = Cache::new(PathBuf::from("/cache"), 30.0, true, false);
+        let invalid = JsValue::Obj(edm_core::js::json::JsObject::from_document_order(Vec::new()));
+        cache.put(&fs, 42.0, &invalid, 1_000.0);
+        let station = ArdentStation {
+            market_id: 42.0,
+            station_name: "Galileo".to_owned(),
+            system_name: "Sol".to_owned(),
+            system_address: 10_477_373_803.0,
+            station_type: Some("Orbis".to_owned()),
+            max_landing_pad_size: Some(3.0),
+            distance_to_arrival: Some(500.0),
+            coordinates: Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+        };
+
+        let prepared = prepare(&cache, &fs, &[station], 2_000.0);
+        assert!(prepared.cached.is_empty());
+        assert_eq!(prepared.to_poll.len(), 1);
+        assert_eq!(prepared.hits.fresh, 0);
+        assert_eq!(prepared.hits.corrupt, 1);
+    }
 }

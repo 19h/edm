@@ -49,6 +49,8 @@ fn market(id: i64) -> Market {
                 name: format!("c{c}"),
                 buy_price: base,
                 sell_price: base - 50,
+                candidate_sell_price: None,
+                mean_price: 0,
                 stock: 5_000,
                 stock_bracket: 3,
                 demand: 5_000,

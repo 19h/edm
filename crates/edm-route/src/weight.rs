@@ -45,6 +45,8 @@ pub struct LegChoice {
     pub limiter: Limiter,
     /// True when the destination's quantity was assumed rather than published.
     pub demand_assumed: bool,
+    /// True when the unit price came from the empirical cargo-quantity model.
+    pub bulk_estimated: bool,
 }
 
 /// How much of a commodity a market will actually take.
@@ -56,6 +58,53 @@ pub fn effective_demand(qty: DemandQty, cargo: Tons) -> (Tons, bool) {
         DemandQty::Published(tons) => (tons, false),
         DemandQty::Unpublished => (cargo, true),
     }
+}
+
+/// Estimates the destination unit price after selling a cargo quantity.
+///
+/// For a published positive demand `D` and a non-negative cargo quantity `Q`,
+/// the penalty is
+/// `ceil(27 * max(base - mean, 0) * Q / (50 * D))`. The penalty is subtracted
+/// from `base`, with the result saturated at zero. An empty cargo therefore
+/// leaves the base price unchanged. Unpublished or non-positive demand and a
+/// negative cargo quantity do not support an estimate and return `None`.
+///
+/// This is an **empirical conservative estimator**, fitted to observed market
+/// responses. It is not a universal guarantee about the game's pricing. A
+/// caller that uses it must explicitly mark the resulting answer as heuristic.
+/// Arithmetic overflow also returns `None` rather than wrapping.
+#[must_use]
+pub fn bulk_sell_price(
+    base: Credits,
+    mean: Credits,
+    demand: DemandQty,
+    cargo: Tons,
+) -> Option<Credits> {
+    let demand = match demand {
+        DemandQty::Published(demand) if demand.0 > 0 => i128::from(demand.0),
+        DemandQty::Published(_) | DemandQty::Unpublished => return None,
+    };
+    if cargo.0 < 0 {
+        return None;
+    }
+    if cargo.0 == 0 {
+        return Some(base);
+    }
+
+    let spread = i128::from(base.0).checked_sub(i128::from(mean.0))?.max(0);
+    if spread == 0 {
+        return Some(Credits(base.0.max(0)));
+    }
+
+    let numerator = 27_i128
+        .checked_mul(spread)?
+        .checked_mul(i128::from(cargo.0))?;
+    let denominator = 50_i128.checked_mul(demand)?;
+    let quotient = numerator.checked_div(denominator)?;
+    let remainder = numerator.checked_rem(denominator)?;
+    let penalty = quotient.checked_add(i128::from(remainder != 0))?;
+    let price = i128::from(base.0).checked_sub(penalty)?.max(0);
+    i64::try_from(price).ok().map(Credits)
 }
 
 /// How many tons a balance can buy at a price. Floors, and is never negative.
@@ -121,8 +170,10 @@ pub fn leg_weight(
     min_units: Tons,
 ) -> Option<LegChoice> {
     debug_assert_eq!(supply.commodity, demand.commodity);
-    let margin = demand.sell_price - supply.buy_price;
-    if margin.0 <= 0 {
+    // `demand.sell_price` is the commander-neutral base when a bulk quote is
+    // present, so it remains an admissible optimistic check before quantity is
+    // known. The final margin below always uses the adjusted unit price.
+    if (demand.sell_price - supply.buy_price).0 <= 0 {
         return None;
     }
     let (units, limiter, demand_assumed) =
@@ -130,14 +181,26 @@ pub fn leg_weight(
     if units < min_units || units.0 <= 0 {
         return None;
     }
+    let (sell_price, bulk_estimated) = match demand.bulk {
+        Some(quote) => (
+            bulk_sell_price(quote.base_sell_price, quote.mean_price, demand.qty, units)?,
+            true,
+        ),
+        None => (demand.sell_price, false),
+    };
+    let margin = sell_price - supply.buy_price;
+    if margin.0 <= 0 {
+        return None;
+    }
     Some(LegChoice {
         commodity: supply.commodity,
         buy_price: supply.buy_price,
-        sell_price: demand.sell_price,
+        sell_price,
         units,
         profit: margin * units,
         limiter,
         demand_assumed,
+        bulk_estimated,
     })
 }
 
@@ -207,8 +270,8 @@ pub fn greedy_fill(
 
 #[cfg(test)]
 mod tests {
-    use super::{Limiter, affordable, greedy_fill, leg_weight, trade_units};
-    use crate::model::{CommodityId, Demand, DemandQty, ShipConfig, Supply};
+    use super::{Limiter, affordable, bulk_sell_price, greedy_fill, leg_weight, trade_units};
+    use crate::model::{BulkQuote, CommodityId, Demand, DemandQty, ShipConfig, Supply};
     use crate::num::{Credits, Tons};
 
     fn ship(cargo: i64, credits: i64) -> ShipConfig {
@@ -220,7 +283,127 @@ mod tests {
     }
 
     fn demand(price: i64, qty: DemandQty) -> Demand {
-        Demand { commodity: CommodityId(0), sell_price: Credits(price), qty }
+        Demand { commodity: CommodityId(0), sell_price: Credits(price), qty, bulk: None }
+    }
+
+    #[test]
+    fn bulk_price_matches_observed_conservative_estimates() {
+        let cases = [
+            (43_056, 40_192, 1_040, 13_884, 42_940),
+            (15_130, 12_650, 1_040, 1_355, 14_102),
+            (43_092, 40_192, 1_168, 5_954, 42_784),
+            (4_685, 1_096, 1_232, 37_531, 4_621),
+        ];
+        for (base, mean, cargo, demand, expected) in cases {
+            assert_eq!(
+                bulk_sell_price(
+                    Credits(base),
+                    Credits(mean),
+                    DemandQty::Published(Tons(demand)),
+                    Tons(cargo),
+                ),
+                Some(Credits(expected)),
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_price_penalty_ceils_instead_of_truncating() {
+        // 27 * (2 - 0) * 1 / (50 * 100) is positive but less than one.
+        assert_eq!(
+            bulk_sell_price(
+                Credits(2),
+                Credits::ZERO,
+                DemandQty::Published(Tons(100)),
+                Tons(1),
+            ),
+            Some(Credits(1)),
+        );
+    }
+
+    #[test]
+    fn bulk_price_has_no_penalty_at_or_below_the_mean_or_for_empty_cargo() {
+        assert_eq!(
+            bulk_sell_price(
+                Credits(100),
+                Credits(100),
+                DemandQty::Published(Tons(1)),
+                Tons(50),
+            ),
+            Some(Credits(100)),
+        );
+        assert_eq!(
+            bulk_sell_price(
+                Credits(99),
+                Credits(100),
+                DemandQty::Published(Tons(1)),
+                Tons(50),
+            ),
+            Some(Credits(99)),
+        );
+        assert_eq!(
+            bulk_sell_price(
+                Credits(100),
+                Credits::ZERO,
+                DemandQty::Published(Tons(1)),
+                Tons::ZERO,
+            ),
+            Some(Credits(100)),
+        );
+    }
+
+    #[test]
+    fn bulk_price_requires_positive_published_demand_and_non_negative_cargo() {
+        assert_eq!(
+            bulk_sell_price(Credits(100), Credits::ZERO, DemandQty::Unpublished, Tons(1)),
+            None,
+        );
+        for demand in [0, -1] {
+            assert_eq!(
+                bulk_sell_price(
+                    Credits(100),
+                    Credits::ZERO,
+                    DemandQty::Published(Tons(demand)),
+                    Tons(1),
+                ),
+                None,
+            );
+        }
+        assert_eq!(
+            bulk_sell_price(
+                Credits(100),
+                Credits::ZERO,
+                DemandQty::Published(Tons(1)),
+                Tons(-1),
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn bulk_price_saturates_at_zero() {
+        assert_eq!(
+            bulk_sell_price(
+                Credits(100),
+                Credits::ZERO,
+                DemandQty::Published(Tons(1)),
+                Tons(100),
+            ),
+            Some(Credits::ZERO),
+        );
+    }
+
+    #[test]
+    fn bulk_price_rejects_i128_intermediate_overflow() {
+        assert_eq!(
+            bulk_sell_price(
+                Credits(i64::MAX),
+                Credits(i64::MIN),
+                DemandQty::Published(Tons(1)),
+                Tons(i64::MAX),
+            ),
+            None,
+        );
     }
 
     #[test]
@@ -264,6 +447,45 @@ mod tests {
     }
 
     #[test]
+    fn leg_profit_uses_the_quantity_adjusted_destination_price() {
+        let seller = supply(1_000, 10_000);
+        let buyer = Demand {
+            commodity: CommodityId(0),
+            // Optimistic base used only by graph bounds.
+            sell_price: Credits(15_130),
+            qty: DemandQty::Published(Tons(1_355)),
+            bulk: Some(BulkQuote {
+                base_sell_price: Credits(15_130),
+                mean_price: Credits(12_650),
+            }),
+        };
+        let choice = leg_weight(&seller, &buyer, &ship(1_040, i64::MAX), Credits(i64::MAX), Tons(1))
+            .expect("observed trade remains profitable");
+        assert_eq!(choice.sell_price, Credits(14_102));
+        assert_eq!(choice.profit, Credits((14_102 - 1_000) * 1_040));
+        assert!(choice.bulk_estimated);
+
+        let smaller = leg_weight(&seller, &buyer, &ship(520, i64::MAX), Credits(i64::MAX), Tons(1))
+            .expect("smaller cargo");
+        assert!(smaller.sell_price > choice.sell_price, "cargo size must affect the quote");
+    }
+
+    #[test]
+    fn unpublished_demand_is_not_given_a_fake_bulk_price() {
+        let seller = supply(1_000, 10_000);
+        let buyer = Demand {
+            commodity: CommodityId(0),
+            sell_price: Credits(41_832),
+            qty: DemandQty::Unpublished,
+            bulk: Some(BulkQuote {
+                base_sell_price: Credits(41_832),
+                mean_price: Credits(1_096),
+            }),
+        };
+        assert!(leg_weight(&seller, &buyer, &ship(1_232, i64::MAX), Credits(i64::MAX), Tons(1)).is_none());
+    }
+
+    #[test]
     fn a_non_positive_margin_is_not_a_leg() {
         let s = ship(100, 1_000_000);
         assert!(
@@ -288,6 +510,7 @@ mod tests {
                     commodity: CommodityId(0),
                     sell_price: Credits(1_010),
                     qty: DemandQty::Published(Tons(1_000)),
+                    bulk: None,
                 },
             ),
             (
@@ -296,6 +519,7 @@ mod tests {
                     commodity: CommodityId(1),
                     sell_price: Credits(110),
                     qty: DemandQty::Published(Tons(1_000)),
+                    bulk: None,
                 },
             ),
         ];

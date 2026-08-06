@@ -31,5 +31,6 @@ enumerating systems within 10 Ly of Sol...
 | elapsed        | <ELAPSED>    |
 +----------------+--------------+
    every price below was read live from the Companion API during this run
+   2 priced listings have no underlying market timestamp; retrieval time was not substituted
 == BEST ROUND TRIPS ================================================================================
    no profitable round trip in this data

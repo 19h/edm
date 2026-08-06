@@ -34,13 +34,14 @@ enumerating systems within 10 Ly of Sol...
 +----------------------+--------------+
 | Field                | Value        |
 +======================+==============+
-| markets polled       | 1 of 2       |
+| markets polled       | 2 of 2       |
 | markets priced       | 1            |
 | no market at station | 1 (HTTP 410) |
 | requests sent        | 2            |
 | elapsed              | <ELAPSED>    |
 +----------------------+--------------+
    every price below was read live from the Companion API during this run
+   1 priced listing has no underlying market timestamp; retrieval time was not substituted
    1 station has no commodity market right now — it answered, it are simply not trading, and it are
    not missing from the ranking
 == BEST ROUND TRIPS ================================================================================

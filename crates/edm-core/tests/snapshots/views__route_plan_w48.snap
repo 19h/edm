@@ -16,7 +16,7 @@ expression: "emit(blocks, width)"
 |   - beyond 2,000 Ls     | -22   (--max-star~ |
 | markets to poll         | 135                |
 | cached and still fresh  | 22                 |
-| CAPI requests           | 253  = 118 starsy~ |
+| CAPI requests           | 253  = 118 offici~ |
 | estimated transfer      | 42-78 MB  (prior:~ |
 | pacing                  | 4 req/s            |
 | estimated wall clock    | 64s                |

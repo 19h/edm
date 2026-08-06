@@ -416,6 +416,9 @@ async fn resolve_one<H: HttpTransport, F: Fs>(
                 market_id: *market_id,
                 station_name: station.station_name,
                 system_name: station.system_name,
+                // `/market/{id}` supplies names only; route ingestion never sees
+                // this feed-only row, so an unknown address stays explicitly unknown.
+                system_address: f64::NAN,
                 station_type: station.station_type,
                 max_landing_pad_size: None,
                 distance_to_arrival: None,

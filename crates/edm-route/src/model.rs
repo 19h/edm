@@ -94,6 +94,15 @@ pub enum DemandQty {
     Unpublished,
 }
 
+/// Commander-neutral destination inputs for quantity-aware price estimation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BulkQuote {
+    /// Candidate no-cargo price from official system marketdata.
+    pub base_sell_price: Credits,
+    /// Canonical mean price from the verified market listing.
+    pub mean_price: Credits,
+}
+
 /// A commodity a market buys, with the price it pays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Demand {
@@ -103,6 +112,9 @@ pub struct Demand {
     pub sell_price: Credits,
     /// How much it will take.
     pub qty: DemandQty,
+    /// Present only when an official commander-neutral candidate quote was
+    /// paired with this verified quantity-bearing listing.
+    pub bulk: Option<BulkQuote>,
 }
 
 /// One market, as the optimiser sees it.
@@ -141,8 +153,12 @@ pub struct RawCommodity {
     pub name: String,
     /// What the station charges per ton.
     pub buy_price: i64,
-    /// What the station pays per ton.
+    /// What the station pays per ton in the inventory-aware verified listing.
     pub sell_price: i64,
+    /// Commander-neutral candidate price from official marketdata, when paired.
+    pub candidate_sell_price: Option<i64>,
+    /// Canonical mean price used by the empirical bulk-price model.
+    pub mean_price: i64,
     /// Tons on the shelf.
     pub stock: i64,
     /// Supply bracket, 0–3.
@@ -252,7 +268,14 @@ impl Market {
                     if qty == DemandQty::Unpublished {
                         counts.demand_unpublished += 1;
                     }
-                    demand.push(Demand { commodity: id, sell_price: Credits(row.sell_price), qty });
+                    let bulk = row.candidate_sell_price.map(|base| BulkQuote {
+                        base_sell_price: Credits(base),
+                        mean_price: Credits(row.mean_price),
+                    });
+                    // The base is an admissible optimistic bound; `leg_weight`
+                    // replaces it with the cargo-adjusted price for ranking.
+                    let sell_price = bulk.map_or(Credits(row.sell_price), |quote| quote.base_sell_price);
+                    demand.push(Demand { commodity: id, sell_price, qty, bulk });
                 }
                 None => counts.no_demand += 1,
             }
@@ -458,6 +481,8 @@ mod tests {
             name: name.to_owned(),
             buy_price: buy,
             sell_price: sell,
+            candidate_sell_price: None,
+            mean_price: 0,
             stock,
             stock_bracket: if stock > 0 { 2 } else { 0 },
             demand,
@@ -551,6 +576,8 @@ mod legality_tests {
             name: "Slaves".to_owned(),
             buy_price: 0,
             sell_price: 16_571,
+            candidate_sell_price: None,
+            mean_price: 0,
             stock: 0,
             stock_bracket: 0,
             demand: 68_433,

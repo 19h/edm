@@ -17,6 +17,23 @@ pub struct Endpoint {
 pub const MARKET_LIST: Endpoint = Endpoint { path: "/2.0/elite/market/list", method: "GET" };
 pub const MARKET_TRADE: Endpoint = Endpoint { path: "/2.0/elite/market/trade", method: "PUT" };
 pub const STARSYSTEM: Endpoint = Endpoint { path: "/2.0/elite/starsystem", method: "GET" };
+/// Read-only bulk market metadata and candidate prices, keyed by system address.
+pub const STARSYSTEM_MARKETDATA: Endpoint =
+    Endpoint { path: "/2.0/elite/starsystem/marketdata", method: "GET" };
+/// Read-only paged snapshot of populated-system topology and status.
+pub const STARSYSTEM_DAILY_DIGEST: Endpoint =
+    Endpoint { path: "/2.0/elite/starsystem/dailydigest_part", method: "GET" };
+/// Read-only server-side market discovery limits and cache policy.
+pub const RESOURCE_FINANCE: Endpoint =
+    Endpoint { path: "/2.0/elite/resources/finance", method: "GET" };
+/// Read-only canonical commodity catalogue.
+pub const RESOURCE_COMMODITIES: Endpoint =
+    Endpoint { path: "/2.0/elite/resources/commodities", method: "GET" };
+
+/// Frontier's own client batches five system addresses per marketdata request.
+pub const MARKETDATA_BATCH_MAX: usize = 5;
+pub const MARKETDATA_CACHE_SECONDS_FALLBACK: u64 = 7_200;
+pub const MARKETDATA_DISTANCE_LY_FALLBACK: f64 = 40.0;
 
 /// `docs/Developers.md:117` — note the non-standard port and the required
 /// trailing slash. Plain HTTP earns a 400.

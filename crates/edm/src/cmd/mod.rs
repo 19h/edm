@@ -30,6 +30,7 @@ pub mod markets;
 pub mod trade;
 
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use edm_core::cli::config::{self, SessionConfig, StampDefaults};
@@ -611,6 +612,71 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 /// gains not a character), its own configuration reader, and no `openSession`
 /// until it is about to spend a request. Keeping it out of `run`'s body is
 /// what makes "route cannot change what `market` does" checkable by reading.
+fn local_commander_state<F: Fs>(
+    cli: &Cli<'_>,
+    ports: &Ports<impl Clock, impl Entropy, F>,
+    out: &Out,
+) -> Option<edm_core::domain::commander::CommanderState> {
+    let home = cli.env("HOME").or_else(|| cli.env("USERPROFILE")).map(Path::new);
+    let mut candidates = Vec::new();
+    if let Some(explicit) = cli.env("EDM_JOURNAL_DIR") {
+        candidates.push(PathBuf::from(explicit));
+    }
+    if let Some(home) = home {
+        candidates.extend(crate::commander::auto_candidates(
+            home,
+            cli.env("STEAM_COMPAT_DATA_PATH").map(Path::new),
+        ));
+    }
+    candidates.dedup();
+
+    for directory in candidates {
+        if !ports.fs.exists(&directory) {
+            continue;
+        }
+        match crate::commander::load_directory(&ports.fs, &directory) {
+            Ok(state) => {
+                if !state.warnings.is_empty() && !out.is_json() {
+                    out.line(&format!(
+                        "warning: local commander state ignored {} malformed or inconsistent observations",
+                        state.warnings.len(),
+                    ));
+                }
+                return Some(state);
+            }
+            Err(_) if out.is_json() => {}
+            Err(_) => out.line(
+                "warning: a local Elite Dangerous journal directory could not be read; trying other locations",
+            ),
+        }
+    }
+    None
+}
+
+fn apply_commander_defaults(
+    cli: &Cli<'_>,
+    state: &edm_core::domain::commander::CommanderState,
+    config: &mut config::RouteConfig,
+) {
+    if cli.args().get(Flag::Cargo).is_none() && config.cargo.is_none() {
+        config.cargo = state.cargo.free.or_else(|| state.cargo.capacity_value()).and_then(safe_u64);
+    }
+    if cli.args().get(Flag::Credits).is_none() && config.credits.is_none() {
+        config.credits = state.credits.as_ref().and_then(|credits| safe_u64(credits.value));
+    }
+    if cli.args().get(Flag::Jump).is_none()
+        && let Some(jump) = state.ship.as_ref().and_then(|ship| ship.value.max_jump_range)
+        && jump.is_finite()
+        && jump > 0.0
+    {
+        config.jump_range_ly = jump;
+    }
+}
+
+fn safe_u64(value: u64) -> Option<f64> {
+    (value <= 9_007_199_254_740_992).then_some(value as f64)
+}
+
 async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     args: &Args,
     env: &EnvSnapshot,
@@ -634,7 +700,12 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return;
     }
 
-    let config = match config::route_config(&cli) {
+    let commander = local_commander_state(&cli, ports, out);
+    let local_reference = commander
+        .as_ref()
+        .and_then(|state| state.current_system.as_ref())
+        .map(|location| location.value.name.as_str());
+    let mut config = match config::route_config_with_reference(&cli, local_reference) {
         Ok(config) => config,
         Err(error) => {
             out.error_paragraph(error.message());
@@ -642,6 +713,9 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             return;
         }
     };
+    if let Some(state) = &commander {
+        apply_commander_defaults(&cli, state, &mut config);
+    }
 
     // `openSession` last, and only because the sweep will need it. A route run
     // that is going to be refused by the ceiling should be refused whether or
@@ -780,4 +854,58 @@ mod tests {
         assert!(parsed.route.is_some(), "route must take the extended arm");
         assert!(wants_json(&parsed));
     }
+
+    #[test]
+    fn commander_defaults_fill_only_missing_route_values() {
+        let mut state = edm_core::domain::commander::CommanderState::default();
+        assert!(state.apply_journal_json(
+            r#"{"timestamp":"3309-01-01T00:00:00Z","event":"LoadGame","Credits":123456}"#,
+            1,
+        ));
+        assert!(state.apply_journal_json(
+            r#"{"timestamp":"3309-01-01T00:00:01Z","event":"Location","StarSystem":"Local System","SystemAddress":10477373803}"#,
+            2,
+        ));
+        assert!(state.apply_journal_json(
+            r#"{"timestamp":"3309-01-01T00:00:02Z","event":"Loadout","Ship":"python","CargoCapacity":100,"MaxJumpRange":31.25}"#,
+            3,
+        ));
+        assert!(state.merge_cargo_sidecar(r#"{"Vessel":"Ship","Count":20,"Inventory":[{"Name":"gold","Count":20,"Stolen":0}]}"#));
+
+        let parsed = edm_core::cli::parse_with(&["route".to_owned()], edm_core::cli::Table::Extended)
+            .expect("route parses");
+        let env = EnvSnapshot::empty();
+        let cli = Cli::new(&parsed, &env);
+        let mut route = config::route_config_with_reference(&cli, Some("Local System"))
+            .expect("local reference supplies the missing positional");
+        apply_commander_defaults(&cli, &state, &mut route);
+        assert_eq!(route.reference, "Local System");
+        assert_eq!(route.cargo, Some(80.0));
+        assert_eq!(route.credits, Some(123_456.0));
+        assert_eq!(route.jump_range_ly, 31.25);
+
+        let parsed = edm_core::cli::parse_with(
+            &[
+                "route".to_owned(),
+                "Explicit".to_owned(),
+                "--cargo".to_owned(),
+                "7".to_owned(),
+                "--credits".to_owned(),
+                "8".to_owned(),
+                "--jump".to_owned(),
+                "9".to_owned(),
+            ],
+            edm_core::cli::Table::Extended,
+        )
+        .expect("explicit route parses");
+        let cli = Cli::new(&parsed, &env);
+        let mut route = config::route_config_with_reference(&cli, Some("Local System"))
+            .expect("explicit route config");
+        apply_commander_defaults(&cli, &state, &mut route);
+        assert_eq!(route.reference, "Explicit");
+        assert_eq!(route.cargo, Some(7.0));
+        assert_eq!(route.credits, Some(8.0));
+        assert_eq!(route.jump_range_ly, 9.0);
+    }
+
 }

@@ -97,6 +97,8 @@ pub enum HeuristicReason {
     MultiCommodityFill,
     /// The branch and bound exhausted its node budget.
     SearchBudgetExhausted,
+    /// Destination prices use the empirical cargo-quantity estimator.
+    BulkPriceEstimate,
 }
 
 /// What the model does not know, independently of how well it was searched.
@@ -107,8 +109,10 @@ pub enum Caveat {
     /// A destination publishes a bracket but no quantity, and was assumed to
     /// take a full hold.
     DemandUnpublished,
-    /// Prices were read at one instant and are already ageing.
+    /// Market observations are already ageing and may come from different instants.
     StaleListing,
+    /// Destination price was estimated from cargo quantity and published demand.
+    BulkPriceEstimated,
     /// Jump count is `ceil(ly / range)` on a straight line; the real galaxy has
     /// gaps, neutron boosts and fuel.
     JumpGraphUnmodelled,
@@ -244,13 +248,14 @@ impl Route {
             first_lap_millis,
             false,
         );
+        let guarantee = bulk_guarantee(&[leg]).unwrap_or(Guarantee::OptimalForStartingCredits);
         Self {
             kind: RouteKind::SingleHop,
             legs: vec![leg],
             profit: choice.profit,
             cycle_millis: leg.millis,
             first_lap_millis,
-            guarantee: Guarantee::OptimalForStartingCredits,
+            guarantee,
             caveats,
             threaded: None,
             rank,
@@ -295,6 +300,7 @@ impl Route {
         caveats.sort_unstable();
         caveats.dedup();
         let rank = RankKey::build(geometry, &legs, steady, profit, cycle_millis, true);
+        let guarantee = bulk_guarantee(&legs).unwrap_or(Guarantee::OptimalForStartingCredits);
 
         Self {
             kind: if nodes.len() == 2 {
@@ -306,7 +312,7 @@ impl Route {
             profit,
             cycle_millis,
             first_lap_millis,
-            guarantee: Guarantee::OptimalForStartingCredits,
+            guarantee,
             caveats,
             threaded: None,
             rank,
@@ -317,8 +323,17 @@ impl Route {
     /// Replaces the guarantee, returning the route.
     #[must_use]
     pub fn with_guarantee(mut self, guarantee: Guarantee) -> Self {
-        self.guarantee = guarantee;
+        self.guarantee = bulk_guarantee(&self.legs).unwrap_or(guarantee);
         self
+    }
+
+    /// Mark the whole optimisation instance as dependent on empirical bulk
+    /// pricing. This is stronger than inspecting the selected legs: a quote on
+    /// an unselected edge can change which route wins, so no result from that
+    /// graph may retain an exact optimality claim.
+    pub fn mark_bulk_price_estimated(&mut self) {
+        self.guarantee = Guarantee::Heuristic { reason: HeuristicReason::BulkPriceEstimate };
+        self.add_caveat(Caveat::BulkPriceEstimated);
     }
 
     /// Adds a caveat, keeping the list sorted and unique.
@@ -339,6 +354,12 @@ impl Route {
     }
 }
 
+fn bulk_guarantee(legs: &[RouteLeg]) -> Option<Guarantee> {
+    legs.iter().any(|leg| leg.choice.bulk_estimated).then_some(Guarantee::Heuristic {
+        reason: HeuristicReason::BulkPriceEstimate,
+    })
+}
+
 fn leg_caveats(legs: &[RouteLeg]) -> Vec<Caveat> {
     // Three of these are unconditional: they are properties of reading a market
     // over a network at all, and a report that only mentioned them sometimes
@@ -354,6 +375,9 @@ fn leg_caveats(legs: &[RouteLeg]) -> Vec<Caveat> {
         }
         if leg.choice.demand_assumed {
             caveats.push(Caveat::DemandUnpublished);
+        }
+        if leg.choice.bulk_estimated {
+            caveats.push(Caveat::BulkPriceEstimated);
         }
     }
     caveats
@@ -487,4 +511,35 @@ mod tests {
         assert_eq!(route.cycle_millis, leg + leg);
         assert_eq!(route.first_lap_millis, route.cycle_millis + geometry.startup_millis(0));
     }
+
+    #[test]
+    fn an_empirical_bulk_quote_can_never_be_relabelled_proved() {
+        let markets = [market(1, 0.0, &[], &[]), market(2, 5.0, &[], &[])];
+        let geometry = geometry(&markets);
+        let mut estimated = choice(0, 100);
+        estimated.bulk_estimated = true;
+        let route = Route::single_hop(&geometry, 0, 1, estimated)
+            .with_guarantee(super::Guarantee::ProvedOptimal);
+        assert_eq!(
+            route.guarantee,
+            super::Guarantee::Heuristic { reason: super::HeuristicReason::BulkPriceEstimate }
+        );
+        assert!(route.caveats.contains(&super::Caveat::BulkPriceEstimated));
+    }
+
+
+    #[test]
+    fn an_unselected_empirical_edge_still_downgrades_the_whole_instance() {
+        let markets = [market(1, 0.0, &[], &[]), market(2, 5.0, &[], &[])];
+        let geometry = geometry(&markets);
+        let mut route = Route::single_hop(&geometry, 0, 1, choice(0, 100))
+            .with_guarantee(super::Guarantee::ProvedOptimal);
+        route.mark_bulk_price_estimated();
+        assert_eq!(
+            route.guarantee,
+            super::Guarantee::Heuristic { reason: super::HeuristicReason::BulkPriceEstimate }
+        );
+        assert!(route.caveats.contains(&super::Caveat::BulkPriceEstimated));
+    }
+
 }

@@ -1328,6 +1328,23 @@ fn route_needs_somewhere_to_search_around() {
     assert_eq!(route(&["route", "Hyades", "Sector", "NI-X"]).unwrap().reference, "Hyades Sector NI-X");
 }
 
+#[test]
+fn local_reference_is_lowest_priority_and_only_used_when_needed() {
+    fn inferred(argv: &[&str]) -> config::RouteConfig {
+        let owned: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+        let parsed = parse_with(&owned, Table::Extended).expect("parses");
+        let env = EnvSnapshot::empty();
+        config::route_config_with_reference(&Cli::new(&parsed, &env), Some("Local System"))
+            .expect("configured")
+    }
+    assert_eq!(inferred(&["route"]).reference, "Local System");
+    assert_eq!(inferred(&["route", "Sol"]).reference, "Sol");
+    assert_eq!(
+        inferred(&["route", "Sol", "--system", "Achenar"]).reference,
+        "Achenar"
+    );
+}
+
 /// The defaults are the whole safety story: they are what keep a nearby sweep
 /// inside the ceiling, and they are load-bearing rather than cosmetic.
 #[test]

@@ -3,18 +3,20 @@
 //! The sequencing here is the safeguard, and it is the reason this file reads
 //! as a list of steps rather than a pipeline:
 //!
-//! 1. Resolve the reference and enumerate the region **through Ardent**, which
-//!    is free, unmetered and CDN-fronted.
-//! 2. Filter to markets a large ship can actually use, before anything is spent.
-//! 3. **Print the plan and price it.** Above the ceiling, stop here.
-//! 4. Only then poll the Companion API, paced, one request per market.
+//! 1. Resolve/enumerate the reference region through free Ardent discovery.
+//! 2. Filter its markets and print a spend plan before authenticated work.
+//! 3. With `--verify-systems`, separately gate a complete daily-digest crawl,
+//!    official five-system candidate batches, and authoritative market reads.
+//! 4. Poll exact listings only after the final quantity-read gate.
 //!
-//! Steps 1–3 cannot send a Frontier request at all, which is what makes
-//! `expect-frontier-requests = 0` a provable assertion in the harness rather
-//! than an assumption. A run that refuses is a run whose wire log is empty.
+//! Every cold-cache phase is priced before its first Frontier request. A
+//! refused phase therefore sends none of that phase's requests, while the
+//! coverage report accounts for discovery already approved in an earlier one.
+
+use std::collections::HashMap;
 
 use edm_core::ardent::{self, Lookup, ReferenceSystem};
-use edm_core::cli::config::{RouteConfig, Shape};
+use edm_core::cli::config::{Pad, RouteConfig, Shape};
 use edm_core::pace::{Bucket, Budget};
 use edm_core::render::views::{self, RouteCoverage};
 use edm_core::select;
@@ -46,6 +48,15 @@ use crate::route::plan::{self, Survey};
 /// noise, which is its own kind of dishonesty: a progress report that fires
 /// when there is no progress to report teaches people to ignore it.
 const CACHE_NOTE_THRESHOLD: usize = 500;
+const DIGEST_SOURCE: &str = "frontier-daily-digest-v1";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SpecialOpportunities {
+    rescue_systems: usize,
+    colonisation_markets: usize,
+    stateful_markets: usize,
+    commodity_override_markets: usize,
+}
 
 /// How many Ardent market lists are read at once.
 ///
@@ -97,6 +108,23 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // queries to reach a conclusion that was available immediately.
     if let Some(refusal) = plan::preflight(config) {
         plan::refuse(out, config, &refusal);
+        return Ok(());
+    }
+    // The old implementation skipped station discovery and then tried to rank
+    // an empty market set. That is not an estimate: it is a confident false
+    // negative, and with `--verify-systems` it could even claim reads that were
+    // never sent. Refuse before *any* lookup until a conservative estimator and
+    // mandatory exact second gate exist.
+    if config.fast_estimate {
+        out.error("--fast-estimate is unavailable: it cannot safely estimate market IDs; omit it for an exact, spend-gated survey");
+        out.set_exit(crate::out::EXIT_FAILURE);
+        return Ok(());
+    }
+    if config.verify_systems
+        && config.radius_ly > edm_core::consts::MARKETDATA_DISTANCE_LY_FALLBACK
+    {
+        out.error("--verify-systems follows Frontier's 40 Ly marketdata policy; use --radius 40 or less");
+        out.set_exit(crate::out::EXIT_FAILURE);
         return Ok(());
     }
 
@@ -170,21 +198,119 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             }
         },
     );
-    let (stations, systems_with_markets) = if config.fast_estimate {
-        (Vec::new(), enumeration.systems.len())
-    } else {
-        gather(
-            &ardent,
-            &atlas,
-            &app.ports.fs,
-            now_ms,
-            &enumeration,
-            gather_report.as_ref().map(|f| f as &dyn Fn(_, _, _)),
-        )
-        .await
-    };
+    let (mut stations, _systems_with_markets) = gather(
+        &ardent,
+        &atlas,
+        &app.ports.fs,
+        now_ms,
+        &enumeration,
+        gather_report.as_ref().map(|f| f as &dyn Fn(_, _, _)),
+    )
+    .await?;
 
-    let selection = select::select(stations, config, &centre.coordinates);
+    let route_started_ms = app.ports.clock.now_ms();
+    let mut opportunities = SpecialOpportunities::default();
+    let mut digest_requests = 0usize;
+    let mut official_topology = None;
+    if config.verify_systems {
+        let digest_cache = crate::route::digest::Cache::new(cache.root(), config.cache, config.refresh);
+        let cached = digest_cache.get(&app.ports.fs, DIGEST_SOURCE, app.ports.clock.now_ms());
+        if let Some(snapshot) = cached {
+            official_topology = Some(snapshot);
+        } else {
+            // The terminal page is unknowable on a cold cache. Gate the strict
+            // crawler's full hard cap before page zero, never a guessed prefix.
+            let crawl_survey = Survey {
+                complete_to_ly: enumeration.complete_to_ly,
+                ardent_requests: enumeration.ardent_requests,
+                counts: Counts {
+                    systems: enumeration.systems.len(),
+                    systems_to_read: crate::route::digest::PAGE_CAP,
+                    stations_known: 0,
+                    markets_to_poll: 0,
+                    cached_fresh: 0,
+                },
+                exclusions: Vec::new(),
+            };
+            match plan::gate(
+                out,
+                config,
+                &crawl_survey,
+                SizePrior {
+                    // Live pages are roughly 1.5 MiB at the 4,000-row size.
+                    system_bytes: 1.5 * 1024.0 * 1024.0,
+                    market_bytes: SizePrior::default().market_bytes,
+                    spread: SizePrior::default().spread,
+                },
+            ) {
+                plan::Decision::Sweep(_) => {}
+                plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+            }
+            note("crawling Frontier's complete populated-system digest...".to_owned());
+            let first = std::cell::Cell::new(true);
+            let requests = std::cell::Cell::new(0usize);
+            let snapshot = digest_cache
+                .get_or_crawl(
+                    &app.ports.fs,
+                    DIGEST_SOURCE,
+                    app.ports.clock.now_ms(),
+                    |page| {
+                        let first = &first;
+                        let requests = &requests;
+                        async move {
+                            if !first.replace(false) {
+                                timer.sleep_ms(1_000.0 / config.rate_per_second).await;
+                            }
+                            requests.set(requests.get() + 1);
+                            let stamp = app.stamp().map_err(|error| error.clone())?;
+                            let request = app.prepare(
+                                edm_core::consts::STARSYSTEM_DAILY_DIGEST,
+                                crate::capi::daily_digest_fields(
+                                    app.cli
+                                        .optional_value(edm_core::cli::Flag::Language, None)
+                                        .unwrap_or("en"),
+                                    u32::try_from(page)
+                                        .map_err(|_| "daily-digest page overflow".to_owned())?,
+                                    &app.credentials,
+                                    stamp.frontier_time,
+                                ),
+                                stamp,
+                            );
+                            let exchange = app
+                                .send(
+                                    &request,
+                                    crate::exchange::SendOptions {
+                                        quiet: true,
+                                        ignore_dry_run: false,
+                                    },
+                                )
+                                .await
+                                .ok_or_else(|| "daily-digest request produced no response".to_owned())?;
+                            if !(200..300).contains(&exchange.status) {
+                                return Err(format!("daily-digest HTTP {}", exchange.status));
+                            }
+                            exchange
+                                .decrypted
+                                .ok_or_else(|| "daily-digest response could not be decoded".to_owned())
+                        }
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            digest_requests = requests.get();
+            official_topology = Some(snapshot);
+        }
+    }
+
+    if let Some(topology) = &official_topology {
+        opportunities.rescue_systems = topology
+            .systems()
+            .iter()
+            .filter(|system| system.status.tw_rescue_market == Some(true))
+            .count();
+    }
+
+    let mut selection = select::select(stations, config, &centre.coordinates);
 
     // Before the gate, not after it: the cache decides how many requests the
     // sweep will actually send, and a plan that priced twenty-two and then
@@ -207,33 +333,195 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // commander is not docked at — and a starsystem payload is ~500 KB against
     // a market's ~20 KB, so reading one per system to rediscover ids we already
     // have would be twenty-five times the transfer for the same prices.
-    let systems_to_read = if !config.verify_systems {
-        0
-    } else if config.fast_estimate {
-        systems_with_markets
+    let official_addresses = if let Some(topology) = &official_topology {
+        topology
+            .within_radius(centre.coordinates, config.radius_ly)
+            .into_iter()
+            .map(|system| system.system.address)
+            .collect()
+    } else if config.verify_systems {
+        selected_system_addresses(&selection)?
     } else {
-        systems_holding(&selection)
+        Vec::new()
     };
+    // One official bulk request covers five exact system addresses. The spend
+    // gate prices the batches before any one of them is sent.
+    let systems_to_read = crate::route::marketdata::batches(
+        &official_addresses,
+        edm_core::consts::MARKETDATA_BATCH_MAX,
+    )
+    .len();
 
     let survey = Survey {
         complete_to_ly: enumeration.complete_to_ly,
         ardent_requests: enumeration.ardent_requests,
         counts: Counts {
             systems: enumeration.systems.len(),
-            systems_to_read,
+            systems_to_read: systems_to_read + digest_requests,
             stations_known: selection.considered,
-            markets_to_poll: selection.keep.len(),
-            cached_fresh: prepared.hits.fresh,
+            markets_to_poll: if config.verify_systems { 0 } else { selection.keep.len() },
+            cached_fresh: if config.verify_systems { 0 } else { prepared.hits.fresh },
         },
         exclusions: selection.exclusions.clone(),
     };
 
-    let decision = plan::gate(out, config, &survey, SizePrior::default());
+    let prior = if config.verify_systems {
+        // One marketdata batch may contain five systems. Budget transfer at the
+        // old per-system starsystem size rather than pretending batching makes
+        // the bytes disappear.
+        SizePrior { system_bytes: 5.0 * SizePrior::default().system_bytes, ..SizePrior::default() }
+    } else {
+        SizePrior::default()
+    };
+    let decision = plan::gate(out, config, &survey, prior);
     if !decision.proceeds() {
         return Ok(());
     }
 
-    // Everything above this line is free. Everything below it costs a request.
+    let started_ms = route_started_ms;
+    let mut candidate_demand_prices = HashMap::new();
+    let mut official_systems_read = 0usize;
+    let mut official_systems_failed = 0usize;
+    let mut official_requests = 0usize;
+
+    if config.verify_systems {
+        note(format!(
+            "officially enriching {} systems in batches of {}...",
+            edm_core::js::format_integer(official_addresses.len() as f64),
+            edm_core::js::format_integer(edm_core::consts::MARKETDATA_BATCH_MAX as f64),
+        ));
+        let rules = edm_core::domain::resources::FinanceRules::default();
+        let official_cache = crate::route::marketdata::Cache::new(
+            cache.root().to_path_buf(),
+            config.max_age_minutes,
+            config.cache,
+            config.refresh,
+        );
+        let first = std::cell::Cell::new(true);
+        let requests = std::cell::Cell::new(0usize);
+        let official = crate::route::marketdata::acquire(
+            &official_addresses,
+            &official_cache,
+            &app.ports.fs,
+            app.ports.clock.now_ms(),
+            rules,
+            |batch| {
+                let first = &first;
+                let requests = &requests;
+                async move {
+                    if !first.replace(false) {
+                        timer.sleep_ms(1_000.0 / config.rate_per_second).await;
+                    }
+                    requests.set(requests.get() + 1);
+                    let stamp = app.stamp().map_err(|error| error.clone())?;
+                    let fields = crate::capi::marketdata_fields(
+                        &batch,
+                        &app.credentials,
+                        stamp.frontier_time,
+                    )?;
+                    let request = app.prepare(
+                        edm_core::consts::STARSYSTEM_MARKETDATA,
+                        fields,
+                        stamp,
+                    );
+                    let exchange = app
+                        .send(
+                            &request,
+                            crate::exchange::SendOptions {
+                                quiet: true,
+                                ignore_dry_run: false,
+                            },
+                        )
+                        .await
+                        .ok_or_else(|| "marketdata request produced no response".to_owned())?;
+                    if !(200..300).contains(&exchange.status) {
+                        return Err(format!("marketdata HTTP {}", exchange.status));
+                    }
+                    exchange
+                        .decrypted
+                        .ok_or_else(|| "marketdata response could not be decoded".to_owned())
+                }
+            },
+        )
+        .await;
+        official_requests = requests.get();
+        official_systems_read = official.systems.len();
+        official_systems_failed = official.missing.len();
+        if !official.failed_batches.is_empty() || !official.missing.is_empty() {
+            return Err(format!(
+                "official marketdata incomplete: {} systems missing across {} failed batches",
+                official.missing.len(),
+                official.failed_batches.len(),
+            ));
+        }
+        opportunities.colonisation_markets = official
+            .systems
+            .iter()
+            .flat_map(|system| &system.markets)
+            .filter(|market| market.colonisation_template.is_some())
+            .count();
+        opportunities.stateful_markets = official
+            .systems
+            .iter()
+            .flat_map(|system| &system.markets)
+            .filter(|market| !market.market_state.is_empty())
+            .count();
+        opportunities.commodity_override_markets = official
+            .systems
+            .iter()
+            .flat_map(|system| &system.markets)
+            .filter(|market| market.commodity_overrides_only)
+            .count();
+        if let Some(topology) = &official_topology {
+            stations = official_stations(topology, &official.systems);
+            selection = select::select(stations, config, &centre.coordinates);
+        }
+        let removed = apply_official_enrichment(
+            &mut selection,
+            &official.systems,
+            config,
+            &mut candidate_demand_prices,
+        );
+        if removed > 0 {
+            note(format!(
+                "{} official candidates failed exact pad/service checks and were excluded",
+                edm_core::js::format_integer(removed as f64),
+            ));
+        }
+    }
+
+    // Official enrichment can only remove known candidates, never add an
+    // un-gated market. Recompute the verified-price cache pass for that subset.
+    let prepared = acquire::prepare(
+        &cache,
+        &app.ports.fs,
+        &selection.keep,
+        app.ports.clock.now_ms(),
+    );
+
+    if config.verify_systems {
+        // Discovery has now exposed the exact market set. Gate authoritative
+        // quantity reads separately; candidate rows can never satisfy them.
+        let exact_survey = Survey {
+            complete_to_ly: enumeration.complete_to_ly,
+            ardent_requests: enumeration.ardent_requests,
+            counts: Counts {
+                systems: official_addresses.len(),
+                systems_to_read: digest_requests + official_requests,
+                stations_known: selection.considered,
+                markets_to_poll: selection.keep.len(),
+                cached_fresh: prepared.hits.fresh,
+            },
+            exclusions: selection.exclusions.clone(),
+        };
+        match plan::gate(out, config, &exact_survey, prior) {
+            plan::Decision::Sweep(_) => {}
+            plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+        }
+    }
+
+    // The exact-price phase starts here. Discovery requests above had their own
+    // explicit gates; no candidate payload can cross this boundary as a listing.
     // Validated once, here, rather than per request: a malformed `--nonce`
     // must fail before a single market is polled, not on the hundredth.
     let stamp_overrides = app.stamp_overrides()?;
@@ -245,7 +533,6 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         edm_core::cli::config::CachedTimestamp::SweepZero,
     )
     .map_err(|error| error.message().to_owned())?;
-    let started_ms = app.ports.clock.now_ms();
     // `EDM_JITTER` pins the backoff fraction so a retry scenario's attempt
     // count is reproducible \[C29\]. Unset, this is the real entropy.
     let entropy = crate::ports::PinnedJitter {
@@ -332,7 +619,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         eddn: eddn.as_ref(),
         workers: config.workers as usize,
         quiet: config.json,
-        verify_systems: config.verify_systems,
+        // Official verification already happened through batched marketdata;
+        // do not enter the legacy lossy starsystem follow-on path.
+        verify_systems: false,
         language: &query.language,
         report: (!config.quiet).then_some(&report as crate::route::pool::Report<'_>),
         trace: (config.verbose && !config.quiet).then_some(&trace as crate::route::pool::Trace<'_>),
@@ -341,11 +630,11 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // Only the systems that still hold a candidate market are worth an
     // authoritative read; the rest were emptied by the filter and a 500 KB
     // payload would confirm nothing.
-    let systems: Vec<(String, f64)> = holding_systems(&enumeration, &selection);
+    let systems: Vec<(String, f64)> = Vec::new();
     let acquired = acquire::sweep(&sweep_cx, &pacer, prepared, &systems).await;
 
+    let at_ms = app.ports.clock.now_ms();
     let coverage = coverage_of(&Measured {
-        survey: &survey,
         selection: &selection,
         acquired: &acquired,
         enumeration: &enumeration,
@@ -353,8 +642,28 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         eddn: config.eddn,
         priced: ingest::priced(&acquired.listings),
         breaker_tripped: pacer.tripped().is_some(),
-        elapsed_seconds: (app.ports.clock.now_ms() - started_ms) / 1000.0,
+        elapsed_seconds: (at_ms - started_ms) / 1000.0,
+        at_ms,
+        official_systems_total: official_addresses.len(),
+        official_systems_read,
+        official_systems_failed,
+        official_requests: official_requests + digest_requests,
     });
+    if !config.json
+        && (opportunities.rescue_systems > 0
+            || opportunities.colonisation_markets > 0
+            || opportunities.stateful_markets > 0
+            || opportunities.commodity_override_markets > 0)
+    {
+        out.line(&format!(
+            "special opportunities observed: {} rescue systems, {} colonisation markets, {} stateful markets, {} override-only markets",
+            opportunities.rescue_systems,
+            opportunities.colonisation_markets,
+            opportunities.stateful_markets,
+            opportunities.commodity_override_markets,
+        ));
+    }
+
     // Under `--json` the coverage block is inside the document instead; on
     // stderr it would be the same information twice.
     if !config.json {
@@ -431,7 +740,16 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // progress line to go.
     let watch = if config.quiet { watch } else { watch.reporting(&report_progress) };
 
-    rank(out, config, acquired, &selection.keep, &coverage, watch);
+    rank(
+        out,
+        config,
+        acquired,
+        &selection.keep,
+        &candidate_demand_prices,
+        &coverage,
+        opportunities,
+        watch,
+    );
 
     // Set, not merely raised. `exchange::send` assigns exit 1 for every non-2xx
     // it sees, which is R75 and is exactly right for the ported commands — but
@@ -451,7 +769,6 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
 
 /// Everything the coverage block is assembled from.
 struct Measured<'a> {
-    survey: &'a Survey,
     selection: &'a select::Selection,
     acquired: &'a acquire::Acquired,
     enumeration: &'a discover::Enumeration,
@@ -463,20 +780,27 @@ struct Measured<'a> {
     priced: usize,
     breaker_tripped: bool,
     elapsed_seconds: f64,
+    at_ms: f64,
+    official_systems_total: usize,
+    official_systems_read: usize,
+    official_systems_failed: usize,
+    official_requests: usize,
 }
 
 /// What the run reached, and what it did not.
 fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
     RouteCoverage {
-        systems_total: m.survey.counts.systems_to_read,
-        systems_read: m.survey.counts.systems_to_read,
-        systems_failed: 0,
+        systems_total: m.official_systems_total,
+        systems_read: m.official_systems_read,
+        systems_failed: m.official_systems_failed,
         markets_found: m.selection.keep.len(),
-        markets_polled: m.acquired.listings.len(),
+        // Live requests which reached a terminal answer. Cached listings are
+        // priced below but were not polled during this run.
+        markets_polled: m.acquired.tally.markets_polled + m.acquired.tally.markets_absent,
         markets_priced: m.priced,
-        // The unreached, plus any the run's `--deadline` cut off before they
-        // were attempted — which is what they are.
-        markets_failed: m.acquired.unreached.len() + m.acquired.tally.markets_out_of_time,
+        // `Tally` is the typed terminal ledger; it includes retry exhaustion,
+        // deadline cut-offs and queued jobs retired by the breaker exactly once.
+        markets_failed: m.acquired.tally.markets_failed,
         markets_absent: m.acquired.tally.markets_absent,
         eddn: m.eddn.then_some(edm_core::render::views::EddnCoverage {
             sent: m.acquired.relayed.sent,
@@ -487,9 +811,32 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
             abandoned: m.acquired.relayed.abandoned,
         }),
         cache_hits: m.acquired.cache.fresh,
-        requests_sent: m.spent.requests,
+        requests_sent: m.spent.requests + m.official_requests,
         throttled: m.spent.throttled,
         elapsed_seconds: m.elapsed_seconds,
+        oldest_observed_ms: m
+            .acquired
+            .listings
+            .iter()
+            .filter_map(|listing| listing.observed_at_ms)
+            .min_by(f64::total_cmp),
+        newest_observed_ms: m
+            .acquired
+            .listings
+            .iter()
+            .filter_map(|listing| listing.observed_at_ms)
+            .fold(None::<f64>, |newest, observed| {
+                Some(newest.map_or(observed, |current| {
+                    if current.total_cmp(&observed).is_lt() { observed } else { current }
+                }))
+            }),
+        observation_time_unknown: m
+            .acquired
+            .listings
+            .iter()
+            .filter(|listing| listing.observed_at_ms.is_none())
+            .count(),
+        measured_at_ms: m.at_ms,
         truncated_to_ly: m.enumeration.truncated.then_some(m.enumeration.complete_to_ly),
         breaker_tripped: m.breaker_tripped,
         ranked: true,
@@ -498,19 +845,26 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
 }
 
 /// Solve, and print what the search will actually claim.
+#[allow(clippy::too_many_arguments, reason = "orchestration boundary keeps ranking inputs explicit")]
 fn rank(
     out: &crate::out::Out,
     config: &RouteConfig,
     acquired: acquire::Acquired,
     stations: &[ardent::ArdentStation],
+    candidate_demand_prices: &HashMap<(i64, i64), i64>,
     coverage: &RouteCoverage,
+    opportunities: SpecialOpportunities,
     watch: edm_route::watch::Watch<'_>,
 ) {
     // By value: `ingest::markets` drops each payload as it builds its `Market`,
     // and at five thousand markets those payloads are ~2.3 GiB that would
     // otherwise stay resident through the graph build.
-    let (markets, commodities, crossing) =
-        ingest::markets(acquired.listings, stations, &ingest::floors(config));
+    let (markets, commodities, crossing) = ingest::markets_with_candidates(
+        acquired.listings,
+        stations,
+        &ingest::floors(config),
+        candidate_demand_prices,
+    );
     // Not under `--json`: a diagnostic in the middle of the stream is exactly
     // what R76 does to the ported commands, and C28 says route's document is
     // one well-formed document or nothing.
@@ -518,6 +872,12 @@ fn rank(
         out.line(&format!(
             "{} commodity rows carried a non-integral price or quantity and were skipped",
             edm_core::js::format_integer(f64::from(crossing.non_integral))
+        ));
+    }
+    if crossing.invalid_identity > 0 && !config.json {
+        out.line(&format!(
+            "{} listings lacked a stable market/system identity or finite coordinates and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.invalid_identity))
         ));
     }
 
@@ -531,7 +891,7 @@ fn rank(
         Shape::RoundTrip => RouteKind::RoundTrip,
         Shape::Loop | Shape::BoundedLoop(_) => RouteKind::Loop { stops: 0 },
     };
-    let solution = edm_route::solve(
+    let mut solution = edm_route::solve(
         &markets,
         time_model(config),
         &ship(config),
@@ -539,6 +899,16 @@ fn rank(
         edm_route::Wanted::only(kind),
         watch,
     );
+    if !candidate_demand_prices.is_empty() {
+        for route in solution
+            .single
+            .iter_mut()
+            .chain(solution.round_trip.iter_mut())
+            .chain(solution.loops.iter_mut())
+        {
+            route.mark_bulk_price_estimated();
+        }
+    }
     let routes = match kind {
         RouteKind::SingleHop => &solution.single,
         RouteKind::RoundTrip => &solution.round_trip,
@@ -554,7 +924,7 @@ fn rank(
             &solution,
             &markets,
             &commodities,
-            coverage_json(coverage, &crossing),
+            coverage_json(coverage, &crossing, opportunities),
         );
         out.document(&document.stringify(2));
         return;
@@ -586,6 +956,7 @@ fn rank(
 fn coverage_json(
     coverage: &RouteCoverage,
     crossing: &ingest::Crossing,
+    opportunities: SpecialOpportunities,
 ) -> edm_core::js::json::JsValue {
     use edm_core::js::json::{JsObject, JsValue};
     let n = |value: usize| JsValue::Num(value as f64);
@@ -603,11 +974,30 @@ fn coverage_json(
         ("throttled".into(), n(coverage.throttled)),
         ("elapsedSeconds".into(), JsValue::Num(coverage.elapsed_seconds)),
         (
+            "oldestMarketObservedAt".into(),
+            coverage.oldest_observed_ms.map_or(JsValue::Null, JsValue::Num),
+        ),
+        (
+            "newestMarketObservedAt".into(),
+            coverage.newest_observed_ms.map_or(JsValue::Null, JsValue::Num),
+        ),
+        ("marketObservationTimeUnknown".into(), n(coverage.observation_time_unknown)),
+        (
             "completeToLy".into(),
             coverage.truncated_to_ly.map_or(JsValue::Null, JsValue::Num),
         ),
         ("breakerTripped".into(), JsValue::Bool(coverage.breaker_tripped)),
         ("rowsSkippedNonIntegral".into(), JsValue::Num(f64::from(crossing.non_integral))),
+        ("listingsSkippedInvalidIdentity".into(), JsValue::Num(f64::from(crossing.invalid_identity))),
+        (
+            "specialOpportunities".into(),
+            JsValue::Obj(JsObject::from_document_order(vec![
+                ("rescueSystems".into(), n(opportunities.rescue_systems)),
+                ("colonisationMarkets".into(), n(opportunities.colonisation_markets)),
+                ("statefulMarkets".into(), n(opportunities.stateful_markets)),
+                ("commodityOverrideMarkets".into(), n(opportunities.commodity_override_markets)),
+            ])),
+        ),
         ("notes".into(), JsValue::Arr(coverage.notes().into_iter().map(|note| JsValue::Str(note.into())).collect())),
     ]))
 }
@@ -718,7 +1108,7 @@ async fn gather<H: HttpTransport, F: Fs>(
     now_ms: f64,
     enumeration: &discover::Enumeration,
     report: Option<&dyn Fn(usize, usize, usize)>,
-) -> (Vec<ardent::ArdentStation>, usize) {
+) -> Result<(Vec<ardent::ArdentStation>, usize), String> {
     use futures_util::StreamExt as _;
 
     let total = enumeration.systems.len();
@@ -736,10 +1126,9 @@ async fn gather<H: HttpTransport, F: Fs>(
         };
         let (done, answered, found) = (&done, &answered, &found);
         async move {
-            let stations =
-                ardent.system_markets_cached(atlas, fs, now_ms, &reference).await.ok();
+            let result = ardent.system_markets_cached(atlas, fs, now_ms, &reference).await;
             done.set(done.get() + 1);
-            if let Some(stations) = &stations {
+            if let Ok(stations) = &result {
                 answered.set(answered.get() + 1);
                 found.set(found.get() + stations.len());
             }
@@ -748,7 +1137,7 @@ async fn gather<H: HttpTransport, F: Fs>(
             if let Some(report) = report {
                 report(done.get(), total, found.get());
             }
-            stations
+            result.map_err(|error| format!("reading Ardent markets for {}: {error}", reference.name))
         }
     }))
     // `buffered`, not `buffer_unordered`: both run sixteen at once, but this
@@ -762,38 +1151,142 @@ async fn gather<H: HttpTransport, F: Fs>(
     .await;
 
     let mut stations = Vec::new();
-    for mut batch in results.into_iter().flatten() {
+    for result in results {
+        let mut batch = result?;
         stations.append(&mut batch);
     }
-    (stations, answered.get())
+    Ok((stations, answered.get()))
 }
 
-/// The systems `--verify-systems` reads, with the addresses those reads need.
-fn holding_systems(
-    enumeration: &discover::Enumeration,
-    selection: &select::Selection,
-) -> Vec<(String, f64)> {
-    let mut wanted: Vec<&str> = selection.keep.iter().map(|s| s.system_name.as_str()).collect();
-    wanted.sort_unstable();
-    wanted.dedup();
-    enumeration
-        .systems
+fn selected_system_addresses(selection: &select::Selection) -> Result<Vec<u64>, String> {
+    let mut addresses = Vec::new();
+    for station in &selection.keep {
+        let address = station.system_address;
+        if !address.is_finite()
+            || address.fract() != 0.0
+            || !(1.0..=9_007_199_254_740_992.0).contains(&address)
+        {
+            return Err(format!(
+                "{} / {} has no exact official system address",
+                station.system_name, station.station_name,
+            ));
+        }
+        addresses.push(address as u64);
+    }
+    addresses.sort_unstable();
+    addresses.dedup();
+    Ok(addresses)
+}
+
+fn official_stations(
+    topology: &crate::route::digest::Snapshot,
+    systems: &[edm_core::domain::marketdata::SystemMarketData],
+) -> Vec<ardent::ArdentStation> {
+    let coordinates = topology
+        .systems()
         .iter()
-        .filter(|system| wanted.binary_search(&system.name.as_str()).is_ok())
-        .map(|system| (system.name.clone(), system.address))
-        .collect()
+        .map(|system| (system.address, system.coordinates))
+        .collect::<HashMap<_, _>>();
+    let mut stations = Vec::new();
+    for system in systems {
+        let Some(&coords) = coordinates.get(&system.address) else { continue };
+        if system.address > 9_007_199_254_740_992 {
+            continue;
+        }
+        for market in &system.markets {
+            if market.market_id == 0 || market.market_id > 9_007_199_254_740_992 {
+                continue;
+            }
+            // `service_commodities=2` is the official fleet-carrier service;
+            // pad shape distinguishes Odyssey settlements from outposts.
+            let station_type = if market.commodities_service == 2 {
+                "Fleet Carrier"
+            } else if market.small_pads && !market.medium_pads && !market.large_pads {
+                "Odyssey Settlement"
+            } else if !market.large_pads {
+                "Outpost"
+            } else {
+                "Starport"
+            };
+            stations.push(ardent::ArdentStation {
+                market_id: market.market_id as f64,
+                station_name: market.name.clone(),
+                system_name: system.name.clone(),
+                system_address: system.address as f64,
+                station_type: Some(station_type.to_owned()),
+                max_landing_pad_size: Some(if market.large_pads {
+                    3.0
+                } else if market.medium_pads {
+                    2.0
+                } else {
+                    1.0
+                }),
+                distance_to_arrival: market.arrival_ls.is_finite().then_some(market.arrival_ls),
+                coordinates: coords,
+            });
+        }
+    }
+    stations.sort_by(|left, right| {
+        left.system_address
+            .total_cmp(&right.system_address)
+            .then_with(|| left.market_id.total_cmp(&right.market_id))
+    });
+    stations
 }
 
-/// How many systems still hold a market worth reading.
-///
-/// This is the number the plan prices, not the number of systems in radius:
-/// near Sol the filter empties most of them, and a starsystem read is the
-/// larger of the two request kinds by a factor of twenty-five.
-fn systems_holding(selection: &select::Selection) -> usize {
-    let mut names: Vec<&str> = selection.keep.iter().map(|s| s.system_name.as_str()).collect();
-    names.sort_unstable();
-    names.dedup();
-    names.len()
+/// Pair official prices with selected official/Ardent candidates and enforce
+/// exact pad and commodity-service access. Official discovery is selected only
+/// after its own gate and receives a second gate before authoritative reads.
+fn apply_official_enrichment(
+    selection: &mut select::Selection,
+    systems: &[edm_core::domain::marketdata::SystemMarketData],
+    config: &RouteConfig,
+    candidate_demand_prices: &mut HashMap<(i64, i64), i64>,
+) -> usize {
+    let before = selection.keep.len();
+    let mut kept = Vec::with_capacity(before);
+    for mut station in selection.keep.drain(..) {
+        let address = station.system_address as u64;
+        let Some(system) = systems.iter().find(|system| system.address == address) else {
+            continue;
+        };
+        let market_id = station.market_id as u64;
+        let Some(market) = system.markets.iter().find(|market| market.market_id == market_id) else {
+            continue;
+        };
+        let pad_ok = match config.pad {
+            Pad::Large => market.large_pads,
+            Pad::Medium => market.large_pads || market.medium_pads,
+            Pad::Small => market.large_pads || market.medium_pads || market.small_pads,
+        };
+        if !pad_ok || market.commodities_service <= 0 {
+            continue;
+        }
+
+        station.system_name.clone_from(&system.name);
+        station.station_name.clone_from(&market.name);
+        station.distance_to_arrival = market.arrival_ls.is_finite().then_some(market.arrival_ls);
+        station.max_landing_pad_size = Some(if market.large_pads {
+            3.0
+        } else if market.medium_pads {
+            2.0
+        } else {
+            1.0
+        });
+        if let Ok(market_id) = i64::try_from(market.market_id) {
+            for commodity in &market.commodities {
+                let Some(price) = commodity.demand_price() else { continue };
+                let Ok(commodity_id) = i64::try_from(commodity.commodity_id) else { continue };
+                if price > 0 {
+                    candidate_demand_prices.insert((market_id, commodity_id), price);
+                }
+            }
+        }
+        kept.push(station);
+    }
+    let removed = before - kept.len();
+    selection.keep = kept;
+    removed
 }
 
 #[cfg(test)]
@@ -802,11 +1295,12 @@ mod tests {
     use edm_core::ardent::ArdentStation;
     use edm_core::domain::id64::Coordinates;
 
-    fn station(system: &str) -> ArdentStation {
+    fn station(system: &str, address: f64) -> ArdentStation {
         ArdentStation {
-            market_id: 1.0,
+            market_id: address,
             station_name: "S".to_owned(),
             system_name: system.to_owned(),
+            system_address: address,
             station_type: Some("Coriolis".to_owned()),
             max_landing_pad_size: None,
             distance_to_arrival: None,
@@ -814,21 +1308,99 @@ mod tests {
         }
     }
 
-    /// A starsystem read is ~500 KB against a market's ~20 KB, so pricing one
-    /// per system in radius rather than per system that still holds a market
-    /// would overstate the transfer by more than the market reads cost.
     #[test]
-    fn only_systems_that_still_hold_a_market_are_priced() {
+    fn official_system_addresses_are_exact_deduplicated_and_sorted() {
         let selection = select::Selection {
-            keep: vec![station("Sol"), station("Sol"), station("Alpha Centauri")],
+            keep: vec![
+                station("Sol", 10_477_373_803.0),
+                station("Sol", 10_477_373_803.0),
+                station("Alpha Centauri", 22_655_943_295.0),
+            ],
             exclusions: Vec::new(),
-            considered: 40,
+            considered: 3,
         };
-        assert_eq!(systems_holding(&selection), 2);
+        assert_eq!(
+            selected_system_addresses(&selection).expect("exact IDs"),
+            vec![10_477_373_803, 22_655_943_295]
+        );
+        let invalid = select::Selection {
+            keep: vec![station("Unknown", f64::NAN)],
+            ..select::Selection::default()
+        };
+        assert!(selected_system_addresses(&invalid).is_err());
     }
 
     #[test]
-    fn an_empty_region_prices_no_system_reads() {
-        assert_eq!(systems_holding(&select::Selection::default()), 0);
+    fn an_empty_region_prices_no_official_batches() {
+        assert!(selected_system_addresses(&select::Selection::default())
+            .expect("empty is valid")
+            .is_empty());
     }
+
+    fn route_config(argv: &[&str]) -> RouteConfig {
+        let owned = argv.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
+        let parsed = edm_core::cli::parse_with(&owned, edm_core::cli::Table::Extended)
+            .expect("route parses");
+        let env = edm_core::cli::EnvSnapshot::empty();
+        edm_core::cli::config::route_config(&edm_core::cli::Cli::new(&parsed, &env))
+            .expect("route config")
+    }
+
+    #[test]
+    fn official_enrichment_applies_pads_services_and_candidate_demand_only() {
+        let document = edm_core::js::json::JsValue::parse(r#"{
+          "starsystems":{"1":{"systemAddr":"1","name":"Official System","hasFleetCarriers":false,
+          "techBroker":"none","materialTrader":"none","blackMarket":false,"facilitator":false,
+          "voucherredemption":false,"carrierVendor":false,"modulepacks":false,"cacheuntil":1,
+          "markets":{"1001":{"id":"1001","systemName":"Official System","name":"Official Port",
+          "distFromSystem":12,"market_state":"","starsystem_id":"1","service_blackmarket":"0",
+          "service_commodities":"1","commodities":{"128049165":{"type":"consumer","sellPrice":41832,
+          "illegalJurisdictionQty":0}},"allowDumping":true,"simulatedAt":1,
+          "smallPads":true,"mediumPads":true,"largePads":true,"surface":false}}}}}"#)
+            .expect("fixture JSON");
+        let systems = edm_core::domain::marketdata::parse_marketdata(&document).systems;
+        let mut candidate = station("Candidate", 1.0);
+        candidate.market_id = 1001.0;
+        let mut selection = select::Selection { keep: vec![candidate], exclusions: Vec::new(), considered: 1 };
+        let mut prices = HashMap::new();
+        let removed = apply_official_enrichment(
+            &mut selection,
+            &systems,
+            &route_config(&["route", "Sol", "--verify-systems"]),
+            &mut prices,
+        );
+        assert_eq!(removed, 0);
+        assert_eq!(selection.keep[0].station_name, "Official Port");
+        assert_eq!(selection.keep[0].distance_to_arrival, Some(12.0));
+        assert_eq!(prices.get(&(1001, 128_049_165)), Some(&41_832));
+    }
+
+
+    #[test]
+    fn special_opportunities_are_structured_in_json_coverage() {
+        let opportunities = SpecialOpportunities {
+            rescue_systems: 1,
+            colonisation_markets: 2,
+            stateful_markets: 3,
+            commodity_override_markets: 4,
+        };
+        let edm_core::js::json::JsValue::Obj(coverage) = coverage_json(
+            &RouteCoverage::default(),
+            &ingest::Crossing::default(),
+            opportunities,
+        ) else {
+            panic!("coverage object")
+        };
+        let Some(edm_core::js::json::JsValue::Obj(special)) =
+            coverage.get("specialOpportunities")
+        else {
+            panic!("special opportunities object")
+        };
+        assert_eq!(special.get("rescueSystems"), Some(&edm_core::js::json::JsValue::Num(1.0)));
+        assert_eq!(
+            special.get("commodityOverrideMarkets"),
+            Some(&edm_core::js::json::JsValue::Num(4.0))
+        );
+    }
+
 }

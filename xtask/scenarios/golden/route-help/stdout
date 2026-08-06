@@ -32,8 +32,8 @@ Which markets (all of these prune before anything is sent)
   --include-carriers       fleet carriers are excluded by default: they jump
                            without warning, so a route through one can evaporate
                            between planning and flying
-  --settlements            Odyssey settlements are excluded by default; they
-                           cannot berth a large ship at all
+  --settlements            consider Odyssey settlements; requires --pad small
+                           because they cannot berth a large ship
   --min-supply <n>         default 1        --min-demand <n>   default 1
   --category <a,b,c>       only these commodity categories. Metals, Minerals,
                            Foods, Chemicals, Machinery, Medicines, Technology,
@@ -45,11 +45,8 @@ Which markets (all of these prune before anything is sent)
                            station service the market payload does not report,
                            which is how a route once ended at a station
                            publishing 68,433 tons of demand it could not accept
-  --verify-systems         read each system's own market list from the Companion
-                           API instead of trusting Ardent's. Authoritative, and
-                           about 25x the transfer: a starsystem payload is
-                           ~500 KB against a market's ~20 KB, and it exists to
-                           find a market Ardent has never seen
+  --verify-systems         enrich/filter known candidates in official batches of 5 and
+                           apply empirical quantity-aware prices (heuristic); radius <= 40
 
 Spending
   Every market in range costs one authenticated request. The plan is printed
@@ -67,7 +64,7 @@ Spending
   --no-cache               ignore the cache entirely   --refresh   re-poll everything
   --cache-dir <path>       default $XDG_CACHE_HOME/edm/route
   --ardent-queries <n>     enumeration budget, default 200
-  --fast-estimate          skip the free pre-count and extrapolate instead
+  --fast-estimate          reserved; currently refused because safe estimation needs market IDs
   --dry-run                print the plan and stop
 
 Sharing what it reads
@@ -80,6 +77,11 @@ Sharing what it reads
                            local price cache is never relayed at any age: it was
                            read earlier, and republishing it would stamp that old
                            reading with the current time
+
+Local commander state
+  Journal/Status/Cargo files are discovered locally (or via EDM_JOURNAL_DIR).
+  When flags are absent they supply the reference system, free cargo space,
+  credits and jump range. Explicit flags and positionals always win.
 
 Output
   One line per market as it lands, unless --json. The sweep is minutes long on a
