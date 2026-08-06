@@ -858,6 +858,12 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
 /// failed is never mistaken for one missing because it was unprofitable.
 #[must_use]
 pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
+    coverage_titled("ROUTE COVERAGE", coverage)
+}
+
+/// The same block under a caller's own heading.
+#[must_use]
+pub fn coverage_titled(title: &str, coverage: &RouteCoverage) -> Vec<Block<'static>> {
     use crate::js::format_integer as int;
 
     let mut rows = Vec::new();
@@ -928,7 +934,7 @@ pub fn route_coverage(coverage: &RouteCoverage) -> Vec<Block<'static>> {
 
     let mut blocks =
         vec![Block::Table {
-            title: "ROUTE COVERAGE".to_owned(),
+            title: title.to_owned(),
             columns: columns::ROUTE_FIELD_COLUMNS,
             rows,
         }];
@@ -970,6 +976,13 @@ fn plural(count: usize, noun: &str, one: &'static str, many: &'static str) -> (S
 /// What a sweep reached, and what it did not.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RouteCoverage {
+    /// Whether a ranking follows.
+    ///
+    /// The notes are written for a reader who is about to look at a table of
+    /// routes — "every price *below*", "not missing from the ranking". Under
+    /// `edm eddn` there is no table below and no ranking to be missing from, so
+    /// the same sentences would be describing something that is not there.
+    pub ranked: bool,
     pub systems_total: usize,
     pub systems_read: usize,
     pub systems_failed: usize,
@@ -1010,7 +1023,12 @@ impl RouteCoverage {
         let fresh = self.markets_priced.saturating_sub(self.cache_hits);
         if self.markets_priced > 0 {
             notes.push(if self.cache_hits == 0 {
-                "every price below was read live from the Companion API during this run".to_owned()
+                if self.ranked {
+                    "every price below was read live from the Companion API during this run"
+                        .to_owned()
+                } else {
+                    "every price was read live from the Companion API during this run".to_owned()
+                }
             } else if fresh == 0 {
                 "every price below came from the cache, not from this run; --refresh re-reads them"
                     .to_owned()
@@ -1028,7 +1046,8 @@ impl RouteCoverage {
             let they = if self.markets_absent == 1 { "it" } else { "they" };
             notes.push(format!(
                 "{count} {verb} no commodity market right now — {they} answered, {they} are \
-                 simply not trading, and {they} are not missing from the ranking",
+                 simply not trading{}",
+                if self.ranked { format!(", and {they} are not missing from the ranking") } else { String::new() },
             ));
         }
         if self.markets_failed > 0 {

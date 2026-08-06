@@ -23,6 +23,7 @@
 //! [`edm_core::cli::config`], and nothing here re-derives a value that module
 //! already computes \[R50\].
 
+pub mod feed;
 pub mod market;
 pub mod route;
 pub mod markets;
@@ -549,8 +550,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // flag resolves \[C26\]. It is consulted *before* the base parse's error,
     // because `edm route Sol --radius 50` is a base parse failure and a valid
     // route command, and the base failure is the wrong answer to print.
-    if let Some(route) = parsed.route {
-        route_command(&route, env, http, ports, out, overrides).await;
+    if let Some(extended) = parsed.route {
+        extended_command(&extended, env, http, ports, out, overrides).await;
         return;
     }
 
@@ -610,7 +611,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 /// gains not a character), its own configuration reader, and no `openSession`
 /// until it is about to spend a request. Keeping it out of `run`'s body is
 /// what makes "route cannot change what `market` does" checkable by reading.
-async fn route_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     args: &Args,
     env: &EnvSnapshot,
     http: &H,
@@ -620,7 +621,16 @@ async fn route_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 ) {
     let cli = Cli::new(args, env);
     if cli.switch_value(Flag::Help, false).unwrap_or(false) {
-        out.line(&cli::route_usage());
+        out.line(&if args.command == "eddn" {
+            edm_core::cli::feed::feed_usage()
+        } else {
+            cli::route_usage()
+        });
+        return;
+    }
+
+    if args.command == "eddn" {
+        eddn_command(&cli, http, ports, out, overrides).await;
         return;
     }
 
@@ -648,6 +658,51 @@ async fn route_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // the timer, so a test can still pin the delay sequence, and no ported
     // command grows a type parameter for a seam only this one uses.
     if let Err(error) = route::run(&app, &config, &crate::ports::RealTimer).await {
+        out.error(&error);
+        out.set_exit(EXIT_FAILURE);
+    }
+}
+
+/// `edm eddn <kind>` \[C33\].
+async fn eddn_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+    cli: &Cli<'_>,
+    http: &H,
+    ports: &Ports<C, E, F>,
+    out: &Out,
+    overrides: &Overrides,
+) {
+    // The list is read here rather than in `edm-core`, which owns no
+    // filesystem — the same seam every other file read in this program uses.
+    let listing = match cli.optional_value(Flag::FromFile, None) {
+        Some(path) => match ports.fs.read_to_string(std::path::Path::new(path)) {
+            Ok(text) => Some(text),
+            Err(error) => {
+                out.error(&format!("--from-file {path}: {error}"));
+                out.set_exit(EXIT_FAILURE);
+                return;
+            }
+        },
+        None => None,
+    };
+
+    let config = match edm_core::cli::feed::feed_config(cli, listing.as_deref()) {
+        Ok(config) => config,
+        Err(error) => {
+            out.error_paragraph(error.message());
+            out.set_exit(EXIT_USAGE);
+            return;
+        }
+    };
+
+    let app = match App::open(*cli, http, ports, out, overrides) {
+        Ok(app) => app,
+        Err(error) => {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+            return;
+        }
+    };
+    if let Err(error) = feed::run(&app, &config, &crate::ports::RealTimer).await {
         out.error(&error);
         out.set_exit(EXIT_FAILURE);
     }

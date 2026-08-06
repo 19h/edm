@@ -717,6 +717,7 @@ fn an_incomplete_enumeration_is_stated_next_to_the_radius() {
 
 fn sample_coverage() -> views::RouteCoverage {
     views::RouteCoverage {
+        ranked: true,
         systems_total: 118,
         systems_read: 116,
         systems_failed: 2,
@@ -1020,4 +1021,30 @@ fn the_absent_note_agrees_in_number() {
     };
     let notes = many.notes().join("\n");
     assert!(notes.contains("40 stations have no commodity market"), "{notes}");
+}
+
+/// The coverage notes are written for a reader about to look at a ranking —
+/// "every price *below*", "not missing from the ranking". `edm eddn` has no
+/// table below and no ranking to be missing from, so the same sentences would
+/// describe something that is not there.
+#[test]
+fn an_unranked_run_does_not_talk_about_a_ranking() {
+    let coverage = views::RouteCoverage {
+        ranked: false,
+        markets_found: 9,
+        markets_polled: 7,
+        markets_priced: 7,
+        markets_absent: 2,
+        requests_sent: 9,
+        ..views::RouteCoverage::default()
+    };
+    let notes = coverage.notes().join("\n");
+    assert!(notes.contains("every price was read live"), "{notes}");
+    assert!(!notes.contains("below"), "{notes}");
+    assert!(!notes.contains("ranking"), "{notes}");
+
+    // And the heading is the caller's.
+    let text = emit(&views::coverage_titled("EDDN IMPORT", &coverage), 200);
+    assert!(text.contains("== EDDN IMPORT"), "{text}");
+    assert!(!text.contains("ROUTE COVERAGE"), "{text}");
 }

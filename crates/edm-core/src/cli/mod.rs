@@ -24,6 +24,7 @@ pub mod access;
 pub mod config;
 pub mod flag;
 pub mod parse;
+pub mod feed;
 pub mod route_usage;
 pub mod usage;
 
@@ -52,7 +53,7 @@ pub fn is_known_command(command: &str) -> bool {
 /// that constant's contents and R48's ordering around it are both pinned by the
 /// parity harness. Bun answers `Unknown command "route"` and exits 2; that
 /// divergence is asserted by a scenario rather than ignored.
-pub const EXTENDED_COMMANDS: [&str; 1] = ["route"];
+pub const EXTENDED_COMMANDS: [&str; 2] = ["route", "eddn"];
 
 #[must_use]
 pub fn is_extended_command(command: &str) -> bool {

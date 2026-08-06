@@ -477,6 +477,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
         elapsed_seconds: m.elapsed_seconds,
         truncated_to_ly: m.enumeration.truncated.then_some(m.enumeration.complete_to_ly),
         breaker_tripped: m.breaker_tripped,
+        ranked: true,
     }
 }
 

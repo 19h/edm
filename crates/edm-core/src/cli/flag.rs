@@ -85,6 +85,8 @@ pub enum Flag {
     EddnMaxAge,
     /// `--category <a,b,c>`: only these `categoryname`s are ranked.
     Category,
+    /// `--from-file <path>`: one system name or market id per line.
+    FromFile,
 
     // `BOOLEAN_FLAGS` (`market-request.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -145,7 +147,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -201,6 +203,7 @@ impl Flag {
         Self::CacheDir,
         Self::EddnMaxAge,
         Self::Category,
+        Self::FromFile,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -289,6 +292,7 @@ impl Flag {
             "cachedir" => Self::CacheDir,
             "eddnmaxage" => Self::EddnMaxAge,
             "category" | "categories" => Self::Category,
+            "fromfile" | "file" => Self::FromFile,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -359,6 +363,7 @@ impl Flag {
             Self::CacheDir => "--cache-dir",
             Self::EddnMaxAge => "--eddn-max-age",
             Self::Category => "--category",
+            Self::FromFile => "--from-file",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",
