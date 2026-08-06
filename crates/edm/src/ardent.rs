@@ -24,6 +24,17 @@ pub struct ResolvedSystem {
     pub station: Option<String>,
 }
 
+/// Why a request did not produce a document.
+///
+/// The status is kept because "no such system" and "the request failed" are
+/// different facts that a caller has to report differently, and `None` — a
+/// transport failure with no response at all — is a third.
+#[derive(Clone, Debug)]
+pub struct Refusal {
+    pub status: Option<u16>,
+    pub message: String,
+}
+
 pub struct ArdentClient<'a, H> {
     http: &'a H,
     base: &'a str,
@@ -42,6 +53,16 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
 
     /// `fetchArdentJson` (ts:2478).
     async fn fetch_json(&self, url: &str) -> Result<JsValue, String> {
+        self.fetch_json_status(url).await.map_err(|refusal| refusal.message)
+    }
+
+    /// The same fetch, with the status kept.
+    ///
+    /// A caller that has to tell "no such system" from "the request failed"
+    /// needs the status, and reading it back out of the message would be
+    /// sniffing a string this module formats — a coupling that fails silently
+    /// the day the wording changes.
+    async fn fetch_json_status(&self, url: &str) -> Result<JsValue, Refusal> {
         let headers = [("accept", "application/json".to_owned())];
         let response: HttpResponse = self
             .http
@@ -53,17 +74,21 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
                 body: Body::None,
             })
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| Refusal { status: None, message: e.to_string() })?;
 
         if !(200..300).contains(&response.status) {
-            return Err(format!(
-                "Ardent replied HTTP {} {} for {url}",
-                response.status, response.status_text
-            ));
+            return Err(Refusal {
+                status: Some(response.status),
+                message: format!(
+                    "Ardent replied HTTP {} {} for {url}",
+                    response.status, response.status_text
+                ),
+            });
         }
         // `response.json()` throws on a malformed body, and that throw is not
         // caught on two of the three call sites below.
-        JsValue::parse(&response.body).map_err(|e| e.to_string())
+        JsValue::parse(&response.body)
+            .map_err(|e| Refusal { status: Some(response.status), message: e.to_string() })
     }
 
     /// `resolveLocation` (ts:2485) — a system name, or a station name via its
@@ -186,8 +211,17 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
         &self,
         system: &ReferenceSystem,
     ) -> Result<Vec<ardent::ArdentStation>, String> {
+        self.system_markets_status(system).await.map_err(|refusal| refusal.message)
+    }
+
+    /// The same list, with the status kept for a caller that must tell an
+    /// unknown system from a failed request.
+    pub async fn system_markets_status(
+        &self,
+        system: &ReferenceSystem,
+    ) -> Result<Vec<ardent::ArdentStation>, Refusal> {
         let url = ardent::system_markets_url(self.base, &system.name);
-        let mut stations = ardent::parse_system_markets(&self.fetch_json(&url).await?);
+        let mut stations = ardent::parse_system_markets(&self.fetch_json_status(&url).await?);
         ardent::place(&mut stations, system.coordinates);
         Ok(stations)
     }

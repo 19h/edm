@@ -58,15 +58,37 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         js::format_integer(config.targets.len() as f64),
         if config.targets.len() == 1 { "target" } else { "targets" },
     ));
-    let (stations, unresolved) = resolve(&ardent, &config.targets).await;
+    let (stations, skipped) = resolve(&ardent, &config.targets).await;
 
-    for name in &unresolved {
-        // Named, not counted: a system Ardent has never heard of is usually a
-        // typo in a hand-written list, and the line is what needs correcting.
-        out.error(&format!("Ardent does not know \"{name}\""));
+    // Named, not counted: in a hand-written list the line is what needs
+    // correcting, and *which* of these three things happened decides whether
+    // anything needs correcting at all.
+    let mut failed = 0;
+    for skip in &skipped {
+        match &skip.why {
+            // Not an error. Ardent knows the system perfectly well; there is
+            // simply nothing there to publish, which is a fact about the
+            // galaxy and not about the list.
+            Skip::NoMarkets => note(format!("{} has no markets", skip.target)),
+            Skip::Unknown => {
+                failed += 1;
+                out.error(&format!("Ardent has no system or market called \"{}\"", skip.target));
+            }
+            Skip::Failed(why) => {
+                failed += 1;
+                out.error(&format!("{}: {why}", skip.target));
+            }
+        }
     }
+
     if stations.is_empty() {
-        return Err("nothing to import: no target resolved to a market".to_owned());
+        if failed > 0 {
+            return Err("nothing to import: no target resolved to a market".to_owned());
+        }
+        // Every target was real and none of them trades. Nothing to do, and
+        // nothing wrong.
+        note("nothing to import: none of these systems has a market".to_owned());
+        return Ok(());
     }
 
     note(format!(
@@ -232,19 +254,49 @@ fn summary(
     blocks
 }
 
-/// Every station under every target, and the targets that resolved to none.
+/// Why a target contributed no markets.
+///
+/// **Three different facts, and they were one message.** A system Ardent has
+/// never heard of is a typo in the list; a system it knows that has no markets
+/// is a fact about the galaxy; a request that failed is neither. Reporting all
+/// three as "Ardent does not know" told a user to go and fix a line that was
+/// correct — `Col 285 Sector HB-V c3-0` is a real system, and Ardent answers
+/// HTTP 200 with a full record for it.
+#[derive(Clone, Debug)]
+enum Skip {
+    /// Ardent answered 404: no such system or market.
+    Unknown,
+    /// Ardent answered 200 with an empty list. Nothing to publish, and nothing
+    /// wrong.
+    NoMarkets,
+    /// The request itself failed, and the message says how.
+    Failed(String),
+}
+
+/// A target that yielded nothing, and why.
+#[derive(Clone, Debug)]
+struct Skipped {
+    target: String,
+    why: Skip,
+}
+
+/// Every station under every target, and the targets that yielded none.
 ///
 /// A market id resolves to itself; a system name resolves to every market
 /// Ardent lists in it — **all of them**, with no station filter. `route`'s
 /// filter exists because a 1,232-tonne ship cannot berth at a settlement; this
 /// command is not flying anywhere, and a settlement's prices are as worth
 /// publishing as a Coriolis's.
+///
+/// The two empty cases are told apart by the status Ardent already sends:
+/// an unknown system is a 404 and so arrives as an `Err`, while a known system
+/// with nothing in it is a 200 carrying `[]`. No extra request is needed.
 async fn resolve<H: HttpTransport>(
     ardent: &ArdentClient<'_, H>,
     targets: &[Target],
-) -> (Vec<ArdentStation>, Vec<String>) {
+) -> (Vec<ArdentStation>, Vec<Skipped>) {
     let mut stations: Vec<ArdentStation> = Vec::new();
-    let mut unresolved = Vec::new();
+    let mut skipped = Vec::new();
 
     for target in targets {
         match target {
@@ -259,7 +311,11 @@ async fn resolve<H: HttpTransport>(
                     // Never read: nothing here filters by distance.
                     coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
                 }),
-                None => unresolved.push(js::js_number(*market_id)),
+                // `station_by_market_id` swallows every failure alike \[R81\],
+                // so this is the one place the three cases cannot be told
+                // apart — and the message says only what is certain.
+                None => skipped
+                    .push(Skipped { target: js::js_number(*market_id), why: Skip::Unknown }),
             },
             Target::System(name) => {
                 let reference = edm_core::ardent::ReferenceSystem {
@@ -267,10 +323,19 @@ async fn resolve<H: HttpTransport>(
                     address: 0.0,
                     coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
                 };
-                match ardent.system_markets(&reference).await {
-                    Ok(found) if !found.is_empty() => stations.extend(found),
-                    _ => unresolved.push(name.clone()),
-                }
+                let why = match ardent.system_markets_status(&reference).await {
+                    Ok(found) if !found.is_empty() => {
+                        stations.extend(found);
+                        continue;
+                    }
+                    Ok(_) => Skip::NoMarkets,
+                    // The status itself, not a substring of the message: 404 is
+                    // Ardent saying it has no such system, and anything else is
+                    // a failure that must be reported as one.
+                    Err(refusal) if refusal.status == Some(404) => Skip::Unknown,
+                    Err(refusal) => Skip::Failed(refusal.message),
+                };
+                skipped.push(Skipped { target: name.clone(), why });
             }
         }
     }
@@ -278,7 +343,7 @@ async fn resolve<H: HttpTransport>(
     // A market named twice — directly and through its system — is read once.
     stations.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
     stations.dedup_by(|a, b| a.market_id == b.market_id);
-    (stations, unresolved)
+    (stations, skipped)
 }
 
 fn pacing(config: &FeedConfig) -> Pacing {
