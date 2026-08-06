@@ -53,12 +53,52 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // Ardent resolves every target to the stations under it, and supplies the
     // system and station names EDDN's schema requires and the market payload
     // does not carry.
+    let cache = Cache::new(
+        Cache::locate(
+            app.cli.env("XDG_CACHE_HOME"),
+            app.cli.env("HOME"),
+            config.cache_dir.as_deref(),
+        ),
+        0.0,
+        // The price cache is *written* — a refreshed listing is worth keeping
+        // for a later `route` — but never *read*, because a cached listing is
+        // never relayed and reading one would only skip the poll this command
+        // exists to make.
+        true,
+        true,
+    );
+    let atlas = crate::route::atlas::Atlas::new(cache.root(), true, false);
+    let now_ms = app.ports.clock.now_ms();
+
     note(format!(
-        "resolving {} {} through Ardent...",
+        "resolving {} {} through Ardent ({} at a time)...",
         js::format_integer(config.targets.len() as f64),
         if config.targets.len() == 1 { "target" } else { "targets" },
+        js::format_integer(ARDENT_CONCURRENCY as f64),
     ));
-    let (stations, skipped) = resolve(&ardent, &config.targets).await;
+    // A counter rewritten in place: 629 lines of "resolved X" is not a progress
+    // report, it is the output.
+    let resolve_report = (!config.quiet).then_some(
+        move |done: usize, total: usize, found: usize| {
+            if done.is_multiple_of(32) || done == total {
+                out.progress(&format!(
+                    "  {} / {} targets resolved, {} markets found",
+                    js::format_integer(done as f64),
+                    js::format_integer(total as f64),
+                    js::format_integer(found as f64),
+                ));
+            }
+        },
+    );
+    let (stations, skipped) = resolve(
+        &ardent,
+        &atlas,
+        &app.ports.fs,
+        now_ms,
+        &config.targets,
+        resolve_report.as_ref().map(|f| f as &dyn Fn(_, _, _)),
+    )
+    .await;
 
     // Named, not counted: in a hand-written list the line is what needs
     // correcting, and *which* of these three things happened decides whether
@@ -110,16 +150,6 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         return Ok(());
     }
 
-    let cache = Cache::new(
-        Cache::locate(app.cli.env("XDG_CACHE_HOME"), app.cli.env("HOME"), config.cache_dir.as_deref()),
-        0.0,
-        // The price cache is *written* — a refreshed listing is worth keeping
-        // for a later `route` — but never *read*, because a cached listing is
-        // never relayed and reading one would only skip the poll this command
-        // exists to make.
-        true,
-        true,
-    );
     let relayed = Relayed::new(cache.root(), config.eddn_max_age_minutes);
     let options = edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials)
         .map_err(|error| error.message().to_owned())?;
@@ -291,52 +321,54 @@ struct Skipped {
 /// The two empty cases are told apart by the status Ardent already sends:
 /// an unknown system is a 404 and so arrives as an `Err`, while a known system
 /// with nothing in it is a 200 carrying `[]`. No extra request is needed.
-async fn resolve<H: HttpTransport>(
+///
+/// **Concurrent, cached and reported.** This was a serial `for` loop that
+/// printed nothing: at ~330 ms a request, a 629-line list is three and a half
+/// minutes of silence before the first market is even read — the same defect
+/// `route`'s gather had, in a command written after it was fixed there. The
+/// answers go through the atlas, so a second run over the same list resolves
+/// from disk.
+async fn resolve<H: HttpTransport, F: Fs>(
     ardent: &ArdentClient<'_, H>,
+    atlas: &crate::route::atlas::Atlas,
+    fs: &F,
+    now_ms: f64,
     targets: &[Target],
+    report: Option<&dyn Fn(usize, usize, usize)>,
 ) -> (Vec<ArdentStation>, Vec<Skipped>) {
+    use futures_util::StreamExt as _;
+
+    let total = targets.len();
+    let done = std::cell::Cell::new(0usize);
+    let found = std::cell::Cell::new(0usize);
+
+    let answers = futures_util::stream::iter(targets.iter().map(|target| {
+        let (done, found) = (&done, &found);
+        async move {
+            let answer = resolve_one(ardent, atlas, fs, now_ms, target).await;
+            done.set(done.get() + 1);
+            if let Ok(stations) = &answer {
+                found.set(found.get() + stations.len());
+            }
+            if let Some(report) = report {
+                report(done.get(), total, found.get());
+            }
+            answer
+        }
+    }))
+    // `buffered`, not `buffer_unordered`: both run sixteen at once, but only
+    // this one yields in input order, and the order of a hand-written list is
+    // the order its writer meant.
+    .buffered(ARDENT_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
     let mut stations: Vec<ArdentStation> = Vec::new();
     let mut skipped = Vec::new();
-
-    for target in targets {
-        match target {
-            Target::Market(market_id) => match ardent.station_by_market_id(*market_id).await {
-                Some(station) => stations.push(ArdentStation {
-                    market_id: *market_id,
-                    station_name: station.station_name,
-                    system_name: station.system_name,
-                    station_type: station.station_type,
-                    max_landing_pad_size: None,
-                    distance_to_arrival: None,
-                    // Never read: nothing here filters by distance.
-                    coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
-                }),
-                // `station_by_market_id` swallows every failure alike \[R81\],
-                // so this is the one place the three cases cannot be told
-                // apart — and the message says only what is certain.
-                None => skipped
-                    .push(Skipped { target: js::js_number(*market_id), why: Skip::Unknown }),
-            },
-            Target::System(name) => {
-                let reference = edm_core::ardent::ReferenceSystem {
-                    name: name.clone(),
-                    address: 0.0,
-                    coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
-                };
-                let why = match ardent.system_markets_status(&reference).await {
-                    Ok(found) if !found.is_empty() => {
-                        stations.extend(found);
-                        continue;
-                    }
-                    Ok(_) => Skip::NoMarkets,
-                    // The status itself, not a substring of the message: 404 is
-                    // Ardent saying it has no such system, and anything else is
-                    // a failure that must be reported as one.
-                    Err(refusal) if refusal.status == Some(404) => Skip::Unknown,
-                    Err(refusal) => Skip::Failed(refusal.message),
-                };
-                skipped.push(Skipped { target: name.clone(), why });
-            }
+    for (target, answer) in targets.iter().zip(answers) {
+        match answer {
+            Ok(mut found) => stations.append(&mut found),
+            Err(why) => skipped.push(Skipped { target: label(target), why }),
         }
     }
 
@@ -345,6 +377,63 @@ async fn resolve<H: HttpTransport>(
     stations.dedup_by(|a, b| a.market_id == b.market_id);
     (stations, skipped)
 }
+
+/// How a target is named back to the user: the line they wrote.
+fn label(target: &Target) -> String {
+    match target {
+        Target::Market(market_id) => js::js_number(*market_id),
+        Target::System(name) => name.clone(),
+    }
+}
+
+/// One target's stations, or why it has none.
+async fn resolve_one<H: HttpTransport, F: Fs>(
+    ardent: &ArdentClient<'_, H>,
+    atlas: &crate::route::atlas::Atlas,
+    fs: &F,
+    now_ms: f64,
+    target: &Target,
+) -> Result<Vec<ArdentStation>, Skip> {
+    match target {
+        Target::Market(market_id) => match ardent.station_by_market_id(*market_id).await {
+            Some(station) => Ok(vec![ArdentStation {
+                market_id: *market_id,
+                station_name: station.station_name,
+                system_name: station.system_name,
+                station_type: station.station_type,
+                max_landing_pad_size: None,
+                distance_to_arrival: None,
+                // Never read: nothing here filters by distance.
+                coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
+            }]),
+            // `station_by_market_id` swallows every failure alike \[R81\], so
+            // this is the one place the three cases cannot be told apart — and
+            // the message says only what is certain.
+            None => Err(Skip::Unknown),
+        },
+        Target::System(name) => {
+            let reference = edm_core::ardent::ReferenceSystem {
+                name: name.clone(),
+                address: 0.0,
+                coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
+            };
+            match ardent.system_markets_cached_status(atlas, fs, now_ms, &reference).await {
+                Ok(found) if !found.is_empty() => Ok(found),
+                Ok(_) => Err(Skip::NoMarkets),
+                // The status itself, not a substring of the message: 404 is
+                // Ardent saying it has no such system, and anything else is a
+                // failure that must be reported as one.
+                Err(refusal) if refusal.status == Some(404) => Err(Skip::Unknown),
+                Err(refusal) => Err(Skip::Failed(refusal.message)),
+            }
+        }
+    }
+}
+
+/// How many Ardent lookups run at once. See `route`'s constant of the same
+/// name: sixteen concurrent requests were measured returning 200 in 0.6 s
+/// against 330 ms each serially.
+const ARDENT_CONCURRENCY: usize = 16;
 
 fn pacing(config: &FeedConfig) -> Pacing {
     Pacing {

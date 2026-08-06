@@ -179,6 +179,30 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
         Ok(ardent::parse_nearby_page(&body))
     }
 
+    /// One system's station list, read through the local copy when fresh, with
+    /// the status kept for a caller that must tell an unknown system from a
+    /// failed request.
+    pub async fn system_markets_cached_status<F: Fs>(
+        &self,
+        atlas: &Atlas,
+        fs: &F,
+        now_ms: f64,
+        system: &ReferenceSystem,
+    ) -> Result<Vec<ardent::ArdentStation>, Refusal> {
+        let url = ardent::system_markets_url(self.base, &system.name);
+        let body = if let Some(body) = atlas.get(fs, &url, now_ms, atlas::MARKETS_LIFETIME_MINUTES)
+        {
+            body
+        } else {
+            let fetched = self.fetch_json_status(&url).await?;
+            atlas.put(fs, &url, &fetched, now_ms);
+            fetched
+        };
+        let mut stations = ardent::parse_system_markets(&body);
+        ardent::place(&mut stations, system.coordinates);
+        Ok(stations)
+    }
+
     /// One system's station list, read through the local copy when fresh.
     pub async fn system_markets_cached<F: Fs>(
         &self,
