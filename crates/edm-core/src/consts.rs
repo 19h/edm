@@ -44,4 +44,14 @@ pub const ARDENT_BASE_URL: &str = "https://api.ardent-insight.com/v2";
 
 /// The credential field widths the Companion API expects.
 pub const MACHINE_TOKEN_LENGTH: usize = 80;
-pub const AUTH_TOKEN_LENGTH: usize = 2024;
+/// The shortest `authToken` that is plausibly a token rather than a truncated
+/// paste.
+///
+/// **The original demands exactly 2024 \[C31\].** A live token measured
+/// 2026-08-06 is 2022 characters, so that constant is not a property of
+/// Frontier's tokens — it is one observation written down as a law, and it
+/// makes the program refuse a credential the game itself is using. The check is
+/// worth keeping because a half-pasted token is a real mistake with a confusing
+/// failure; the exact length is not, because it cannot be right for a value
+/// this program does not issue.
+pub const AUTH_TOKEN_MIN_LENGTH: usize = 512;

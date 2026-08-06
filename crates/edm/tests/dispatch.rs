@@ -69,6 +69,13 @@ fn main_dispatches_help_then_unknown_commands_then_errors() {
         vec![("AUTH_TOKEN".to_owned(), "short".to_owned())],
     );
     run.assert_exit(1);
-    assert_eq!(run.stderr, "authToken must be exactly 2024 characters; received 5\n");
+    // C31: a floor, not the original's exact 2024. A live token measured
+    // 2026-08-06 is 2022 characters, so the exact length was one observation
+    // written down as a law and it refused a credential the game was using.
+    // The check still catches what it exists for — a half-pasted token.
+    assert_eq!(
+        run.stderr,
+        "authToken looks truncated: 5 characters, expected at least 512\n"
+    );
     assert!(run.calls.is_empty(), "credentials load before anything is sent");
 }

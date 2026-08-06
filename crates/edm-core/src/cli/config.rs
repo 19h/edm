@@ -18,7 +18,7 @@
 //! none of them.
 
 use crate::consts::{
-    AUTH_TOKEN_LENGTH, DEFAULT_CONCURRENCY, DEFAULT_REQUEUES, DEFAULT_TIMEOUT_SECONDS,
+    AUTH_TOKEN_MIN_LENGTH, DEFAULT_CONCURRENCY, DEFAULT_REQUEUES, DEFAULT_TIMEOUT_SECONDS,
     MACHINE_TOKEN_LENGTH, MAX_CONCURRENCY,
 };
 use crate::domain::eddn::EddnOptions;
@@ -60,6 +60,21 @@ fn validate_ascii(name: &str, value: &str) -> Result<(), CliError> {
     Ok(())
 }
 
+/// A floor rather than an exact length, for a value this program does not
+/// issue \[C31\].
+///
+/// Measured in UTF-16 code units, like its exact sibling \[R22\].
+fn validate_min_length(name: &str, value: &str, minimum: usize) -> Result<(), CliError> {
+    let received = text::utf16_len(value);
+    if received < minimum {
+        return Err(format!(
+            "{name} looks truncated: {received} characters, expected at least {minimum}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// `validateExactLength` (ts:64) — measured in UTF-16 code units \[R22\].
 fn validate_exact_length(name: &str, value: &str, expected: usize) -> Result<(), CliError> {
     let received = text::utf16_len(value);
@@ -93,7 +108,7 @@ pub fn load_credentials(cli: &Cli<'_>) -> Result<Credentials, CliError> {
 
     let auth_token = cli.require_value(Flag::AuthToken, Some("AUTH_TOKEN"))?;
     validate_ascii("authToken", auth_token)?;
-    validate_exact_length("authToken", auth_token, AUTH_TOKEN_LENGTH)?;
+    validate_min_length("authToken", auth_token, AUTH_TOKEN_MIN_LENGTH)?;
 
     Ok(Credentials {
         commander_id: commander_id.to_owned(),

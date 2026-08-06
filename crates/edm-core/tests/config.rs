@@ -126,10 +126,18 @@ fn credentials_are_validated_field_by_field_in_source_order() {
         session(&["market", "--machine-token", "abc"], &[]).unwrap_err(),
         "machineToken must be exactly 80 characters; received 3"
     );
+    // C31: the auth token is checked against a floor, not the original's exact
+    // 2024. A live token measured 2026-08-06 is 2022 characters, so the exact
+    // length was one observation written down as a law, and it refused a
+    // credential the game itself was using. `machineToken` above keeps its
+    // exact check: 80 is what every observed value has been.
     assert_eq!(
         session(&["market", "--auth-token", "abc"], &[]).unwrap_err(),
-        "authToken must be exactly 2024 characters; received 3"
+        "authToken looks truncated: 3 characters, expected at least 512"
     );
+    // And a token of the length the original refused is accepted.
+    let real_length = "a".repeat(2022);
+    assert!(session(&["market", "--auth-token", &real_length], &[]).is_ok());
 }
 
 /// A surrogate pair is two UTF-16 code units, and the length message counts

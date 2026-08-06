@@ -10,7 +10,7 @@
 //! them. This module is written statement-for-statement against ts:1224-1290.
 
 use edm_core::consts::{
-    AUTH_TOKEN_LENGTH, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT, Endpoint,
+    AUTH_TOKEN_MIN_LENGTH, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT, Endpoint,
     MACHINE_TOKEN_LENGTH,
 };
 use edm_core::js::{self, text};
@@ -49,6 +49,21 @@ pub fn validate_exact_length(name: &str, value: &str, expected: usize) -> Result
     }
 }
 
+/// A floor rather than an exact length \[C31\].
+///
+/// The original demands exactly 2024 characters. A live token measured
+/// 2026-08-06 is 2022, so the constant is one observation written down as a
+/// law — and it made the program refuse a credential the game itself was using.
+/// A floor still catches the mistake the check exists for, a half-pasted token.
+pub fn validate_min_length(name: &str, value: &str, minimum: usize) -> Result<(), String> {
+    let length = text::utf16_len(value);
+    if length >= minimum {
+        Ok(())
+    } else {
+        Err(format!("{name} looks truncated: {length} characters, expected at least {minimum}"))
+    }
+}
+
 impl Credentials {
     /// `loadCredentials` (ts:75).
     ///
@@ -68,7 +83,7 @@ impl Credentials {
         validate_ascii("machineToken", machine_token)?;
         validate_exact_length("machineToken", machine_token, MACHINE_TOKEN_LENGTH)?;
         validate_ascii("authToken", auth_token)?;
-        validate_exact_length("authToken", auth_token, AUTH_TOKEN_LENGTH)?;
+        validate_min_length("authToken", auth_token, AUTH_TOKEN_MIN_LENGTH)?;
 
         Ok(Self {
             commander_id: commander_id.to_owned(),
