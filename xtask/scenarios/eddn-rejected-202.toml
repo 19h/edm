@@ -1,5 +1,5 @@
-why = "EDDN answering 202 with a body of OK. Success is `status === 200 && trim(body) === \"OK\"`, so 202 is a failure (R79) and the detail line carries the status and the clamped body."
-argv = ["market", "--market-id", "3229009408", "--eddn"]
+why = "C34 renamed the default software this program signs its uploads with, so both sides are given the name explicitly and the posted body stays compared byte for byte — including its content-length, which the shorter name would otherwise change. EDDN answering 202 with a body of OK. Success is `status === 200 && trim(body) === \"OK\"`, so 202 is a failure (R79) and the detail line carries the status and the clamped body."
+argv = ["market", "--market-id", "3229009408", "--eddn", "--software-name", "edm"]
 
 [[route]]
 path = "/v2/market/3229009408"

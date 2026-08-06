@@ -22,7 +22,18 @@ pub const STARSYSTEM: Endpoint = Endpoint { path: "/2.0/elite/starsystem", metho
 /// trailing slash. Plain HTTP earns a 400.
 pub const EDDN_UPLOAD_URL: &str = "https://eddn.edcd.io:4430/upload/";
 pub const EDDN_SCHEMA: &str = "https://eddn.edcd.io/schemas/commodity/3";
-pub const EDDN_SOFTWARE_NAME: &str = "int-market-sync";
+/// What this program calls itself to EDDN \[C34\].
+///
+/// The original says `int-market-sync`, and the port said it too — which meant
+/// every row this program contributed to a shared dataset was attributed to a
+/// different piece of software. EDDN's whole purpose is knowing what produced a
+/// datum: when a sender misbehaves, the software name is how consumers and
+/// maintainers find it, and when a sender is fixed it is how they know. Being
+/// byte-identical to the original is worth a great deal in this port; it is not
+/// worth signing somebody else's name.
+///
+/// `--software-name` still overrides it, as it always did.
+pub const EDDN_SOFTWARE_NAME: &str = "edm";
 /// MUST be incremented whenever the content of the messages we send changes.
 pub const EDDN_SOFTWARE_VERSION: &str = "1.0.0";
 /// `docs/Developers.md:263` — commodity data taken from a live CAPI endpoint.

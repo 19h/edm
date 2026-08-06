@@ -28,7 +28,7 @@ pub const STARSYSTEM_PATH: &str = "/2.0/elite/starsystem";
 /// trailing slash are both required by EDDN's `docs/Developers.md`.
 pub const EDDN_UPLOAD_URL: &str = "https://eddn.edcd.io:4430/upload/";
 /// `EDDN_SOFTWARE_NAME` (`market-request.ts:32`).
-pub const EDDN_SOFTWARE_NAME: &str = "int-market-sync";
+pub const EDDN_SOFTWARE_NAME: &str = "edm";
 /// `EDDN_SOFTWARE_VERSION` (`market-request.ts:34`) — EDDN requires this to be
 /// incremented whenever the content of the messages sent changes.
 pub const EDDN_SOFTWARE_VERSION: &str = "1.0.0";

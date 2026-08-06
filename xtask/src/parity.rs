@@ -248,12 +248,16 @@ fn compare(
     if bun_side.code != rust_side.code {
         report.push(format!("exit code: bun {} vs rust {}", bun_side.code, rust_side.code));
     }
-    let bun_stdout = normalise_side_dir(&bun_side.stdout, &bun_side.dir);
-    let bun_stderr = normalise_side_dir(&bun_side.stderr, &bun_side.dir);
-    let rust_stdout =
-        normalise_side_dir(&canonicalise(&rust_side.stdout, base), &rust_side.dir);
-    let rust_stderr =
-        normalise_side_dir(&canonicalise(&rust_side.stderr, base), &rust_side.dir);
+    let bun_stdout = normalise_software_line(&normalise_side_dir(&bun_side.stdout, &bun_side.dir));
+    let bun_stderr = normalise_software_line(&normalise_side_dir(&bun_side.stderr, &bun_side.dir));
+    let rust_stdout = normalise_software_line(&normalise_side_dir(
+        &canonicalise(&rust_side.stdout, base),
+        &rust_side.dir,
+    ));
+    let rust_stderr = normalise_software_line(&normalise_side_dir(
+        &canonicalise(&rust_side.stderr, base),
+        &rust_side.dir,
+    ));
     if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, DIFFERENTIAL, multiset) {
         report.push(diff);
     }
@@ -737,6 +741,31 @@ fn canonicalise(bytes: &[u8], base: &str) -> Vec<u8> {
 fn normalise_side_dir(bytes: &[u8], dir: &str) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
     text.replace(dir, "<OUTDIR>").into_bytes()
+}
+
+/// Masks the one line of the usage text that documents the software name.
+///
+/// **[C34]** — the name changed, so the line that states its default changed
+/// with it, and the value is not the same width, so the whole line shifts. The
+/// alternative was a help text that documents a default the program does not
+/// use, which is a worse thing for a reader than a masked line is for a diff.
+///
+/// One line of eighty-nine. Every other byte of the usage text stays pinned,
+/// including the lines either side of this one, so the mask cannot hide a
+/// second change.
+fn normalise_software_line(bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        // The exact indented prefix: `str::trim_start` is banned here \[R25\],
+        // and the usage text's alignment is fixed anyway.
+        if line.starts_with("  --software-name <n>") {
+            out.push_str("<SOFTWARE-NAME LINE>\n");
+        } else {
+            out.push_str(line);
+        }
+    }
+    out.into_bytes()
 }
 
 /// Replaces a well-formed EDDN message timestamp with a placeholder.

@@ -552,7 +552,9 @@ fn eddn_options_default_to_the_commander_and_the_constants() {
     let defaults =
         with_cli(&["market"], &[], |cli| config::eddn_config(cli, &credentials).unwrap());
     assert_eq!(defaults.uploader_id, "F1234567");
-    assert_eq!(defaults.software_name, "int-market-sync");
+    // C34: this program signs its own uploads. Attributing a shared dataset's
+    // rows to a different piece of software defeats the point of the field.
+    assert_eq!(defaults.software_name, "edm");
     assert_eq!(defaults.software_version, "1.0.0");
     assert_eq!(defaults.game_version, "CAPI-Live-market");
     assert_eq!(defaults.game_build, "");
