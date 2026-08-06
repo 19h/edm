@@ -10,6 +10,8 @@ use edm_core::domain::eddn::EddnStation;
 use edm_core::js::json::JsValue;
 
 use crate::net::{Body, HttpRequest, HttpResponse, HttpTransport, Profile};
+use crate::ports::Fs;
+use crate::route::atlas::{self, Atlas};
 
 /// A system resolved from a name, and how it was found.
 #[derive(Clone, Debug)]
@@ -127,6 +129,51 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
     ) -> Result<ardent::NearbyPage, String> {
         let url = ardent::nearby_url(self.base, system_name, max_distance);
         Ok(ardent::parse_nearby_page(&self.fetch_json(&url).await?))
+    }
+
+    /// The same page, read through a local copy when there is a fresh one.
+    ///
+    /// A separate method rather than a field on the client, because the four
+    /// ported commands must keep making exactly the requests they make today
+    /// \[R50\] — a cache under them would change the wire log the parity
+    /// harness diffs. Only `route` calls this.
+    pub async fn nearby_cached<F: Fs>(
+        &self,
+        atlas: &Atlas,
+        fs: &F,
+        now_ms: f64,
+        system_name: &str,
+        max_distance: f64,
+    ) -> Result<ardent::NearbyPage, String> {
+        let url = ardent::nearby_url(self.base, system_name, max_distance);
+        if let Some(body) = atlas.get(fs, &url, now_ms, atlas::NEARBY_LIFETIME_MINUTES) {
+            return Ok(ardent::parse_nearby_page(&body));
+        }
+        let body = self.fetch_json(&url).await?;
+        atlas.put(fs, &url, &body, now_ms);
+        Ok(ardent::parse_nearby_page(&body))
+    }
+
+    /// One system's station list, read through the local copy when fresh.
+    pub async fn system_markets_cached<F: Fs>(
+        &self,
+        atlas: &Atlas,
+        fs: &F,
+        now_ms: f64,
+        system: &ReferenceSystem,
+    ) -> Result<Vec<ardent::ArdentStation>, String> {
+        let url = ardent::system_markets_url(self.base, &system.name);
+        let body = if let Some(body) = atlas.get(fs, &url, now_ms, atlas::MARKETS_LIFETIME_MINUTES)
+        {
+            body
+        } else {
+            let fetched = self.fetch_json(&url).await?;
+            atlas.put(fs, &url, &fetched, now_ms);
+            fetched
+        };
+        let mut stations = ardent::parse_system_markets(&body);
+        ardent::place(&mut stations, system.coordinates);
+        Ok(stations)
     }
 
     /// `/system/name/{s}/markets` — every station in one system that trades

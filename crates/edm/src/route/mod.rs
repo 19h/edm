@@ -14,6 +14,7 @@
 //! optimiser is handed.
 
 pub mod acquire;
+pub mod atlas;
 pub mod cache;
 pub mod discover;
 pub mod ingest;

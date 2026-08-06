@@ -124,8 +124,21 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             p.system,
         ));
     });
+    // Built here rather than beside the price lookup, because the atlas shares
+    // its root and the enumeration below is the first thing that wants it.
+    let cache = cache_for(app, config);
+    // The galaxy's shape, cached locally: systems do not move, and station
+    // lists change on the order of days. Before this, a repeat run over the
+    // same region re-made every /nearby and /markets request from scratch —
+    // hundreds of round trips at a wide radius, all of them for answers that
+    // had not changed.
+    let atlas = crate::route::atlas::Atlas::new(cache.root(), config.cache, config.refresh);
+    let now_ms = app.ports.clock.now_ms();
     let enumeration = discover::enumerate(
         &ardent,
+        &atlas,
+        &app.ports.fs,
+        now_ms,
         &centre,
         config.radius_ly,
         budget,
@@ -160,8 +173,15 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let (stations, systems_with_markets) = if config.fast_estimate {
         (Vec::new(), enumeration.systems.len())
     } else {
-        gather(&ardent, &enumeration, gather_report.as_ref().map(|f| f as &dyn Fn(_, _, _)))
-            .await
+        gather(
+            &ardent,
+            &atlas,
+            &app.ports.fs,
+            now_ms,
+            &enumeration,
+            gather_report.as_ref().map(|f| f as &dyn Fn(_, _, _)),
+        )
+        .await
     };
 
     let selection = select::select(stations, config, &centre.coordinates);
@@ -674,8 +694,11 @@ async fn resolve<H: HttpTransport>(
 /// the pacer and the spend gate exist for.
 ///
 /// Returns the stations and how many systems answered at all.
-async fn gather<H: HttpTransport>(
+async fn gather<H: HttpTransport, F: Fs>(
     ardent: &ArdentClient<'_, H>,
+    atlas: &crate::route::atlas::Atlas,
+    fs: &F,
+    now_ms: f64,
     enumeration: &discover::Enumeration,
     report: Option<&dyn Fn(usize, usize, usize)>,
 ) -> (Vec<ardent::ArdentStation>, usize) {
@@ -696,7 +719,8 @@ async fn gather<H: HttpTransport>(
         };
         let (done, answered, found) = (&done, &answered, &found);
         async move {
-            let stations = ardent.system_markets(&reference).await.ok();
+            let stations =
+                ardent.system_markets_cached(atlas, fs, now_ms, &reference).await.ok();
             done.set(done.get() + 1);
             if let Some(stations) = &stations {
                 answered.set(answered.get() + 1);

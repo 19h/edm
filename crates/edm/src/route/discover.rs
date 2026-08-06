@@ -111,8 +111,12 @@ struct Covered {
 /// Errors are not swallowed. An Ardent outage that read as an empty region
 /// would be indistinguishable from a genuinely empty one, and the whole command
 /// downstream is a claim about completeness.
-pub async fn enumerate<H: HttpTransport>(
+#[expect(clippy::too_many_arguments, reason = "a client, its cache, and the query it answers")]
+pub async fn enumerate<H: HttpTransport, F: crate::ports::Fs>(
     ardent: &ArdentClient<'_, H>,
+    atlas: &crate::route::atlas::Atlas,
+    fs: &F,
+    now_ms: f64,
     centre: &ReferenceSystem,
     radius_ly: f64,
     budget: u32,
@@ -133,7 +137,7 @@ pub async fn enumerate<H: HttpTransport>(
     }];
     let mut seen: HashSet<u64> = HashSet::from([address_key(centre.address)]);
 
-    let page = ardent.nearby(&centre.name, radius_ly).await?;
+    let page = ardent.nearby_cached(atlas, fs, now_ms, &centre.name, radius_ly).await?;
     let mut requests = 1u32;
     let mut anchors = 0u32;
     let mut balls =
@@ -165,7 +169,7 @@ pub async fn enumerate<H: HttpTransport>(
                 complete_to_ly: frontier.nearest_ly,
             });
         }
-        let page = ardent.nearby(&anchor.name, radius_ly).await?;
+        let page = ardent.nearby_cached(atlas, fs, now_ms, &anchor.name, radius_ly).await?;
         requests += 1;
         anchors += 1;
         balls.push(Covered { centre: anchor.coordinates, radius_ly: covered_to(&page, reach) });
@@ -382,7 +386,18 @@ mod tests {
 
     async fn run(http: &FakeArdent, radius_ly: f64, budget: u32) -> Enumeration {
         let client = ArdentClient::new(http, BASE);
-        enumerate(&client, &centre(), radius_ly, budget, None).await.expect("the script answers")
+        enumerate(
+            &client,
+            &crate::route::atlas::Atlas::new(std::path::Path::new("/none"), false, false),
+            &crate::ports::RecordingFs::default(),
+            0.0,
+            &centre(),
+            radius_ly,
+            budget,
+            None,
+        )
+        .await
+        .expect("the script answers")
     }
 
     /// A page under the cap exhausted the radius, so one request settles it.
