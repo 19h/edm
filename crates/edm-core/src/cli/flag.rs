@@ -55,13 +55,11 @@ pub enum Flag {
     Timeout,
     Requeue,
 
-    // Route-only value flags. They sit inside the value run rather than after
-    // the switches because `takes_value` is a single comparison against the
-    // arity boundary; putting them at the end would make it two.
-    //
-    // None of these resolve unless the command is `route` \[C26\] — see
-    // [`Flag::resolve_in`]. Their discriminants shift the switches along, which
-    // is harmless: the slot index is never persisted or compared across builds.
+    // Extension-only value flags. Most belong to `route`; they sit inside the
+    // value run rather than after the switches because `takes_value` is a
+    // single comparison against the arity boundary. None resolve in the base
+    // grammar — see [`Flag::resolve_in`]. Their discriminants shift the
+    // switches along, which is harmless: slot indices are never persisted.
     Radius,
     Pad,
     StationTypes,
@@ -90,6 +88,8 @@ pub enum Flag {
     /// `--eddn-rps <n>`: messages per second to EDDN, paced apart from the
     /// game-internal API.
     EddnRps,
+    /// `--min-level <n>`: minimum Pioneer Supplies item grade for `vendor`.
+    MinLevel,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -143,14 +143,13 @@ pub enum Table {
     /// Exactly the TypeScript's grammar. Every existing command uses this.
     #[default]
     Base,
-    /// `Base` plus the route-only names. Reached only when the command is
-    /// `route`.
+    /// `Base` plus names used by Rust-only extension commands.
     Extended,
 }
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 85] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -208,6 +207,7 @@ impl Flag {
         Self::Category,
         Self::FromFile,
         Self::EddnRps,
+        Self::MinLevel,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -271,8 +271,9 @@ impl Flag {
         })
     }
 
-    /// The route-only names. Disjoint from the base table by construction, and
-    /// a gate proves it.
+    /// Names used only by extension commands. Disjoint from the base table by
+    /// construction, and a gate proves it. The historical method name remains
+    /// because `route` introduced this table.
     #[must_use]
     pub fn resolve_route(normalized: &str) -> Option<Self> {
         Some(match normalized {
@@ -298,6 +299,7 @@ impl Flag {
             "category" | "categories" => Self::Category,
             "fromfile" | "file" => Self::FromFile,
             "eddnrps" => Self::EddnRps,
+            "minlevel" | "mingrade" => Self::MinLevel,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -347,8 +349,8 @@ impl Flag {
             Self::BlackMarket => "--black-market",
             Self::FullMarket => "--full-market",
 
-            // Route-only. Not in `FLAG_DISPLAY` because the TypeScript has no
-            // such command; these are the documented spellings \[C26\].
+            // Extension-only. Not in `FLAG_DISPLAY` because the TypeScript has
+            // no such commands; these are the documented spellings.
             Self::Radius => "--radius",
             Self::Pad => "--pad",
             Self::StationTypes => "--station-types",
@@ -370,6 +372,7 @@ impl Flag {
             Self::Category => "--category",
             Self::FromFile => "--from-file",
             Self::EddnRps => "--eddn-rps",
+            Self::MinLevel => "--min-level",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

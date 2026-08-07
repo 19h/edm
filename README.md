@@ -116,13 +116,15 @@ system match checks every non-carrier market in the system.
 
 ```bash
 edm vendor Sol
+edm vendor Sol --min-level 3
 edm vendor --station "Jaques Station"
 edm vendor --market-id 4370953219
 edm vendor Colonia --json
 ```
 
 The default output includes in-stock upgraded offers and ordinary grade-1
-outfitting. Add `--detail` to retain sold-out premium slots and Frontier's raw
+outfitting. Use `--min-level N` (or `--min-grade N`) to retain only grade N and
+higher. Add `--detail` to retain sold-out premium slots and Frontier's raw
 prototype names. JSON output also preserves each decoded vendor payload for
 shape inspection and downstream tools.
 

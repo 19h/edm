@@ -65,13 +65,29 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
         .route("/v2/market/4370953219", vec![json_reply(MARKET)])
         .route("/2.0/elite/vendors/items", vec![sealed(STOCK)]);
     let run = drive(
-        &["vendor", "--market-id", "4370953219", "--json", "--detail"],
+        &[
+            "vendor",
+            "--market-id",
+            "4370953219",
+            "--json",
+            "--detail",
+            "--min-level",
+            "2",
+        ],
         &json_http,
     );
     run.assert_exit(0);
     let document: serde_json::Value = serde_json::from_str(&run.stdout).expect("one JSON document");
     assert_eq!(document["summary"]["markets"], 1);
-    assert_eq!(document["summary"]["items"], 3);
+    assert_eq!(document["minimumLevel"], 2);
+    assert_eq!(document["summary"]["items"], 2);
+    assert!(
+        document["markets"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["grade"].as_u64().unwrap() >= 2)
+    );
     assert_eq!(
         document["markets"][0]["payload"]["premiumStockKey"],
         1_785_999_600u64
@@ -183,11 +199,20 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
     );
     assert!(run.stdout.contains("VENDOR SEARCH PLAN") || run.stdout.contains("REQUEST"));
 
+    let run = drive(
+        &["vendor", "--market-id", "4370953219", "--min-level", "0"],
+        &FakeHttp::default(),
+    );
+    run.assert_exit(1);
+    assert!(run.stderr.contains("--min-level must be at least 1"));
+    assert!(run.calls.is_empty(), "invalid filters fail before lookup");
+
     let run = drive(&["vendor", "--help"], &FakeHttp::default());
     run.assert_exit(0);
     assert!(
         run.stdout
             .contains("edm vendor — find live Pioneer Supplies stock")
     );
+    assert!(run.stdout.contains("--min-level <n>"));
     assert!(run.calls.is_empty());
 }

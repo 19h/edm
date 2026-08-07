@@ -5,7 +5,7 @@ use futures_util::stream::{self, StreamExt as _};
 use edm_core::ardent::{ArdentStation, Lookup, is_carrier};
 use edm_core::cli::Flag;
 use edm_core::cli::config::LookupMode;
-use edm_core::cli::vendor::{VendorTarget, vendor_target};
+use edm_core::cli::vendor::{VendorTarget, minimum_level, vendor_target};
 use edm_core::consts::{DEFAULT_CONCURRENCY, MAX_CONCURRENCY, VENDOR_ITEMS};
 use edm_core::domain::vendor::{VendorItem, read_outfitting_items, read_premium_items};
 use edm_core::js;
@@ -51,6 +51,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 
     let target = vendor_target(&app.cli).map_err(message)?;
+    let minimum_level = minimum_level(&app.cli).map_err(message)?;
     let mut markets = resolve_markets(app, target).await?;
     if markets.is_empty() {
         return Err("Ardent found no markets to check for Pioneer Supplies stock".to_owned());
@@ -84,7 +85,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 
     if app.session.dry_run {
-        emit_dry_run(app, &prepared).await;
+        emit_dry_run(app, &prepared, minimum_level).await;
         return Ok(());
     }
 
@@ -96,19 +97,17 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         ))]);
     }
 
-    let jobs = stream::iter(
-        prepared
-            .into_iter()
-            .map(|(target, request)| async move { visit(app, target, request, detail).await }),
-    );
+    let jobs = stream::iter(prepared.into_iter().map(|(target, request)| async move {
+        visit(app, target, request, detail, minimum_level).await
+    }));
     let mut visits: Vec<Visit> = jobs.buffer_unordered(concurrency).collect().await;
     visits.sort_by_key(|visit| visit.target.index);
 
     if app.session.json {
         app.out
-            .document(&json_document(&visits, detail).stringify(2));
+            .document(&json_document(&visits, detail, minimum_level).stringify(2));
     } else {
-        emit_table(app, &visits, detail);
+        emit_table(app, &visits, detail, minimum_level);
     }
     Ok(())
 }
@@ -196,6 +195,7 @@ async fn visit<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     target: TargetMarket,
     request: PreparedRequest,
     detail: bool,
+    minimum_level: f64,
 ) -> Visit {
     let exchange = app
         .send(
@@ -237,9 +237,14 @@ async fn visit<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         items.extend(
             read_premium_items(payload)
                 .into_iter()
+                .filter(|item| item.grade >= minimum_level)
                 .filter(|item| detail || item.available()),
         );
-        items.extend(read_outfitting_items(payload));
+        items.extend(
+            read_outfitting_items(payload)
+                .into_iter()
+                .filter(|item| item.grade >= minimum_level),
+        );
     }
     Visit {
         target,
@@ -263,6 +268,7 @@ fn is_vendor_payload(value: &JsValue) -> bool {
 async fn emit_dry_run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     app: &App<'_, H, C, E, F>,
     prepared: &[(TargetMarket, PreparedRequest)],
+    minimum_level: f64,
 ) {
     if app.session.json {
         let markets = prepared
@@ -273,6 +279,7 @@ async fn emit_dry_run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             &object([
                 ("dryRun".to_owned(), JsValue::Bool(true)),
                 ("vendorType".to_owned(), JsValue::Num(PIONEER_SUPPLIES)),
+                ("minimumLevel".to_owned(), JsValue::Num(minimum_level)),
                 ("markets".to_owned(), JsValue::Arr(markets)),
             ])
             .stringify(2),
@@ -318,6 +325,7 @@ fn emit_table<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     app: &App<'_, H, C, E, F>,
     visits: &[Visit],
     detail: bool,
+    minimum_level: f64,
 ) {
     let mut rows = Vec::new();
     for visit in visits {
@@ -341,8 +349,13 @@ fn emit_table<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 
     let succeeded = visits.iter().filter(|visit| visit.succeeded).count();
+    let level_label = if minimum_level > 1.0 {
+        format!(" G{}+", js::format_integer(minimum_level))
+    } else {
+        String::new()
+    };
     let title = format!(
-        "VENDOR ITEMS  {} offer{} across {} market{}",
+        "VENDOR ITEMS{level_label}  {} offer{} across {} market{}",
         rows.len(),
         if rows.len() == 1 { "" } else { "s" },
         visits.len(),
@@ -351,7 +364,10 @@ fn emit_table<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     if rows.is_empty() {
         app.out.emit(&[
             Block::Heading(title),
-            Block::Note("no Pioneer Supplies items were available".to_owned()),
+            Block::Note(format!(
+                "no Pioneer Supplies items of grade {} or higher were available",
+                js::format_integer(minimum_level)
+            )),
         ]);
     } else {
         app.out.emit(&[Block::Table {
@@ -368,7 +384,7 @@ fn emit_table<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 }
 
-fn json_document(visits: &[Visit], detail: bool) -> JsValue {
+fn json_document(visits: &[Visit], detail: bool, minimum_level: f64) -> JsValue {
     let markets = visits
         .iter()
         .map(|visit| {
@@ -387,6 +403,7 @@ fn json_document(visits: &[Visit], detail: bool) -> JsValue {
     let item_count = visits.iter().map(|visit| visit.items.len()).sum::<usize>();
     object([
         ("vendorType".to_owned(), JsValue::Num(PIONEER_SUPPLIES)),
+        ("minimumLevel".to_owned(), JsValue::Num(minimum_level)),
         ("detail".to_owned(), JsValue::Bool(detail)),
         ("markets".to_owned(), JsValue::Arr(markets)),
         (

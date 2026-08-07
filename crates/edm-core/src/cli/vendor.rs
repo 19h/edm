@@ -71,6 +71,15 @@ pub fn vendor_target(cli: &Cli<'_>) -> Result<VendorTarget, CliError> {
         .map_err(CliError::from)
 }
 
+/// Minimum suit or weapon grade to include. The default keeps every grade.
+pub fn minimum_level(cli: &Cli<'_>) -> Result<f64, CliError> {
+    let level = cli.optional_number(Flag::MinLevel)?.unwrap_or(1.0);
+    if level < 1.0 {
+        return Err("--min-level must be at least 1".to_owned().into());
+    }
+    Ok(level)
+}
+
 /// Help for the Rust-only vendor locator.
 #[must_use]
 pub fn vendor_usage() -> String {
@@ -88,6 +97,7 @@ Targets
   --market-id <id>          check one market directly (else MARKET_ID)
 
 Options
+  --min-level <n>           include only items of grade n or higher (alias: --min-grade)
   --detail                  include sold-out premium offers and Frontier prototype names
   --concurrency <n>         simultaneous Frontier reads, default 5, max 16
   --carriers                include Fleet Carriers in a system search
@@ -152,5 +162,10 @@ mod tests {
                 mode: LookupMode::Station,
             }
         );
+
+        let args = parse(&["vendor", "--min-level", "3"]);
+        assert_eq!(minimum_level(&Cli::new(&args, &env)).unwrap(), 3.0);
+        let args = parse(&["vendor", "--min-grade", "0"]);
+        assert!(minimum_level(&Cli::new(&args, &env)).is_err());
     }
 }
