@@ -58,6 +58,14 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
     );
     assert!(run.stdout.contains("Takada Zenith"), "{}", run.stdout);
     assert!(run.stdout.contains("Karma AR-50"), "{}", run.stdout);
+    assert!(run.stdout.contains("System"), "{}", run.stdout);
+    assert!(run.stdout.contains("Dist (Ly)"), "{}", run.stdout);
+    assert!(run.stdout.contains("Colonia"), "{}", run.stdout);
+    assert!(
+        run.stdout.find("Karma AR-50") < run.stdout.find("Takada Zenith"),
+        "items should be sorted by name:\n{}",
+        run.stdout
+    );
     assert!(
         !run.stdout.contains("Manticore Tormentor"),
         "sold-out premium stock is hidden"
@@ -81,6 +89,7 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
     run.assert_exit(0);
     let document: serde_json::Value = serde_json::from_str(&run.stdout).expect("one JSON document");
     assert_eq!(document["summary"]["markets"], 1);
+    assert_eq!(document["markets"][0]["market"]["distanceLy"], 0);
     assert_eq!(document["minimumLevel"], 2);
     assert_eq!(document["summary"]["items"], 2);
     assert!(
@@ -96,8 +105,11 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
     );
     assert_eq!(
         document["markets"][0]["items"][0]["symbol"],
-        "Wpn_S_Pistol_Laser_SAuto"
+        "Wpn_S_Pistol_Plasma_Charged",
+        "items are sorted by their player-facing names"
     );
+    assert_eq!(document["markets"][0]["items"][0]["name"], "Manticore Tormentor");
+    assert_eq!(document["markets"][0]["items"][1]["name"], "Takada Zenith");
 
     let wrong_shape_http = FakeHttp::default()
         .route("/v2/market/4370953219", vec![json_reply(MARKET)])
@@ -178,6 +190,104 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
         "fleet carriers are excluded before Frontier is queried"
     );
 
+    let radius_http = FakeHttp::default()
+        .route(
+            "/v2/system/name/Test",
+            vec![json_reply(
+                r#"{"systemName":"Test","systemAddress":42,"systemX":1,"systemY":2,"systemZ":3}"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Test/nearby?maxDistance=10",
+            vec![json_reply(
+                r#"[{"systemName":"Neighbor","systemAddress":43,
+                     "systemX":4.25,"systemY":2,"systemZ":3,"distance":3}]"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Test/markets",
+            vec![json_reply(
+                r#"[{"marketId":4370953219,"stationName":"Jaques Station",
+                     "systemName":"Test","stationType":"Orbis"}]"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Neighbor/markets",
+            vec![json_reply(
+                r#"[
+                  {"marketId":4370953221,"stationName":"Nearby Port",
+                   "systemName":"Neighbor","stationType":"Coriolis"},
+                  {"marketId":4370953222,"stationName":"ABC-456",
+                   "systemName":"Neighbor","stationType":"FleetCarrier"}
+                ]"#,
+            )],
+        )
+        .route(
+            "/2.0/elite/vendors/items",
+            vec![sealed(STOCK), sealed(STOCK)],
+        );
+    let run = drive(
+        &["vendor", "--system", "Test", "--radius", "10", "--json"],
+        &radius_http,
+    );
+    run.assert_exit(0);
+    assert_eq!(
+        run.calls,
+        [
+            "GET https://api.ardent-insight.com/v2/system/name/Test",
+            "GET https://api.ardent-insight.com/v2/system/name/Test/nearby",
+            "GET https://api.ardent-insight.com/v2/system/name/Test/markets",
+            "GET https://api.ardent-insight.com/v2/system/name/Neighbor/markets",
+            "GET https://api.orerve.net/2.0/elite/vendors/items",
+            "GET https://api.orerve.net/2.0/elite/vendors/items",
+        ],
+        "--radius enumerates the centre and nearby systems, then excludes carriers"
+    );
+    let document: serde_json::Value =
+        serde_json::from_str(&run.stdout).expect("radius output is one JSON document");
+    assert_eq!(document["radiusLy"], 10);
+    assert_eq!(document["summary"]["markets"], 2);
+    assert_eq!(document["markets"][0]["market"]["system"], "Test");
+    assert_eq!(document["markets"][0]["market"]["distanceLy"], 0);
+    assert_eq!(document["markets"][1]["market"]["system"], "Neighbor");
+    assert_eq!(document["markets"][1]["market"]["distanceLy"], 3.25);
+    assert_eq!(document["markets"][0]["items"][0]["name"], "Karma AR-50");
+
+    let ceiling_http = FakeHttp::default()
+        .route(
+            "/v2/system/name/Test",
+            vec![json_reply(
+                r#"{"systemName":"Test","systemAddress":42,"systemX":1,"systemY":2,"systemZ":3}"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Test/markets",
+            vec![json_reply(
+                r#"[
+                  {"marketId":4370953219,"stationName":"One","systemName":"Test",
+                   "stationType":"Orbis"},
+                  {"marketId":4370953221,"stationName":"Two","systemName":"Test",
+                   "stationType":"Coriolis"}
+                ]"#,
+            )],
+        );
+    let run = drive(
+        &["vendor", "--system", "Test", "--max-requests", "1"],
+        &ceiling_http,
+    );
+    run.assert_exit(1);
+    assert_eq!(
+        run.calls.len(),
+        2,
+        "the request ceiling permits only Ardent discovery"
+    );
+    assert!(run.stderr.contains("request count (2)"), "{}", run.stderr);
+    assert!(
+        run.stderr.contains("Nothing has been sent"),
+        "{}",
+        run.stderr
+    );
+
     let dry_http = FakeHttp::default()
         .route(
             "/v2/system/name/Test",
@@ -256,6 +366,51 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
         "no target uses the journal's current system ahead of MARKET_ID"
     );
 
+    let local_radius_http = FakeHttp::default()
+        .route(
+            "/v2/system/name/Test",
+            vec![json_reply(
+                r#"{"systemName":"Test","systemAddress":42,"systemX":1,"systemY":2,"systemZ":3}"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Test/nearby?maxDistance=10",
+            vec![json_reply("[]")],
+        )
+        .route(
+            "/v2/system/name/Test/markets",
+            vec![json_reply(
+                r#"[{"marketId":4370953219,"stationName":"Jaques Station",
+                     "systemName":"Test","stationType":"Orbis"}]"#,
+            )],
+        );
+    let run = drive_with_env_and_files(
+        &["vendor", "--radius", "10", "--dry-run"],
+        &local_radius_http,
+        vec![("EDM_JOURNAL_DIR".to_owned(), "/journals".to_owned())],
+        vec![
+            (PathBuf::from("/journals"), String::new()),
+            (
+                PathBuf::from("/journals/Journal.2026-08-07T010101.01.log"),
+                concat!(
+                    r#"{"timestamp":"2026-08-07T01:01:01Z","event":"Location","StarSystem":"Test","SystemAddress":42,"StarPos":[1,2,3]}"#,
+                    "\n",
+                )
+                .to_owned(),
+            ),
+        ],
+    );
+    run.assert_exit(0);
+    assert_eq!(
+        run.calls,
+        [
+            "GET https://api.ardent-insight.com/v2/system/name/Test",
+            "GET https://api.ardent-insight.com/v2/system/name/Test/nearby",
+            "GET https://api.ardent-insight.com/v2/system/name/Test/markets",
+        ],
+        "--radius without a target centres the search on the journal system"
+    );
+
     let run = drive(
         &["vendor", "--market-id", "4370953219", "--min-level", "0"],
         &FakeHttp::default(),
@@ -264,6 +419,14 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
     assert!(run.stderr.contains("--min-level must be at least 1"));
     assert!(run.calls.is_empty(), "invalid filters fail before lookup");
 
+    let run = drive(&["vendor", "Sol", "--radius", "501"], &FakeHttp::default());
+    run.assert_exit(1);
+    assert!(run.stderr.contains("--radius must be at most 500"));
+    assert!(
+        run.calls.is_empty(),
+        "an invalid radius fails before lookup"
+    );
+
     let run = drive(&["vendor", "--help"], &FakeHttp::default());
     run.assert_exit(0);
     assert!(
@@ -271,5 +434,7 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
             .contains("edm vendor — find live Pioneer Supplies stock")
     );
     assert!(run.stdout.contains("--min-level <n>"));
+    assert!(run.stdout.contains("--radius <ly>"));
+    assert!(run.stdout.contains("--max-requests <n>"));
     assert!(run.calls.is_empty());
 }

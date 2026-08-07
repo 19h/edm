@@ -165,7 +165,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
     /// A separate method rather than a field on the client, because the four
     /// ported commands must keep making exactly the requests they make today
     /// \[R50\] — a cache under them would change the wire log the parity
-    /// harness diffs. Only `route` calls this.
+    /// harness diffs. Only regional extension commands call this.
     pub async fn nearby_cached<F: Fs>(
         &self,
         atlas: &Atlas,

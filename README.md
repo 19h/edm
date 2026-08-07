@@ -115,12 +115,18 @@ a station match that includes a market ID checks only that station, while a
 system match checks every non-carrier market in the system.
 
 With no target, the command reads the latest local Elite Dangerous journal and
-searches the commander's current system.
+searches the commander's current system. By default the search stays in the one
+resolved system; add `--radius N` to enumerate every known system within N light
+years of it using the same cap-aware Ardent discovery as `edm route`. Regional
+searches share its Ardent cache, refuse more than 2,000 Frontier reads by
+default, and require `--yes` above 250 reads. Results include each station's
+system and distance from the search centre and are sorted by item name.
 
 ```bash
 edm vendor
+edm vendor --radius 20
 edm vendor Sol
-edm vendor Sol --min-level 3
+edm vendor Sol --radius 20 --min-level 3
 edm vendor --station "Jaques Station"
 edm vendor --market-id 4370953219
 edm vendor Colonia --json
@@ -195,3 +201,10 @@ Provide credentials as flags or environment variables:
 
 Run `edm help`, `edm route --help`, `edm vendor --help`, or `edm eddn --help` for
 the complete option reference.
+
+## Protocol research
+
+- [Mission API research](MISSIONS.md) records the request to investigate live
+  mission listings, the mission-related calls observed in the captured game
+  traffic, current limitations, and the evidence still needed before adding a
+  mission-board command.

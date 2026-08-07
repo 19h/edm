@@ -85,6 +85,22 @@ pub fn vendor_target_with_default(
     )
 }
 
+/// Optional radius around the resolved target system.
+///
+/// Absence deliberately differs from the route command's default radius: a
+/// vendor lookup without this flag retains its one-system scope.
+pub fn search_radius(cli: &Cli<'_>) -> Result<Option<f64>, CliError> {
+    let radius = cli.optional_decimal(Flag::Radius)?;
+    if radius.is_some_and(|radius| radius > crate::ardent::ARDENT_MAX_DISTANCE_LY) {
+        return Err(format!(
+            "--radius must be at most {}",
+            js::js_number(crate::ardent::ARDENT_MAX_DISTANCE_LY),
+        )
+        .into());
+    }
+    Ok(radius)
+}
+
 /// Minimum suit or weapon grade to include. The default keeps every grade.
 pub fn minimum_level(cli: &Cli<'_>) -> Result<f64, CliError> {
     let level = cli.optional_number(Flag::MinLevel)?.unwrap_or(1.0);
@@ -112,11 +128,22 @@ Targets
   --station <name>          require a station-name match
   --market-id <id>          check one market directly
 
+Search area
+  (no --radius)             check only the resolved market or system
+  --radius <ly>             check every known system within this distance of the resolved system;
+                            with no target, centre the search on the player's current system
+  Results                   show system and distance from that centre, sorted by item name
+
 Options
   --min-level <n>           include only items of grade n or higher (alias: --min-grade)
   --detail                  include sold-out premium offers and Frontier prototype names
   --concurrency <n>         simultaneous Frontier reads, default 5, max 16
+  --max-requests <n>        request ceiling, default 2000; above 250 requires --yes
+  --yes                     confirm a regional search above 250 Frontier requests
   --carriers                include Fleet Carriers in a system search
+  --cache, --no-cache       use or bypass the regional Ardent discovery cache
+  --refresh                 refresh cached Ardent discovery before the search
+  --cache-dir <path>        override the shared route/discovery cache directory
   --dry-run                 resolve and print the request or system plan without sending it
   --json                    emit one JSON document
   --method <verb>           override GET for endpoint probing
@@ -128,6 +155,8 @@ Credentials (option, else environment)
 Examples
   edm vendor
   edm vendor Sol
+  edm vendor --radius 20
+  edm vendor Sol --radius 20
   edm vendor --station "Jaques Station"
   edm vendor --market-id 4370953219
   edm vendor Colonia --detail --json"#
@@ -184,6 +213,17 @@ mod tests {
         assert_eq!(minimum_level(&Cli::new(&args, &env)).unwrap(), 3.0);
         let args = parse(&["vendor", "--min-grade", "0"]);
         assert!(minimum_level(&Cli::new(&args, &env)).is_err());
+
+        let args = parse(&["vendor", "Sol", "--radius", "20"]);
+        assert_eq!(search_radius(&Cli::new(&args, &env)).unwrap(), Some(20.0));
+        let args = parse(&["vendor", "Sol"]);
+        assert_eq!(search_radius(&Cli::new(&args, &env)).unwrap(), None);
+        let args = parse(&["vendor", "Sol", "--radius", "501"]);
+        assert!(search_radius(&Cli::new(&args, &env)).is_err());
+        let args = parse(&["vendor", "Sol", "--radius", "0"]);
+        assert!(search_radius(&Cli::new(&args, &env)).is_err());
+        let args = parse(&["vendor", "Sol", "--radius", "Infinity"]);
+        assert!(search_radius(&Cli::new(&args, &env)).is_err());
 
         let args = parse(&["vendor"]);
         assert_eq!(
