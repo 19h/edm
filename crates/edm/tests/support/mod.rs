@@ -197,6 +197,15 @@ pub(crate) fn drive(argv: &[&str], http: &FakeHttp) -> Run {
 }
 
 pub(crate) fn drive_with_env(argv: &[&str], http: &FakeHttp, extra: Vec<(String, String)>) -> Run {
+    drive_with_env_and_files(argv, http, extra, Vec::new())
+}
+
+pub(crate) fn drive_with_env_and_files(
+    argv: &[&str],
+    http: &FakeHttp,
+    extra: Vec<(String, String)>,
+    files: Vec<(PathBuf, String)>,
+) -> Run {
     let argv: Vec<String> = argv.iter().map(|token| (*token).to_owned()).collect();
     // `EnvSnapshot` is first-wins per name \[R55\], so the caller's overrides go
     // in front of the defaults.
@@ -210,7 +219,7 @@ pub(crate) fn drive_with_env(argv: &[&str], http: &FakeHttp, extra: Vec<(String,
         // are the same on every run.
         clock: FixedClock { now_ms: 1_700_000_000_000.0, uptime_seconds: 12_345.0 },
         entropy: CountingEntropy::default(),
-        fs: RecordingFs::default(),
+        fs: RecordingFs(RefCell::new(files)),
     };
 
     let parsed = cli::parse_dispatch(&argv);

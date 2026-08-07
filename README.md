@@ -114,7 +114,11 @@ weapons offered across a system. Ardent supplies the station-to-market mapping;
 a station match that includes a market ID checks only that station, while a
 system match checks every non-carrier market in the system.
 
+With no target, the command reads the latest local Elite Dangerous journal and
+searches the commander's current system.
+
 ```bash
+edm vendor
 edm vendor Sol
 edm vendor Sol --min-level 3
 edm vendor --station "Jaques Station"

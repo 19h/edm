@@ -14,11 +14,20 @@ pub enum VendorTarget {
     Location { name: String, mode: LookupMode },
 }
 
-/// Reads the vendor target.
+/// Reads an explicit vendor target.
+pub fn vendor_target(cli: &Cli<'_>) -> Result<VendorTarget, CliError> {
+    vendor_target_with_default(cli, None)
+}
+
+/// Reads the vendor target with an optional current-system default.
 ///
 /// An explicit market id wins. Otherwise station, system, and positional names
-/// are considered in that order; with no name, `MARKET_ID` is the final fallback.
-pub fn vendor_target(cli: &Cli<'_>) -> Result<VendorTarget, CliError> {
+/// are considered in that order. With no explicit target, the commander's current
+/// journal system supplies the default.
+pub fn vendor_target_with_default(
+    cli: &Cli<'_>,
+    current_system: Option<&str>,
+) -> Result<VendorTarget, CliError> {
     let explicit_market = cli.optional_value(Flag::MarketId, None);
     let station = cli.optional_value(Flag::Station, None);
     let system = cli.optional_value(Flag::System, None);
@@ -59,16 +68,21 @@ pub fn vendor_target(cli: &Cli<'_>) -> Result<VendorTarget, CliError> {
         });
     }
 
-    let Some(raw) = cli.optional_value(Flag::MarketId, Some("MARKET_ID")) else {
-        return Err(
-            "vendor needs a system or station name, or --market-id <id> (or MARKET_ID in the environment)"
-                .to_owned()
-                .into(),
-        );
-    };
-    js::parse_unsigned_integer("MARKET_ID", raw)
-        .map(VendorTarget::Market)
-        .map_err(CliError::from)
+    if let Some(name) = current_system
+        .map(text::js_trim)
+        .filter(|name| !name.is_empty())
+    {
+        return Ok(VendorTarget::Location {
+            name: name.to_owned(),
+            mode: LookupMode::System,
+        });
+    }
+
+    Err(
+        "vendor could not determine the current system; pass a target or set EDM_JOURNAL_DIR"
+            .to_owned()
+            .into(),
+    )
 }
 
 /// Minimum suit or weapon grade to include. The default keeps every grade.
@@ -86,15 +100,17 @@ pub fn vendor_usage() -> String {
     r#"edm vendor — find live Pioneer Supplies stock
 
 Usage
-  edm vendor <system-or-station> [options]
+  edm vendor [<system-or-station>] [options]
   edm vendor --market-id <id> [options]
 
 Targets
+  (no target)              use the player's current system from the latest local journal
+                            (set EDM_JOURNAL_DIR to override automatic journal discovery)
   <system-or-station>       resolve through Ardent; a station result with a market id checks only
                             that market, while a system result checks its non-carrier markets
   --system <name>           require a system-name match
   --station <name>          require a station-name match
-  --market-id <id>          check one market directly (else MARKET_ID)
+  --market-id <id>          check one market directly
 
 Options
   --min-level <n>           include only items of grade n or higher (alias: --min-grade)
@@ -110,6 +126,7 @@ Credentials (option, else environment)
   --machine-token MACHINE_TOKEN   --auth-token     AUTH_TOKEN
 
 Examples
+  edm vendor
   edm vendor Sol
   edm vendor --station "Jaques Station"
   edm vendor --market-id 4370953219
@@ -167,5 +184,27 @@ mod tests {
         assert_eq!(minimum_level(&Cli::new(&args, &env)).unwrap(), 3.0);
         let args = parse(&["vendor", "--min-grade", "0"]);
         assert!(minimum_level(&Cli::new(&args, &env)).is_err());
+
+        let args = parse(&["vendor"]);
+        assert_eq!(
+            vendor_target_with_default(&Cli::new(&args, &env), Some("  Colonia  ")).unwrap(),
+            VendorTarget::Location {
+                name: "Colonia".to_owned(),
+                mode: LookupMode::System,
+            }
+        );
+        let market_env = EnvSnapshot::from_pairs(vec![("MARKET_ID".to_owned(), "42".to_owned())]);
+        assert_eq!(
+            vendor_target_with_default(&Cli::new(&args, &market_env), Some("Colonia")).unwrap(),
+            VendorTarget::Location {
+                name: "Colonia".to_owned(),
+                mode: LookupMode::System,
+            },
+            "the live commander system is preferred to a stale MARKET_ID fallback"
+        );
+        assert!(
+            vendor_target(&Cli::new(&args, &market_env)).is_err(),
+            "MARKET_ID does not replace the journal-derived system default"
+        );
     }
 }

@@ -5,7 +5,7 @@ use futures_util::stream::{self, StreamExt as _};
 use edm_core::ardent::{ArdentStation, Lookup, is_carrier};
 use edm_core::cli::Flag;
 use edm_core::cli::config::LookupMode;
-use edm_core::cli::vendor::{VendorTarget, minimum_level, vendor_target};
+use edm_core::cli::vendor::{VendorTarget, minimum_level, vendor_target_with_default};
 use edm_core::consts::{DEFAULT_CONCURRENCY, MAX_CONCURRENCY, VENDOR_ITEMS};
 use edm_core::domain::vendor::{VendorItem, read_outfitting_items, read_premium_items};
 use edm_core::js;
@@ -45,12 +45,13 @@ struct Visit {
 /// uses documentary JSON rather than inheriting the ported commands' JSON leak.
 pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     app: &App<'_, H, C, E, F>,
+    current_system: Option<&str>,
 ) -> CmdResult {
     if app.session.json {
         app.out.stdout_is_a_document();
     }
 
-    let target = vendor_target(&app.cli).map_err(message)?;
+    let target = vendor_target_with_default(&app.cli, current_system).map_err(message)?;
     let minimum_level = minimum_level(&app.cli).map_err(message)?;
     let mut markets = resolve_markets(app, target).await?;
     if markets.is_empty() {

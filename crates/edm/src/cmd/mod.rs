@@ -701,6 +701,14 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return;
     }
     if args.command == "vendor" {
+        let has_explicit_target = !args.positionals.is_empty()
+            || [Flag::MarketId, Flag::Station, Flag::System]
+                .iter()
+                .any(|&flag| args.get(flag).is_some());
+        let current_system = (!has_explicit_target)
+            .then(|| local_commander_state(&cli, ports, out))
+            .flatten()
+            .and_then(|state| state.current_system.map(|location| location.value.name));
         let app = match App::open(cli, http, ports, out, overrides) {
             Ok(app) => app,
             Err(error) => {
@@ -709,7 +717,7 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                 return;
             }
         };
-        if let Err(error) = vendor::run(&app).await {
+        if let Err(error) = vendor::run(&app, current_system.as_deref()).await {
             out.error(&error);
             out.set_exit(EXIT_FAILURE);
         }

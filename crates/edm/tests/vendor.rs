@@ -4,7 +4,9 @@
 
 mod support;
 
-use support::{FakeHttp, drive, json_reply, sealed};
+use std::path::PathBuf;
+
+use support::{FakeHttp, drive, drive_with_env_and_files, json_reply, sealed};
 
 const MARKET: &str = r#"{
   "marketId":4370953219,
@@ -198,6 +200,61 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
         "system dry-run sends no Frontier request"
     );
     assert!(run.stdout.contains("VENDOR SEARCH PLAN") || run.stdout.contains("REQUEST"));
+
+    let run = drive(&["vendor"], &FakeHttp::default());
+    run.assert_exit(1);
+    assert!(
+        run.stderr
+            .contains("could not determine the current system")
+    );
+    assert!(run.calls.is_empty());
+
+    let local_http = FakeHttp::default()
+        .route(
+            "/v2/system/name/Test",
+            vec![json_reply(
+                r#"{"systemName":"Test","systemAddress":42,"systemX":1,"systemY":2,"systemZ":3}"#,
+            )],
+        )
+        .route(
+            "/v2/system/name/Test/markets",
+            vec![json_reply(
+                r#"[{"marketId":4370953219,"stationName":"Jaques Station",
+                     "systemName":"Test","stationType":"Orbis"}]"#,
+            )],
+        )
+        .route("/2.0/elite/vendors/items", vec![sealed(STOCK)]);
+    let run = drive_with_env_and_files(
+        &["vendor"],
+        &local_http,
+        vec![
+            ("EDM_JOURNAL_DIR".to_owned(), "/journals".to_owned()),
+            ("MARKET_ID".to_owned(), "99".to_owned()),
+        ],
+        vec![
+            (PathBuf::from("/journals"), String::new()),
+            (
+                PathBuf::from("/journals/Journal.2026-08-07T010101.01.log"),
+                concat!(
+                    r#"{"timestamp":"2026-08-07T01:01:01Z","event":"LoadGame","Credits":1000}"#,
+                    "\n",
+                    r#"{"timestamp":"2026-08-07T01:02:00Z","event":"Location","StarSystem":"Test","SystemAddress":42,"StarPos":[1,2,3]}"#,
+                    "\n",
+                )
+                .to_owned(),
+            ),
+        ],
+    );
+    run.assert_exit(0);
+    assert_eq!(
+        run.calls,
+        [
+            "GET https://api.ardent-insight.com/v2/system/name/Test",
+            "GET https://api.ardent-insight.com/v2/system/name/Test/markets",
+            "GET https://api.orerve.net/2.0/elite/vendors/items",
+        ],
+        "no target uses the journal's current system ahead of MARKET_ID"
+    );
 
     let run = drive(
         &["vendor", "--market-id", "4370953219", "--min-level", "0"],
