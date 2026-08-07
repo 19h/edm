@@ -118,6 +118,9 @@ pub struct StationMatch {
     pub station_name: String,
     pub system_name: String,
     pub station_type: Option<String>,
+    /// The station-scoped id consumed by Frontier's market and vendor routes.
+    /// Older or partial Ardent rows may omit it.
+    pub market_id: Option<f64>,
     /// `maxLandingPadSize`. Read, and then ignored by the API's own filters.
     pub pad: Option<f64>,
 }
@@ -134,6 +137,7 @@ pub fn parse_station_matches(value: &JsValue) -> Vec<StationMatch> {
                 station_name: record.get("stationName")?.as_str()?.to_owned(),
                 system_name: record.get("systemName")?.as_str()?.to_owned(),
                 station_type: record.get("stationType").and_then(JsValue::as_str).map(str::to_owned),
+                market_id: finite(record, "marketId"),
                 pad: finite(record, "maxLandingPadSize"),
             })
         })
@@ -493,6 +497,7 @@ mod tests {
             station_name: name.to_owned(),
             system_name: system.to_owned(),
             station_type: None,
+            market_id: None,
             pad: None,
         }
     }

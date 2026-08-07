@@ -107,6 +107,25 @@ Market sweeps can run concurrently, retry transient failures, include carriers
 or non-trading markets on request, and return either fitted terminal tables or
 JSON for downstream tools.
 
+## Find Pioneer Supplies stock
+
+`edm vendor` reads Frontier's market-scoped vendor endpoint and locates suits and
+weapons offered across a system. Ardent supplies the station-to-market mapping;
+a station match that includes a market ID checks only that station, while a
+system match checks every non-carrier market in the system.
+
+```bash
+edm vendor Sol
+edm vendor --station "Jaques Station"
+edm vendor --market-id 4370953219
+edm vendor Colonia --json
+```
+
+The default output includes in-stock upgraded offers and ordinary grade-1
+outfitting. Add `--detail` to retain sold-out premium slots and Frontier's raw
+prototype names. JSON output also preserves each decoded vendor payload for
+shape inspection and downstream tools.
+
 ## Execute controlled trades
 
 Buy or sell by commodity name or ID. `edm` can look up the current price, clamp
@@ -168,5 +187,5 @@ Provide credentials as flags or environment variables:
 | `--machine-token` | `MACHINE_TOKEN` | Exactly 80 characters |
 | `--auth-token` | `AUTH_TOKEN` | Exactly 2024 characters |
 
-Run `edm help`, `edm route --help`, or `edm eddn --help` for the complete option
-reference.
+Run `edm help`, `edm route --help`, `edm vendor --help`, or `edm eddn --help` for
+the complete option reference.

@@ -28,6 +28,7 @@ pub mod market;
 pub mod route;
 pub mod markets;
 pub mod trade;
+pub mod vendor;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -687,16 +688,31 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 ) {
     let cli = Cli::new(args, env);
     if cli.switch_value(Flag::Help, false).unwrap_or(false) {
-        out.line(&if args.command == "eddn" {
-            edm_core::cli::feed::feed_usage()
-        } else {
-            cli::route_usage()
+        out.line(&match args.command.as_str() {
+            "eddn" => edm_core::cli::feed::feed_usage(),
+            "vendor" => edm_core::cli::vendor::vendor_usage(),
+            _ => cli::route_usage(),
         });
         return;
     }
 
     if args.command == "eddn" {
         eddn_command(&cli, http, ports, out, overrides).await;
+        return;
+    }
+    if args.command == "vendor" {
+        let app = match App::open(cli, http, ports, out, overrides) {
+            Ok(app) => app,
+            Err(error) => {
+                out.error(&error);
+                out.set_exit(EXIT_FAILURE);
+                return;
+            }
+        };
+        if let Err(error) = vendor::run(&app).await {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+        }
         return;
     }
 

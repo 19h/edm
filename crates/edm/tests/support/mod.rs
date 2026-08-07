@@ -317,4 +317,4 @@ pub(crate) fn starsystem() -> String {
 pub(crate) const ARDENT_COLONIA: &str = r#"{"systemName":"Colonia","systemAddress":3238296097059,"systemX":-9530.5,"systemY":-910.28125,"systemZ":19808.125}"#;
 
 /// The game-internal API origin every fixture URL is built from.
-pub(crate) const game-internal API: &str = "https://api.orerve.net";
+pub(crate) const GAME_INTERNAL_API: &str = "https://api.orerve.net";

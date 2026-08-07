@@ -27,6 +27,7 @@ pub mod parse;
 pub mod feed;
 pub mod route_usage;
 pub mod usage;
+pub mod vendor;
 
 pub use access::{Cli, CliError, EnvSnapshot, POISON_TYPE_ERROR};
 pub use flag::{Flag, Literal, Table, boolean_literal, normalize};
@@ -47,13 +48,12 @@ pub fn is_known_command(command: &str) -> bool {
     KNOWN_COMMANDS.contains(&command)
 }
 
-/// Commands this port adds, which the TypeScript does not have \[C25\].
+/// Commands this port adds, which the TypeScript does not have \[C25, C33, C35\].
 ///
 /// Kept disjoint from [`KNOWN_COMMANDS`] rather than appended to it, because
 /// that constant's contents and R48's ordering around it are both pinned by the
-/// parity harness. Bun answers `Unknown command "route"` and exits 2; that
-/// divergence is asserted by a scenario rather than ignored.
-pub const EXTENDED_COMMANDS: [&str; 2] = ["route", "eddn"];
+/// parity harness. Bun rejects each extension as an unknown command.
+pub const EXTENDED_COMMANDS: [&str; 3] = ["route", "eddn", "vendor"];
 
 #[must_use]
 pub fn is_extended_command(command: &str) -> bool {
@@ -67,10 +67,10 @@ pub fn is_extended_command(command: &str) -> bool {
 /// pick — cheaply, since parsing is a linear walk over a handful of tokens.
 #[derive(Debug)]
 pub struct Parsed {
-    /// What [`parse`] produced. Always computed, and always what a non-route
-    /// run uses — including its error, verbatim.
+    /// What [`parse`] produced. Always computed, and always what a ported
+    /// command uses — including its error, verbatim.
     pub base: Result<Args, ArgError>,
-    /// `Some` only when the extended parse succeeded *and* named a route.
+    /// `Some` only when the extended parse succeeded and named an extension.
     pub route: Option<Args>,
 }
 

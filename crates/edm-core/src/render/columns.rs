@@ -170,6 +170,26 @@ pub const MARKET_POINT_COLUMNS: &[Column] = &[
     Column::new("body", "Body").max_width(22).priority(5),
 ];
 
+/// Markets that a dry-run would inspect for Pioneer Supplies stock.
+pub const VENDOR_MARKET_COLUMNS: &[Column] = &[
+    Column::new("marketId", "Market ID").right(),
+    Column::new("station", "Station").min_width(16).max_width(36),
+    Column::new("system", "System").max_width(36).priority(1),
+    Column::new("type", "Type").max_width(18).priority(2),
+];
+
+/// One Pioneer Supplies item, for the Rust-only `vendor` locator.
+pub const VENDOR_COLUMNS: &[Column] = &[
+    Column::new("marketId", "Market ID").right().priority(3),
+    Column::new("station", "Station").max_width(30),
+    Column::new("kind", "Kind").priority(2),
+    Column::new("item", "Item").min_width(16).max_width(28),
+    Column::new("grade", "G").right(),
+    Column::new("quantity", "Qty").right().priority(2),
+    Column::new("price", "Price").right().priority(1),
+    Column::new("mods", "Mods").priority(4),
+];
+
 /// Every column set, by the TypeScript's own name for it.
 ///
 /// Exists so that a test or a fixture can address a column set by name without
@@ -186,6 +206,8 @@ pub const ALL: &[(&str, &[Column])] = &[
     ("TRADE_LOG", TRADE_LOG_COLUMNS),
     ("POI", POI_COLUMNS),
     ("MARKET_POINT", MARKET_POINT_COLUMNS),
+    ("VENDOR_MARKET", VENDOR_MARKET_COLUMNS),
+    ("VENDOR", VENDOR_COLUMNS),
 ];
 
 /// Looks a column set up by the name it has in `game-internal-api.ts`.

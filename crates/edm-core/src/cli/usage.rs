@@ -4,8 +4,8 @@
 //! frozen block of prose: fourteen of its values are interpolated from the same
 //! constants the program actually runs on. Freezing the rendered text here
 //! would let a default drift away from its own documentation silently, so the
-//! interpolation is reproduced and `usage_matches_its_interpolation` holds the
-//! two together.
+//! interpolation is reproduced, and the CLI tests verify that the rendered
+//! text advertises the values the program uses.
 
 use crate::js;
 

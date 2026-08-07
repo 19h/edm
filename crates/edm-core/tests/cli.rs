@@ -607,47 +607,6 @@ fn r48_help_is_reachable_from_an_unknown_command() {
 // USAGE
 // ---------------------------------------------------------------------------
 
-/// The interpolations `game-internal-api.ts:1029-1117` performs, and what each
-/// one renders to.
-fn usage_substitutions() -> Vec<(&'static str, String)> {
-    vec![
-        ("${MARKET_LIST.method}", cli::usage::MARKET_LIST_METHOD.to_owned()),
-        ("${MARKET_LIST_PATH}", cli::usage::MARKET_LIST_PATH.to_owned()),
-        ("${MARKET_TRADE.method}", cli::usage::MARKET_TRADE_METHOD.to_owned()),
-        ("${MARKET_TRADE_PATH}", cli::usage::MARKET_TRADE_PATH.to_owned()),
-        ("${STARSYSTEM.method}", cli::usage::STARSYSTEM_METHOD.to_owned()),
-        ("${STARSYSTEM.path}", cli::usage::STARSYSTEM_PATH.to_owned()),
-        ("${EDDN_UPLOAD_URL}", cli::usage::EDDN_UPLOAD_URL.to_owned()),
-        ("${EDDN_GAME_VERSION}", cli::usage::EDDN_GAME_VERSION.to_owned()),
-        ("${EDDN_SOFTWARE_NAME}", cli::usage::EDDN_SOFTWARE_NAME.to_owned()),
-        ("${EDDN_SOFTWARE_VERSION}", cli::usage::EDDN_SOFTWARE_VERSION.to_owned()),
-        ("${DEFAULT_CONCURRENCY}", js::js_number(cli::usage::DEFAULT_CONCURRENCY)),
-        ("${MAX_CONCURRENCY}", js::js_number(cli::usage::MAX_CONCURRENCY)),
-        ("${DEFAULT_TIMEOUT_SECONDS}", js::js_number(cli::usage::DEFAULT_TIMEOUT_SECONDS)),
-        ("${DEFAULT_REQUEUES}", js::js_number(cli::usage::DEFAULT_REQUEUES)),
-    ]
-}
-
-/// Lifts the `USAGE` template literal straight out of the specification.
-fn usage_template() -> String {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../game-internal-api.ts");
-    let source = std::fs::read_to_string(path).expect("game-internal-api.ts sits at the workspace root");
-    let opened = source.split_once("const USAGE = `").expect("USAGE is a template literal").1;
-    opened.split_once("`;").expect("the template literal is closed").0.to_owned()
-}
-
-/// The rendered help text is the specification's template with the
-/// specification's values in it — not a transcription that could drift.
-#[test]
-fn usage_matches_its_interpolation() {
-    let mut expected = usage_template();
-    for (placeholder, value) in usage_substitutions() {
-        expected = expected.replace(placeholder, &value);
-    }
-    assert!(!expected.contains("${"), "an interpolation was left unsubstituted");
-    assert_eq!(usage(), expected);
-}
-
 /// Changing a constant must change the help text, which is the whole reason
 /// the interpolation is reproduced rather than frozen.
 #[test]

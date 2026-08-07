@@ -195,6 +195,26 @@ pub fn list_fields(market_id: &str, credentials: &Credentials, frontier_time: f6
     fields
 }
 
+/// The envelope observed for `/2.0/elite/vendors/items`.
+///
+/// `vendorType=1` is Pioneer Supplies.  Type 2 is the bartender's static
+/// microresource exchange catalogue and has no premium suit or weapon stock.
+#[must_use]
+pub fn vendor_fields(
+    market_id: &str,
+    vendor_type: f64,
+    credentials: &Credentials,
+    frontier_time: f64,
+) -> Vec<Field> {
+    let mut fields = vec![
+        Field::text("cmdrId", credentials.commander_id.clone()),
+        Field::text("marketId", market_id),
+        Field::number("vendorType", vendor_type),
+    ];
+    fields.extend(credential_fields(credentials, frontier_time));
+    fields
+}
+
 /// `starsystemEnvelopeFields` (ts:230).
 #[must_use]
 pub fn starsystem_fields(
@@ -581,6 +601,38 @@ mod tests {
             digest.starts_with("language=en&pageNumber=38&fTime=7&"),
             "{digest}"
         );
+    }
+
+    #[test]
+    fn vendor_envelope_matches_the_observed_get_request() {
+        let fields = vendor_fields("4370953219", 1.0, &credentials(), 1_786_067_738.0);
+        let keys = fields.iter().map(|field| field.name).collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            [
+                "cmdrId",
+                "marketId",
+                "vendorType",
+                "fTime",
+                "machineId",
+                "machineToken",
+                "authToken",
+            ]
+        );
+        let request = prepare(
+            edm_core::consts::API_ORIGIN,
+            edm_core::consts::VENDOR_ITEMS,
+            None,
+            fields,
+            Stamp {
+                nonce: Nonce::parse_arg("0123456789ab").unwrap(),
+                frontier_time: 1_786_067_738.0,
+                request_time: 1,
+            },
+            &HeaderConfig::default(),
+        );
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/2.0/elite/vendors/items");
     }
 
     #[test]

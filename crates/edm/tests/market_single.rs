@@ -5,7 +5,7 @@
 mod support;
 
 use support::{
-    game-internal API, FakeHttp, NOT_A_LISTING, RESPONSE_NONCE, Reply, drive, drive_with_env, listing, reply,
+    GAME_INTERNAL_API, FakeHttp, NOT_A_LISTING, RESPONSE_NONCE, Reply, drive, drive_with_env, listing, reply,
     sealed,
 };
 
@@ -115,5 +115,5 @@ fn one_market_by_id_end_to_end() {
     run.assert_exit(0);
     assert_eq!(run.calls, ["GET http://localhost:9/2.0/elite/market/list"]);
     assert!(run.stdout.contains("http://localhost:9/2.0/elite/market/list"));
-    assert!(!run.stdout.contains(game-internal API));
+    assert!(!run.stdout.contains(GAME_INTERNAL_API));
 }

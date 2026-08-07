@@ -22,6 +22,8 @@ pub struct ResolvedSystem {
     pub via: String,
     /// The station that led here, when a station search resolved it.
     pub station: Option<String>,
+    /// Its market id when the Ardent station row supplied one.
+    pub market_id: Option<f64>,
 }
 
 /// Why a request did not produce a document.
@@ -115,6 +117,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
                     system,
                     via: "system name".to_owned(),
                     station: None,
+                    market_id: None,
                 });
             }
             if kind == Lookup::System {
@@ -137,6 +140,7 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
             system,
             via: format!("station \"{}\"", chosen.station_name),
             station: Some(chosen.station_name.clone()),
+            market_id: chosen.market_id,
         })
     }
 

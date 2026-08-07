@@ -16,6 +16,9 @@ pub struct Endpoint {
 /// `trade` answers `Allow: PUT, OPTIONS`, and a GET there is rejected with 405.
 pub const MARKET_LIST: Endpoint = Endpoint { path: "/2.0/elite/market/list", method: "GET" };
 pub const MARKET_TRADE: Endpoint = Endpoint { path: "/2.0/elite/market/trade", method: "PUT" };
+/// Read-only Pioneer Supplies and bartender inventory for one market.
+pub const VENDOR_ITEMS: Endpoint =
+    Endpoint { path: "/2.0/elite/vendors/items", method: "GET" };
 pub const STARSYSTEM: Endpoint = Endpoint { path: "/2.0/elite/starsystem", method: "GET" };
 /// Read-only bulk market metadata and candidate prices, keyed by system address.
 pub const STARSYSTEM_MARKETDATA: Endpoint =
