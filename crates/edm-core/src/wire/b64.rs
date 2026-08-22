@@ -53,7 +53,10 @@ pub fn is_wire_base64(s: &str) -> bool {
         return false;
     }
     let body = &bytes[..bytes.len() - padding];
-    if !body.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/') {
+    if !body
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+    {
         return false;
     }
 
@@ -112,7 +115,10 @@ mod tests {
         assert!(!is_wire_base64("QU==QUJD"), "padding inside the body");
         assert!(!is_wire_base64("QU-_"), "url-safe alphabet");
         assert!(!is_wire_base64("QU J="), "embedded space");
-        assert!(!is_wire_base64("QUJ\n"), "trailing newline: `$` is end-of-input");
+        assert!(
+            !is_wire_base64("QUJ\n"),
+            "trailing newline: `$` is end-of-input"
+        );
     }
 
     /// Node keeps the whole byte and throws the stray bits away rather than

@@ -25,8 +25,8 @@
 
 pub mod feed;
 pub mod market;
-pub mod route;
 pub mod markets;
+pub mod route;
 pub mod trade;
 pub mod vendor;
 
@@ -45,8 +45,8 @@ use edm_core::js::{self, text::Metric};
 use edm_core::render::{Block, views, write_blocks};
 use edm_core::wire::Nonce;
 
-use crate::game_api::{self, Field, FieldValue, HeaderConfig, PreparedRequest, Stamp};
 use crate::exchange::{self, Exchange, SendOptions};
+use crate::game_api::{self, Field, FieldValue, HeaderConfig, PreparedRequest, Stamp};
 use crate::net::{HeaderView, HttpTransport};
 use crate::out::{EXIT_FAILURE, EXIT_USAGE, Out};
 use crate::ports::{Clock, Entropy, Fs, Ports};
@@ -98,9 +98,18 @@ impl Overrides {
     #[must_use]
     pub fn from_env(env: &EnvSnapshot) -> Self {
         Self {
-            origin: env.get("EDM_ORIGIN_OVERRIDE").unwrap_or(API_ORIGIN).to_owned(),
-            ardent_base: env.get("EDM_ARDENT_BASE").unwrap_or(ARDENT_BASE_URL).to_owned(),
-            eddn_url: env.get("EDM_EDDN_URL").unwrap_or(EDDN_UPLOAD_URL).to_owned(),
+            origin: env
+                .get("EDM_ORIGIN_OVERRIDE")
+                .unwrap_or(API_ORIGIN)
+                .to_owned(),
+            ardent_base: env
+                .get("EDM_ARDENT_BASE")
+                .unwrap_or(ARDENT_BASE_URL)
+                .to_owned(),
+            eddn_url: env
+                .get("EDM_EDDN_URL")
+                .unwrap_or(EDDN_UPLOAD_URL)
+                .to_owned(),
             strict_json: env.get("EDM_STRICT_JSON") == Some("1"),
             metric: if env.get("EDM_WIDTH") == Some("display") {
                 Metric::Display
@@ -133,7 +142,11 @@ impl Default for Overrides {
 pub fn timer_duration(millis: f64) -> Duration {
     // NaN fails `contains`, which lands it on the same one-millisecond floor
     // Node gives it.
-    let clamped = if (1.0..=2_147_483_647.0).contains(&millis) { millis } else { 1.0 };
+    let clamped = if (1.0..=2_147_483_647.0).contains(&millis) {
+        millis
+    } else {
+        1.0
+    };
     Duration::from_millis(clamped as u64)
 }
 
@@ -214,7 +227,16 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
                 .unwrap_or(DEFAULT_FDEV_SEASON)
                 .to_owned(),
         };
-        Ok(Self { http, ports, out, cli, session, credentials, headers, overrides })
+        Ok(Self {
+            http,
+            ports,
+            out,
+            cli,
+            session,
+            credentials,
+            headers,
+            overrides,
+        })
     }
 
     /// `nextStamp` (ts:100), drawn afresh for every request \[R50\].
@@ -250,11 +272,21 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
             Some(raw) => Some(js::parse_unsigned_integer("fTime", raw)?),
             None => None,
         };
-        let request_time = match self.cli.optional_value(Flag::RequestTime, Some("REQUEST_TIME")) {
-            Some(raw) => Some(js::to_uint32(js::parse_unsigned_integer("requestTime", raw)?)),
+        let request_time = match self
+            .cli
+            .optional_value(Flag::RequestTime, Some("REQUEST_TIME"))
+        {
+            Some(raw) => Some(js::to_uint32(js::parse_unsigned_integer(
+                "requestTime",
+                raw,
+            )?)),
             None => None,
         };
-        Ok(StampOverrides { nonce, frontier_time, request_time })
+        Ok(StampOverrides {
+            nonce,
+            frontier_time,
+            request_time,
+        })
     }
 
     /// `prepareRequest` (ts:1154), retargeted at `EDM_ORIGIN_OVERRIDE`.
@@ -264,7 +296,14 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
     /// query is encrypted from the envelope alone and the origin is not part of
     /// it \[C24\].
     pub fn prepare(&self, endpoint: Endpoint, fields: Vec<Field>, stamp: Stamp) -> PreparedRequest {
-        game_api::prepare(&self.overrides.origin, endpoint, self.session.method_override.as_deref(), fields, stamp, &self.headers)
+        game_api::prepare(
+            &self.overrides.origin,
+            endpoint,
+            self.session.method_override.as_deref(),
+            fields,
+            stamp,
+            &self.headers,
+        )
     }
 
     /// `send` (ts:1224), with the two tables wired in.
@@ -278,7 +317,14 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
             request,
             self.session.dry_run,
             options,
-            |request| emit_request(self.out, request, &self.overrides.origin, self.session.full_url),
+            |request| {
+                emit_request(
+                    self.out,
+                    request,
+                    &self.overrides.origin,
+                    self.session.full_url,
+                )
+            },
             |exchange| emit_response(self.out, exchange),
         )
         .await
@@ -311,8 +357,15 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
     ///
     /// [`MarketSnapshot`]: edm_core::domain::MarketSnapshot
     pub async fn require_market_snapshot(&self, market_id: &str) -> Result<JsValue, CmdError> {
-        let lookup =
-            self.fetch_market(market_id, SendOptions { quiet: true, ignore_dry_run: true }).await?;
+        let lookup = self
+            .fetch_market(
+                market_id,
+                SendOptions {
+                    quiet: true,
+                    ignore_dry_run: true,
+                },
+            )
+            .await?;
         let Some(text) = decrypted(lookup.as_ref()) else {
             // ts:1935
             return Err(
@@ -384,27 +437,51 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
         let mut entries = vec![(
             "request".to_owned(),
             object([
-                ("method".to_owned(), JsValue::Str(request.method.clone().into_boxed_str())),
+                (
+                    "method".to_owned(),
+                    JsValue::Str(request.method.clone().into_boxed_str()),
+                ),
                 (
                     "endpoint".to_owned(),
                     JsValue::Str(
                         format!("{}{}", self.overrides.origin, request.path).into_boxed_str(),
                     ),
                 ),
-                ("url".to_owned(), JsValue::Str(request.url.clone().into_boxed_str())),
+                (
+                    "url".to_owned(),
+                    JsValue::Str(request.url.clone().into_boxed_str()),
+                ),
                 ("headers".to_owned(), headers),
                 ("envelope".to_owned(), envelope),
-                ("plaintextLength".to_owned(), JsValue::Num(request.plaintext_bytes as f64)),
+                (
+                    "plaintextLength".to_owned(),
+                    JsValue::Num(request.plaintext_bytes as f64),
+                ),
                 // `...request.stamp`, in the stamp's own field order (ts:95).
-                ("nonce".to_owned(), JsValue::Str(request.stamp.nonce.as_str().into())),
-                ("frontierTime".to_owned(), JsValue::Num(request.stamp.frontier_time)),
-                ("requestTime".to_owned(), JsValue::Num(f64::from(request.stamp.request_time))),
+                (
+                    "nonce".to_owned(),
+                    JsValue::Str(request.stamp.nonce.as_str().into()),
+                ),
+                (
+                    "frontierTime".to_owned(),
+                    JsValue::Num(request.stamp.frontier_time),
+                ),
+                (
+                    "requestTime".to_owned(),
+                    JsValue::Num(f64::from(request.stamp.request_time)),
+                ),
             ]),
         )];
-        entries.extend(extra.into_iter().map(|(key, value)| (key.to_owned(), value)));
+        entries.extend(
+            extra
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value)),
+        );
         entries.push((
             "status".to_owned(),
-            exchange.map_or(JsValue::Null, |exchange| JsValue::Num(f64::from(exchange.status))),
+            exchange.map_or(JsValue::Null, |exchange| {
+                JsValue::Num(f64::from(exchange.status))
+            }),
         ));
         entries.push(("payload".to_owned(), parsed));
 
@@ -447,14 +524,21 @@ fn emit_request(out: &Out, request: &PreparedRequest, origin: &str, full_url: bo
 /// \[R74\].
 pub(crate) fn emit_response(out: &Out, exchange: &Exchange) {
     let headers = exchange.headers.sorted();
-    out.emit(&views::response(f64::from(exchange.status), &exchange.status_text, &headers));
+    out.emit(&views::response(
+        f64::from(exchange.status),
+        &exchange.status_text,
+        &headers,
+    ));
 }
 
 /// The request headers as a `Headers` object presents them: lowercased, sorted,
 /// duplicates combined \[R71\].
 fn request_headers(request: &PreparedRequest) -> Vec<views::Header> {
     HeaderView::from_pairs(
-        request.headers.iter().map(|(name, value)| ((*name).to_owned(), value.clone())),
+        request
+            .headers
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), value.clone())),
     )
     .sorted()
 }
@@ -477,7 +561,10 @@ fn field_json(value: &FieldValue) -> JsValue {
 /// JavaScript object literal enumerates in for non-index keys \[R5\].
 pub(crate) fn object<I: IntoIterator<Item = (String, JsValue)>>(entries: I) -> JsValue {
     JsValue::Obj(JsObject::from_document_order(
-        entries.into_iter().map(|(key, value)| (key.into_boxed_str(), value)).collect(),
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.into_boxed_str(), value))
+            .collect(),
     ))
 }
 
@@ -561,8 +648,12 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         Ok(args) => args,
         Err(error) => {
             // ts:3139 — the message and a blank line on stderr, `USAGE` on
-            // stdout \[R49\].
-            out.error_paragraph(&error.to_string());
+            // stdout \[R49\]. The extended table's complaint wins when there
+            // is one: it is the only reading in which a route-only flag exists
+            // at all, so it is the only one that can describe what was wrong
+            // with it.
+            let message = parsed.misread.as_ref().unwrap_or(&error).to_string();
+            out.error_paragraph(&message);
             out.line(&cli::usage());
             out.set_exit(EXIT_USAGE);
             return;
@@ -618,7 +709,10 @@ fn local_commander_state<F: Fs>(
     ports: &Ports<impl Clock, impl Entropy, F>,
     out: &Out,
 ) -> Option<edm_core::domain::commander::CommanderState> {
-    let home = cli.env("HOME").or_else(|| cli.env("USERPROFILE")).map(Path::new);
+    let home = cli
+        .env("HOME")
+        .or_else(|| cli.env("USERPROFILE"))
+        .map(Path::new);
     let mut candidates = Vec::new();
     if let Some(explicit) = cli.env("EDM_JOURNAL_DIR") {
         candidates.push(PathBuf::from(explicit));
@@ -660,13 +754,34 @@ fn apply_commander_defaults(
     config: &mut config::RouteConfig,
 ) {
     if cli.args().get(Flag::Cargo).is_none() && config.cargo.is_none() {
-        config.cargo = state.cargo.free.or_else(|| state.cargo.capacity_value()).and_then(safe_u64);
+        // A hold, but never a hold of zero — from either field. `free` is
+        // derived and reads zero both for a hold that is genuinely full and for
+        // input the parser had to clamp, and a malformed journal can report a
+        // zero capacity outright. Planning a route around a nought-tonne hold
+        // answers a question nobody asked: every leg carries nothing, every
+        // profit is zero, and the ranking then reports "no profitable hop in
+        // this data" — blaming the market for a fact about the ship, and a
+        // wrong one. Leaving it unknown lets the optimiser's own default hold
+        // apply and says so out loud; `--cargo` still overrides everything.
+        config.cargo = state
+            .cargo
+            .free
+            .filter(|free| *free > 0)
+            .or_else(|| state.cargo.capacity_value())
+            .filter(|hold| *hold > 0)
+            .and_then(safe_u64);
     }
     if cli.args().get(Flag::Credits).is_none() && config.credits.is_none() {
-        config.credits = state.credits.as_ref().and_then(|credits| safe_u64(credits.value));
+        config.credits = state
+            .credits
+            .as_ref()
+            .and_then(|credits| safe_u64(credits.value));
     }
     if cli.args().get(Flag::Jump).is_none()
-        && let Some(jump) = state.ship.as_ref().and_then(|ship| ship.value.max_jump_range)
+        && let Some(jump) = state
+            .ship
+            .as_ref()
+            .and_then(|ship| ship.value.max_jump_range)
         && jump.is_finite()
         && jump > 0.0
     {
@@ -834,7 +949,10 @@ mod tests {
     #[test]
     fn a_timer_delay_outside_int32_clamps_to_one_millisecond() {
         assert_eq!(timer_duration(10_000.0), Duration::from_secs(10));
-        assert_eq!(timer_duration(2_147_483_647.0), Duration::from_millis(2_147_483_647));
+        assert_eq!(
+            timer_duration(2_147_483_647.0),
+            Duration::from_millis(2_147_483_647)
+        );
         assert_eq!(timer_duration(2_147_483_648.0), Duration::from_millis(1));
         assert_eq!(timer_duration(0.0), Duration::from_millis(1));
         assert_eq!(timer_duration(f64::NAN), Duration::from_millis(1));
@@ -856,13 +974,18 @@ mod tests {
         for (argv, expected) in [
             (vec!["market".to_owned()], false),
             (vec!["market".to_owned(), "--json".to_owned()], true),
-            (vec!["market".to_owned(), "--json".to_owned(), "false".to_owned()], false),
+            (
+                vec!["market".to_owned(), "--json".to_owned(), "false".to_owned()],
+                false,
+            ),
             (vec!["market".to_owned(), "--no-json".to_owned()], false),
         ] {
             let parsed = cli::parse_dispatch(&argv);
             let args = parsed.base.as_ref().expect("parses");
             let env = EnvSnapshot::empty();
-            let accessor = Cli::new(args, &env).switch_value(Flag::Json, false).expect("readable");
+            let accessor = Cli::new(args, &env)
+                .switch_value(Flag::Json, false)
+                .expect("readable");
             assert_eq!(wants_json(&parsed), expected);
             assert_eq!(wants_json(&parsed), accessor);
         }
@@ -894,10 +1017,13 @@ mod tests {
             r#"{"timestamp":"3309-01-01T00:00:02Z","event":"Loadout","Ship":"python","CargoCapacity":100,"MaxJumpRange":31.25}"#,
             3,
         ));
-        assert!(state.merge_cargo_sidecar(r#"{"Vessel":"Ship","Count":20,"Inventory":[{"Name":"gold","Count":20,"Stolen":0}]}"#));
+        assert!(state.merge_cargo_sidecar(
+            r#"{"Vessel":"Ship","Count":20,"Inventory":[{"Name":"gold","Count":20,"Stolen":0}]}"#
+        ));
 
-        let parsed = edm_core::cli::parse_with(&["route".to_owned()], edm_core::cli::Table::Extended)
-            .expect("route parses");
+        let parsed =
+            edm_core::cli::parse_with(&["route".to_owned()], edm_core::cli::Table::Extended)
+                .expect("route parses");
         let env = EnvSnapshot::empty();
         let cli = Cli::new(&parsed, &env);
         let mut route = config::route_config_with_reference(&cli, Some("Local System"))
@@ -932,4 +1058,47 @@ mod tests {
         assert_eq!(route.jump_range_ly, 9.0);
     }
 
+    /// A full hold reports nought free tonnes, and a malformed journal can
+    /// report a nought capacity outright. Either taken literally makes every
+    /// leg carry nothing, and the ranking then reports "no profitable hop in
+    /// this data" — a claim about the market, from a fact about the ship.
+    #[test]
+    fn a_hold_with_no_room_falls_back_rather_than_planning_for_nought_tonnes() {
+        let env = EnvSnapshot::empty();
+        let plan = |state: &edm_core::domain::commander::CommanderState| {
+            let parsed =
+                edm_core::cli::parse_with(&["route".to_owned()], edm_core::cli::Table::Extended)
+                    .expect("route parses");
+            let cli = Cli::new(&parsed, &env);
+            let mut route = config::route_config_with_reference(&cli, Some("Local System"))
+                .expect("local reference");
+            apply_commander_defaults(&cli, state, &mut route);
+            route.cargo
+        };
+
+        // Full hold: 100 t of capacity, 100 t carried, nought free.
+        let mut full = edm_core::domain::commander::CommanderState::default();
+        assert!(full.apply_journal_json(
+            r#"{"timestamp":"3309-01-01T00:00:02Z","event":"Loadout","Ship":"python","CargoCapacity":100}"#,
+            1,
+        ));
+        assert!(full.merge_cargo_sidecar(
+            r#"{"Vessel":"Ship","Count":100,"Inventory":[{"Name":"gold","Count":100,"Stolen":0}]}"#
+        ));
+        assert_eq!(full.cargo.free, Some(0), "the hold really is full");
+        assert_eq!(
+            plan(&full),
+            Some(100.0),
+            "planned against capacity, not free space"
+        );
+
+        // A capacity of nought is an observation, not a ship. Left unknown, the
+        // optimiser's own default hold applies and the run says so.
+        let mut nought = edm_core::domain::commander::CommanderState::default();
+        assert!(nought.apply_journal_json(
+            r#"{"timestamp":"3309-01-01T00:00:02Z","event":"Loadout","Ship":"sidewinder","CargoCapacity":0}"#,
+            1,
+        ));
+        assert_eq!(plan(&nought), None);
+    }
 }

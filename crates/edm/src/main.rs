@@ -38,7 +38,10 @@ async fn main() -> ExitCode {
     // First-wins per name, because a raw environment block can repeat one and
     // `getenv` answers with the first \[R55\].
     let env = EnvSnapshot::from_pairs(std::env::vars_os().map(|(name, value)| {
-        (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())
+        (
+            name.to_string_lossy().into_owned(),
+            value.to_string_lossy().into_owned(),
+        )
     }));
 
     let overrides = Overrides::from_env(&env);

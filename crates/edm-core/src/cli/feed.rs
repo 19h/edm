@@ -133,7 +133,9 @@ Examples
 /// Frontier's endpoints the user meant, and the guess would be silent.
 pub fn feed_of(positionals: &[String]) -> Result<Feed, CliError> {
     let Some(word) = positionals.first() else {
-        return Err("eddn needs something to import: eddn market".to_owned().into());
+        return Err("eddn needs something to import: eddn market"
+            .to_owned()
+            .into());
     };
     match word.to_lowercase().as_str() {
         "market" => Ok(Feed::Market),
@@ -172,7 +174,9 @@ pub fn parse_line(line: &str) -> Option<Target> {
 pub fn parse_list(text: &str) -> Vec<Target> {
     let mut targets = Vec::new();
     for line in text.lines() {
-        let Some(target) = parse_line(line) else { continue };
+        let Some(target) = parse_line(line) else {
+            continue;
+        };
         if !targets.contains(&target) {
             targets.push(target);
         }
@@ -213,22 +217,34 @@ pub fn feed_config(cli: &Cli<'_>, file_contents: Option<&str>) -> Result<FeedCon
         // Both is a contradiction, not a union: one of them is a mistake and
         // guessing which would run the wrong list.
         (Some(_), Some(_)) => {
-            return Err("--market-id and --from-file are alternatives; give one".to_owned().into());
+            return Err("--market-id and --from-file are alternatives; give one"
+                .to_owned()
+                .into());
         }
         (Some(raw), None) => {
-            vec![Target::Market(js::parse_unsigned_integer("--market-id", raw)?)]
+            vec![Target::Market(js::parse_unsigned_integer(
+                "--market-id",
+                raw,
+            )?)]
         }
         (None, Some(text)) => {
             let targets = parse_list(text);
             if targets.is_empty() {
-                return Err("--from-file held no system names or market ids".to_owned().into());
+                return Err("--from-file held no system names or market ids"
+                    .to_owned()
+                    .into());
             }
             targets
         }
         (None, None) => match cli.optional_value(Flag::MarketId, Some("MARKET_ID")) {
-            Some(raw) => vec![Target::Market(js::parse_unsigned_integer("MARKET_ID", raw)?)],
+            Some(raw) => vec![Target::Market(js::parse_unsigned_integer(
+                "MARKET_ID",
+                raw,
+            )?)],
             None => {
-                return Err("eddn needs --market-id <id> or --from-file <path>".to_owned().into());
+                return Err("eddn needs --market-id <id> or --from-file <path>"
+                    .to_owned()
+                    .into());
             }
         },
     };
@@ -245,14 +261,17 @@ pub fn feed_config(cli: &Cli<'_>, file_contents: Option<&str>) -> Result<FeedCon
             .unwrap_or(DEFAULT_EDDN_RPS),
         rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
         workers: {
-            let declared =
-                cli.optional_number(Flag::Concurrency)?.unwrap_or(f64::from(DEFAULT_CONCURRENCY));
+            let declared = cli
+                .optional_number(Flag::Concurrency)?
+                .unwrap_or(f64::from(DEFAULT_CONCURRENCY));
             js::js_max(1.0, js::js_min(f64::from(MAX_CONCURRENCY), declared)) as u32
         },
         deadline_seconds: cli
             .optional_decimal(Flag::Deadline)?
             .unwrap_or(DEFAULT_DEADLINE_SECONDS),
-        max_requests: cli.optional_decimal(Flag::MaxRequests)?.unwrap_or(DEFAULT_MAX_REQUESTS),
+        max_requests: cli
+            .optional_decimal(Flag::MaxRequests)?
+            .unwrap_or(DEFAULT_MAX_REQUESTS),
         confirmed: cli.switch_value(Flag::Yes, false)?,
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
@@ -269,14 +288,20 @@ mod tests {
     /// is never a bare number.
     #[test]
     fn digits_are_a_market_and_anything_else_is_a_system() {
-        assert_eq!(parse_line("4306502403"), Some(Target::Market(4_306_502_403.0)));
+        assert_eq!(
+            parse_line("4306502403"),
+            Some(Target::Market(4_306_502_403.0))
+        );
         assert_eq!(parse_line("Sol"), Some(Target::System("Sol".to_owned())));
         assert_eq!(
             parse_line("COL 285 SECTOR HB-V C3-0"),
             Some(Target::System("COL 285 SECTOR HB-V C3-0".to_owned()))
         );
         // A name with digits in it is still a name.
-        assert_eq!(parse_line("LHS 1939"), Some(Target::System("LHS 1939".to_owned())));
+        assert_eq!(
+            parse_line("LHS 1939"),
+            Some(Target::System("LHS 1939".to_owned()))
+        );
     }
 
     /// A list is hand-written, so it gets the courtesies of a hand-written
@@ -307,7 +332,10 @@ mod tests {
     fn order_is_kept_and_repeats_are_not() {
         assert_eq!(
             parse_list("Sol\nLHS 1939\nSol\n"),
-            vec![Target::System("Sol".to_owned()), Target::System("LHS 1939".to_owned())]
+            vec![
+                Target::System("Sol".to_owned()),
+                Target::System("LHS 1939".to_owned())
+            ]
         );
     }
 
@@ -317,12 +345,15 @@ mod tests {
     #[test]
     fn a_market_id_in_the_environment_does_not_contradict_a_file() {
         use crate::cli::{Table, parse_with};
-        let argv: Vec<String> =
-            ["eddn", "market", "--from-file", "x"].iter().map(|s| (*s).to_owned()).collect();
+        let argv: Vec<String> = ["eddn", "market", "--from-file", "x"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
         let parsed = parse_with(&argv, Table::Extended).expect("parses");
-        let env = crate::cli::EnvSnapshot::from_pairs(
-            [("MARKET_ID".to_owned(), "4306502403".to_owned())],
-        );
+        let env = crate::cli::EnvSnapshot::from_pairs([(
+            "MARKET_ID".to_owned(),
+            "4306502403".to_owned(),
+        )]);
         let config = feed_config(&Cli::new(&parsed, &env), Some("Sol\n")).expect("configures");
         assert_eq!(config.targets, vec![Target::System("Sol".to_owned())]);
     }
@@ -334,9 +365,10 @@ mod tests {
         use crate::cli::{Table, parse_with};
         let argv: Vec<String> = ["eddn", "market"].iter().map(|s| (*s).to_owned()).collect();
         let parsed = parse_with(&argv, Table::Extended).expect("parses");
-        let env = crate::cli::EnvSnapshot::from_pairs(
-            [("MARKET_ID".to_owned(), "4306502403".to_owned())],
-        );
+        let env = crate::cli::EnvSnapshot::from_pairs([(
+            "MARKET_ID".to_owned(),
+            "4306502403".to_owned(),
+        )]);
         let config = feed_config(&Cli::new(&parsed, &env), None).expect("configures");
         assert_eq!(config.targets, vec![Target::Market(4_306_502_403.0)]);
     }

@@ -5,11 +5,9 @@
 //! type, and a test fixture that placed a station in space would trip it — so
 //! the fixtures live here and the gated files stay clean, tests included.
 
-use crate::model::{
-    CommodityId, Demand, DemandQty, Limits, Market, ShipConfig, Supply,
-};
-use crate::num::{Credits, Tons};
 use crate::Wanted;
+use crate::model::{CommodityId, Demand, DemandQty, Limits, Market, ShipConfig, Supply};
+use crate::num::{Credits, Tons};
 use crate::time::{Geometry, TimeModel};
 use crate::weight::{LegChoice, Limiter};
 use edm_core::domain::id64::Coordinates;
@@ -58,12 +56,19 @@ pub(crate) fn geometry(markets: &[Market]) -> Geometry<'_> {
 
 /// A ship with a big enough hold and balance that neither binds.
 pub(crate) fn ship() -> ShipConfig {
-    ShipConfig { cargo: Tons(1_000), credits: Credits(1_000_000_000_000) }
+    ShipConfig {
+        cargo: Tons(1_000),
+        credits: Credits(1_000_000_000_000),
+    }
 }
 
 /// Limits that filter nothing and keep everything found.
 pub(crate) fn limits() -> Limits {
-    Limits { top_n: 64, shortlist_factor: 1, ..Limits::default() }
+    Limits {
+        top_n: 64,
+        shortlist_factor: 1,
+        ..Limits::default()
+    }
 }
 
 /// A leg carrying `profit` credits of one commodity, with nothing binding.
@@ -95,7 +100,11 @@ pub(crate) fn proved_round_trip() -> crate::report::Route {
         Wanted::all(),
         crate::watch::Watch::unlimited(),
     );
-    solution.round_trip.into_iter().next().expect("these two markets trade both ways")
+    solution
+        .round_trip
+        .into_iter()
+        .next()
+        .expect("these two markets trade both ways")
 }
 
 /// The two markets [`proved_round_trip`] is built from: one sells commodity 0

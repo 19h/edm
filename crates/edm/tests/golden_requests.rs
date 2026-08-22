@@ -9,10 +9,10 @@
 //!
 //! Regenerate with `bun xtask/oracle/bless-requests.ts crates/edm/tests/fixtures`.
 
+use edm::game_api::{self, Credentials, HeaderConfig, Stamp};
 use edm_core::consts::{MARKET_TRADE, STARSYSTEM};
 use edm_core::domain::trade::{Kind, TradePlan};
 use edm_core::wire::Nonce;
-use edm::game_api::{self, Credentials, HeaderConfig, Stamp};
 
 fn credentials() -> Credentials {
     Credentials::load("F1234567", "machine-1", &"m".repeat(80), &"a".repeat(2024))
@@ -60,7 +60,15 @@ fn build(name: &str) -> game_api::PreparedRequest {
             MARKET_TRADE,
             None,
             game_api::trade_fields(
-                &trade("4306502403", Kind::Buy, 128_049_204.0, 7.0, 7.0, 517.0, false),
+                &trade(
+                    "4306502403",
+                    Kind::Buy,
+                    128_049_204.0,
+                    7.0,
+                    7.0,
+                    517.0,
+                    false,
+                ),
                 &credentials,
                 time,
             ),
@@ -72,7 +80,15 @@ fn build(name: &str) -> game_api::PreparedRequest {
             MARKET_TRADE,
             None,
             game_api::trade_fields(
-                &trade("128667761", Kind::Sell, 128_049_152.0, 13.0, 130.0, 3340.0, true),
+                &trade(
+                    "128667761",
+                    Kind::Sell,
+                    128_049_152.0,
+                    13.0,
+                    130.0,
+                    3340.0,
+                    true,
+                ),
                 &credentials,
                 time,
             ),

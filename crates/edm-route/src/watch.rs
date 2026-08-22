@@ -106,7 +106,10 @@ impl<'a> Watch<'a> {
     /// A search with no deadline and nobody listening.
     #[must_use]
     pub fn unlimited() -> Self {
-        Self { expired: None, sink: None }
+        Self {
+            expired: None,
+            sink: None,
+        }
     }
 
     /// Stops the search the first time `expired` answers `true`.
@@ -118,7 +121,10 @@ impl<'a> Watch<'a> {
     /// deadline passed, and it must keep answering `true` once it has.
     #[must_use]
     pub fn until(self, expired: &'a dyn Fn() -> bool) -> Self {
-        Self { expired: Some(expired), ..self }
+        Self {
+            expired: Some(expired),
+            ..self
+        }
     }
 
     /// Sends progress to `sink`.
@@ -129,7 +135,10 @@ impl<'a> Watch<'a> {
     /// how long the run has been silent.
     #[must_use]
     pub fn reporting(self, sink: &'a dyn Fn(Event)) -> Self {
-        Self { sink: Some(sink), ..self }
+        Self {
+            sink: Some(sink),
+            ..self
+        }
     }
 
     /// Whether the caller's budget is spent.
@@ -189,14 +198,30 @@ mod tests {
         let seen = std::cell::RefCell::new(Vec::new());
         let sink = |event: Event| seen.borrow_mut().push(event);
         let watch = Watch::unlimited().reporting(&sink);
-        watch.report(Event::Building { done: 1, total: 2, edges: 3 });
-        watch.report(Event::Round { round: 1, rate: Ratio::ZERO, stops: 0 });
+        watch.report(Event::Building {
+            done: 1,
+            total: 2,
+            edges: 3,
+        });
+        watch.report(Event::Round {
+            round: 1,
+            rate: Ratio::ZERO,
+            stops: 0,
+        });
         watch.report(Event::Abandoned);
         assert_eq!(
             seen.into_inner(),
             vec![
-                Event::Building { done: 1, total: 2, edges: 3 },
-                Event::Round { round: 1, rate: Ratio::ZERO, stops: 0 },
+                Event::Building {
+                    done: 1,
+                    total: 2,
+                    edges: 3
+                },
+                Event::Round {
+                    round: 1,
+                    rate: Ratio::ZERO,
+                    stops: 0
+                },
                 Event::Abandoned,
             ]
         );

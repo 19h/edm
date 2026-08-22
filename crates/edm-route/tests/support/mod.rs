@@ -14,15 +14,13 @@
 #![allow(dead_code, reason = "one support module shared by three test binaries")]
 
 use edm_route::graph::{Pools, TradeGraph};
-use edm_route::model::{
-    CommodityId, Demand, DemandQty, Limits, Market, ShipConfig, Supply,
-};
+use edm_route::model::{CommodityId, Demand, DemandQty, Limits, Market, ShipConfig, Supply};
 use edm_route::num::{Credits, Ratio, Tons};
 use edm_route::report::{RankKey, Route};
 use edm_route::round;
 use edm_route::time::{Geometry, TimeModel};
-use edm_route::watch::Watch;
 use edm_route::topn::TopN;
+use edm_route::watch::Watch;
 use edm_route::weight::leg_weight;
 
 /// `(commodity, price, quantity)`.
@@ -64,12 +62,19 @@ pub(crate) fn at(id: i64, x: f64, arrival_ls: f64, supply: &[Row], demand: &[Row
 
 /// A ship whose hold and balance never bind.
 pub(crate) fn ship() -> ShipConfig {
-    ShipConfig { cargo: Tons(1_000), credits: Credits(1_000_000_000_000) }
+    ShipConfig {
+        cargo: Tons(1_000),
+        credits: Credits(1_000_000_000_000),
+    }
 }
 
 /// Limits that filter nothing.
 pub(crate) fn limits() -> Limits {
-    Limits { top_n: 64, shortlist_factor: 1, ..Limits::default() }
+    Limits {
+        top_n: 64,
+        shortlist_factor: 1,
+        ..Limits::default()
+    }
 }
 
 /// Builds the graph for an instance under the default model.
@@ -138,7 +143,9 @@ pub(crate) fn best_cycle_rate(
         if !stops.contains(&cycle.len()) {
             continue;
         }
-        let Some((profit, millis, _)) = round::price_cycle(graph, &cycle) else { continue };
+        let Some((profit, millis, _)) = round::price_cycle(graph, &cycle) else {
+            continue;
+        };
         let rate = Ratio::new(profit, millis);
         if best.is_none_or(|current| rate > current) {
             best = Some(rate);
@@ -159,9 +166,7 @@ pub(crate) fn brute_force_single_hops(markets: &[Market], limits: &Limits) -> Ve
             if from == to {
                 continue;
             }
-            if limits.exclude_same_system
-                && origin.system_address == destination.system_address
-            {
+            if limits.exclude_same_system && origin.system_address == destination.system_address {
                 continue;
             }
             // Every trade, not every station pair: a hop is identified by its
@@ -229,7 +234,13 @@ pub(crate) fn random_markets(rng: &mut Rng, count: usize, commodities: u32) -> V
             }
         }
         let x = (rng.below(400) as f64) / 10.0;
-        markets.push(at(i as i64 + 1, x, (rng.below(2_000)) as f64, &supply, &demand));
+        markets.push(at(
+            i as i64 + 1,
+            x,
+            (rng.below(2_000)) as f64,
+            &supply,
+            &demand,
+        ));
     }
     markets
 }

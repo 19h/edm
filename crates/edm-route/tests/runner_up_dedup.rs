@@ -23,10 +23,10 @@
 use std::time::{Duration, Instant};
 
 use edm_core::domain::id64::Coordinates;
+use edm_route::Wanted;
 use edm_route::model::{
     Commodities, IngestCounts, Limits, Market, MarketIdentity, RawCommodity, RowFloors, ShipConfig,
 };
-use edm_route::Wanted;
 use edm_route::time::TimeModel;
 use edm_route::watch::Watch;
 
@@ -69,7 +69,11 @@ fn market(id: i64) -> Market {
             station: format!("Station {id}"),
             system: format!("System {id}"),
             system_address: id,
-            coords: Coordinates { x: id as f64 * 3.0, y: 0.0, z: 0.0 },
+            coords: Coordinates {
+                x: id as f64 * 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
             arrival_ls: 100.0,
         },
         &rows,
@@ -84,20 +88,22 @@ fn the_runner_up_listing_does_not_rescan_everything_it_has_seen() {
     let markets: Vec<Market> = (0..MARKETS).map(market).collect();
 
     let started = Instant::now();
-    let solution =
-        edm_route::solve(
-            &markets,
-            TimeModel::default(),
-            &ShipConfig::default(),
-            &Limits::default(),
-            Wanted::all(),
-            Watch::unlimited(),
-        );
+    let solution = edm_route::solve(
+        &markets,
+        TimeModel::default(),
+        &ShipConfig::default(),
+        &Limits::default(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
     let elapsed = started.elapsed();
 
     // The instance has to actually reach the listing, or the timing proves
     // nothing at all.
-    assert!(!solution.round_trip.is_empty(), "the instance must produce round trips");
+    assert!(
+        !solution.round_trip.is_empty(),
+        "the instance must produce round trips"
+    );
     assert!(
         solution.round_trip.len() > 1,
         "and runners-up, or the dedup is never exercised: {}",
@@ -117,20 +123,22 @@ fn the_runner_up_listing_does_not_rescan_everything_it_has_seen() {
 #[test]
 fn runners_up_are_distinct_routes() {
     let markets: Vec<Market> = (0..40).map(market).collect();
-    let solution =
-        edm_route::solve(
-            &markets,
-            TimeModel::default(),
-            &ShipConfig::default(),
-            &Limits::default(),
-            Wanted::all(),
-            Watch::unlimited(),
-        );
+    let solution = edm_route::solve(
+        &markets,
+        TimeModel::default(),
+        &ShipConfig::default(),
+        &Limits::default(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
 
     let mut seen: Vec<&[i64]> = Vec::new();
     for route in &solution.round_trip {
         let stations = route.rank.stations.as_slice();
-        assert!(!seen.contains(&stations), "duplicate route in the listing: {stations:?}");
+        assert!(
+            !seen.contains(&stations),
+            "duplicate route in the listing: {stations:?}"
+        );
         seen.push(stations);
     }
     assert!(seen.len() > 1, "the listing must hold more than the head");

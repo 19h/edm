@@ -47,7 +47,11 @@ pub fn utf16_len(s: &str) -> usize {
     // `len()` counts UTF-8 bytes; every code point of 3 UTF-8 bytes or fewer is
     // one UTF-16 unit and every 4-byte one is two, so the ASCII fast path is
     // exact and worth taking — most of this program's strings are ASCII.
-    if s.is_ascii() { s.len() } else { s.chars().map(char::len_utf16).sum() }
+    if s.is_ascii() {
+        s.len()
+    } else {
+        s.chars().map(char::len_utf16).sum()
+    }
 }
 
 /// Is this an ECMAScript `WhiteSpace` or `LineTerminator` code point?
@@ -66,8 +70,8 @@ pub fn is_js_whitespace(c: char) -> bool {
         // LineTerminator
         | '\u{A}' | '\u{D}' | '\u{2028}' | '\u{2029}'
         // <USP>: general category Space_Separator
-        | '\u{20}' | '\u{A0}' | '\u{1680}' | '\u{2000}'..='\u{200A}'
-        | '\u{202F}' | '\u{205F}' | '\u{3000}'
+        | '\u{20}' | '\u{A0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}'
     )
 }
 

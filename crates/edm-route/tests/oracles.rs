@@ -15,12 +15,16 @@ use edm_route::round;
 use edm_route::single;
 use edm_route::watch::Watch;
 use support::{
-    Rng, all_simple_cycles, best_cycle_rate, brute_force_single_hops, geometry, graph_of,
-    limits, random_markets, ranking, ship,
+    Rng, all_simple_cycles, best_cycle_rate, brute_force_single_hops, geometry, graph_of, limits,
+    random_markets, ranking, ship,
 };
 
 /// Instances small enough that every simple cycle can be enumerated.
-fn instances(seeds: std::ops::Range<u64>, markets: usize, commodities: u32) -> Vec<Vec<edm_route::model::Market>> {
+fn instances(
+    seeds: std::ops::Range<u64>,
+    markets: usize,
+    commodities: u32,
+) -> Vec<Vec<edm_route::model::Market>> {
     seeds
         .map(|seed| {
             let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5bf0_3635);
@@ -38,11 +42,17 @@ fn the_free_loop_matches_brute_force_over_every_simple_cycle() {
         let found = ratio::max_ratio_cycle(&graph, Watch::unlimited()).map(|best| best.rate);
         assert_eq!(found, oracle, "instance of {} markets", markets.len());
         if let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) {
-            assert!(best.proved, "the free solver always terminates with a proof");
+            assert!(
+                best.proved,
+                "the free solver always terminates with a proof"
+            );
             checked += 1;
         }
     }
-    assert!(checked > 10, "the generator produced too few cyclic instances to prove anything");
+    assert!(
+        checked > 10,
+        "the generator produced too few cyclic instances to prove anything"
+    );
 }
 
 #[test]
@@ -93,9 +103,15 @@ fn the_bounded_optimum_is_monotone_in_the_cap_and_never_beats_the_free_one() {
             else {
                 continue;
             };
-            assert!(rate <= free, "a capped loop beat the uncapped optimum at k = {k}");
+            assert!(
+                rate <= free,
+                "a capped loop beat the uncapped optimum at k = {k}"
+            );
             if let Some(previous) = previous {
-                assert!(rate >= previous, "raising the cap lowered the optimum at k = {k}");
+                assert!(
+                    rate >= previous,
+                    "raising the cap lowered the optimum at k = {k}"
+                );
             }
             previous = Some(rate);
         }
@@ -147,9 +163,8 @@ fn the_minimum_distinct_search_matches_brute_force() {
         let graph = graph_of(&markets, &limits());
         for k_min in 2..=4usize {
             let oracle = best_cycle_rate(&graph, k_min..=markets.len());
-            let found =
-                distinct::best_with_min_stops(&graph, &limits(), k_min, Watch::unlimited())
-                    .map(|best| best.rate);
+            let found = distinct::best_with_min_stops(&graph, &limits(), k_min, Watch::unlimited())
+                .map(|best| best.rate);
             assert_eq!(found, oracle, "floor of {k_min}");
             if let Some(best) =
                 distinct::best_with_min_stops(&graph, &limits(), k_min, Watch::unlimited())
@@ -186,7 +201,9 @@ fn the_mediant_sandwich_holds() {
     // lies between the worst and the best single edge in the graph.
     for markets in instances(900..960, 7, 4) {
         let graph = graph_of(&markets, &limits());
-        let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) else { continue };
+        let Some(best) = ratio::max_ratio_cycle(&graph, Watch::unlimited()) else {
+            continue;
+        };
         let mut lowest: Option<Ratio> = None;
         let mut highest: Option<Ratio> = None;
         for (_, _, edge) in graph.edges() {
@@ -210,7 +227,12 @@ fn the_enumeration_oracle_finds_what_it_should() {
     // three-cycle, and the two-cycle the chord closes.
     let markets = [
         support::market(1, 0.0, &[(0, 100, 500), (3, 100, 500)], &[(2, 900, 500)]),
-        support::market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500), (3, 900, 500)]),
+        support::market(
+            2,
+            1.0,
+            &[(1, 100, 500), (2, 100, 500)],
+            &[(0, 900, 500), (3, 900, 500)],
+        ),
         support::market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
     ];
     let graph = graph_of(&markets, &limits());

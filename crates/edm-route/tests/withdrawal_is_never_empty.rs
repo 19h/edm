@@ -19,12 +19,12 @@
 use std::cell::RefCell;
 
 use edm_core::domain::id64::Coordinates;
+use edm_route::Wanted;
 use edm_route::model::{
     Commodities, IngestCounts, Limits, Market, MarketIdentity, RawCommodity, RowFloors, ShipConfig,
 };
 use edm_route::time::TimeModel;
 use edm_route::watch::{Event, Watch};
-use edm_route::Wanted;
 
 /// A directed three-ring: M0 supplies c0 and buys c2, M1 supplies c1 and buys
 /// c0, M2 supplies c2 and buys c1. Three edges, no reverse edge anywhere, so
@@ -70,7 +70,11 @@ fn ring() -> Vec<Market> {
                     station: format!("Station {i}"),
                     system: format!("System {i}"),
                     system_address: i,
-                    coords: Coordinates { x: i as f64 * 0.01, y: 0.0, z: 0.0 },
+                    coords: Coordinates {
+                        x: i as f64 * 0.01,
+                        y: 0.0,
+                        z: 0.0,
+                    },
                     arrival_ls: 0.0,
                 },
                 &rows,
@@ -105,7 +109,10 @@ fn withdrawal_matches_output(limits: &Limits, markets: &[Market]) {
         Watch::unlimited().until(&always).reporting(&sink),
     );
 
-    let withdrew = events.borrow().iter().any(|event| matches!(event, Event::Abandoned));
+    let withdrew = events
+        .borrow()
+        .iter()
+        .any(|event| matches!(event, Event::Abandoned));
     assert!(
         !(withdrew && solution.loops.is_empty()),
         "announced 'reporting the best route it had' and then reported none \
@@ -122,7 +129,13 @@ fn an_abandoned_ratio_search_with_no_two_cycle_does_not_announce_a_route() {
 
 #[test]
 fn an_abandoned_bounded_search_with_no_two_cycle_does_not_announce_a_route() {
-    withdrawal_matches_output(&Limits { max_stops: Some(4), ..Limits::default() }, &ring());
+    withdrawal_matches_output(
+        &Limits {
+            max_stops: Some(4),
+            ..Limits::default()
+        },
+        &ring(),
+    );
 }
 
 /// The `--min-distinct` path, which reaches the same contradiction on data that
@@ -130,5 +143,11 @@ fn an_abandoned_bounded_search_with_no_two_cycle_does_not_announce_a_route() {
 /// `best` is empty however ordinary the markets are.
 #[test]
 fn an_abandoned_distinct_search_does_not_announce_a_route_it_has_not_got() {
-    withdrawal_matches_output(&Limits { min_distinct: Some(3), ..Limits::default() }, &ring());
+    withdrawal_matches_output(
+        &Limits {
+            min_distinct: Some(3),
+            ..Limits::default()
+        },
+        &ring(),
+    );
 }

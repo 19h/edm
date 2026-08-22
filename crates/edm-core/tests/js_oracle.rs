@@ -18,8 +18,7 @@ fn fixture(name: &str) -> String {
 fn rows(body: &str) -> impl Iterator<Item = (usize, Vec<&str>)> {
     body.lines().enumerate().filter_map(|(i, line)| {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        (!line.is_empty() && !line.starts_with('#'))
-            .then(|| (i + 1, line.split('\t').collect()))
+        (!line.is_empty() && !line.starts_with('#')).then(|| (i + 1, line.split('\t').collect()))
     })
 }
 
@@ -40,7 +39,11 @@ impl Failures {
     const LIMIT: usize = 12;
 
     fn new(what: &'static str) -> Self {
-        Self { what, seen: Vec::new(), total: 0 }
+        Self {
+            what,
+            seen: Vec::new(),
+            total: 0,
+        }
     }
 
     fn check(&mut self, line: usize, input: &str, expected: &str, actual: &str) {
@@ -62,7 +65,11 @@ impl Failures {
             self.what,
             self.total,
             self.seen.join("\n"),
-            if self.total > Self::LIMIT { "\n  ..." } else { "" },
+            if self.total > Self::LIMIT {
+                "\n  ..."
+            } else {
+                ""
+            },
         );
     }
 }
@@ -142,14 +149,21 @@ fn whitespace_predicates_match_bun() {
     let mut n = 0;
     for (line, cols) in rows(&body) {
         let cp = u32::from_str_radix(cols[0], 16).expect("hex codepoint");
-        let Some(c) = char::from_u32(cp) else { continue };
+        let Some(c) = char::from_u32(cp) else {
+            continue;
+        };
         let sample = format!("{c}1{c}");
 
         let strips_trim = text::js_trim(&sample) == "1";
         trim.check(line, cols[0], cols[1], if strips_trim { "1" } else { "0" });
 
         let strips_number = js::to_number(&sample) == 1.0;
-        number.check(line, cols[0], cols[2], if strips_number { "1" } else { "0" });
+        number.check(
+            line,
+            cols[0],
+            cols[2],
+            if strips_number { "1" } else { "0" },
+        );
         n += 1;
     }
     trim.finish(n);
@@ -222,7 +236,12 @@ fn json_key_order_and_serialization_match_bun() {
 
         if let Some(object) = value.as_object() {
             let actual: Vec<&str> = object.iter().map(|(k, _)| k).collect();
-            keys.check(line, &doc, &want_keys.join("\u{1f}"), &actual.join("\u{1f}"));
+            keys.check(
+                line,
+                &doc,
+                &want_keys.join("\u{1f}"),
+                &actual.join("\u{1f}"),
+            );
         }
         compact.check(line, &doc, &want_compact, &value.stringify_compact());
         pretty.check(line, &doc, &want_pretty, &value.stringify(2));
@@ -242,10 +261,25 @@ fn array_index_boundary() {
         assert!(array_index(yes).is_some(), "{yes} should be an array index");
     }
     for no in [
-        "4294967295", "4294967296", "01", "007", "", "1.5", "1e3", "-1", "+1", " 1", "1 ",
-        "0x1", "١", "9007199254740993",
+        "4294967295",
+        "4294967296",
+        "01",
+        "007",
+        "",
+        "1.5",
+        "1e3",
+        "-1",
+        "+1",
+        " 1",
+        "1 ",
+        "0x1",
+        "١",
+        "9007199254740993",
     ] {
-        assert!(array_index(no).is_none(), "{no} should not be an array index");
+        assert!(
+            array_index(no).is_none(),
+            "{no} should not be an array index"
+        );
     }
 }
 
@@ -254,7 +288,10 @@ fn array_index_boundary() {
 #[test]
 fn integral_doubles_serialize_without_a_point() {
     let value = JsValue::parse(r#"{"meanPrice":123.0,"stock":0,"demand":1e3}"#).unwrap();
-    assert_eq!(value.stringify_compact(), r#"{"meanPrice":123,"stock":0,"demand":1000}"#);
+    assert_eq!(
+        value.stringify_compact(),
+        r#"{"meanPrice":123,"stock":0,"demand":1000}"#
+    );
 }
 
 fn render(chars: &[char]) -> String {
@@ -263,7 +300,10 @@ fn render(chars: &[char]) -> String {
 
 /// Minimal JSON string unescape, for the fixture's quoted inputs.
 fn unquote(s: &str) -> String {
-    let inner = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let inner = s
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(s);
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
     while let Some(c) = chars.next() {

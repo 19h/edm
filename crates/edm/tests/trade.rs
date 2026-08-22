@@ -12,8 +12,17 @@ fn http(trade_replies: Vec<Reply>) -> FakeHttp {
         .route("/2.0/elite/market/list", vec![sealed(&listing(10))])
 }
 
-const BUY_GOLD: [&str; 9] =
-    ["trade", "--market-id", "4306502403", "--type", "buy", "--item", "gold", "--qty", "5"];
+const BUY_GOLD: [&str; 9] = [
+    "trade",
+    "--market-id",
+    "4306502403",
+    "--type",
+    "buy",
+    "--item",
+    "gold",
+    "--qty",
+    "5",
+];
 
 const FILL: [&str; 10] = [
     "trade",
@@ -52,12 +61,28 @@ fn trading_end_to_end() {
     // R91/R94: the zero-quantity ladder ends the run before anything is sent,
     // and `derivePrice` gets there before the stock clamp does.
     let run = drive(
-        &["trade", "--market-id", "4306502403", "--type", "buy", "--item", "biowaste", "--qty", "5"],
+        &[
+            "trade",
+            "--market-id",
+            "4306502403",
+            "--type",
+            "buy",
+            "--item",
+            "biowaste",
+            "--qty",
+            "5",
+        ],
         &http(vec![]),
     );
     run.assert_exit(1);
-    assert_eq!(run.calls, ["GET https://api.orerve.net/2.0/elite/market/list"]);
-    assert_eq!(run.stderr, "Biowaste is not sold at this market (buyPrice 0)\n");
+    assert_eq!(
+        run.calls,
+        ["GET https://api.orerve.net/2.0/elite/market/list"]
+    );
+    assert_eq!(
+        run.stderr,
+        "Biowaste is not sold at this market (buyPrice 0)\n"
+    );
 
     // R74: the price lookup carries `ignoreDryRun`, so `--dry-run` still reads
     // the listing — and then prints the request without sending it.
@@ -65,8 +90,14 @@ fn trading_end_to_end() {
     dry.push("--dry-run");
     let run = drive(&dry, &http(vec![]));
     run.assert_exit(0);
-    assert_eq!(run.calls, ["GET https://api.orerve.net/2.0/elite/market/list"]);
-    assert!(run.stdout.contains("== REQUEST  PUT /2.0/elite/market/trade "));
+    assert_eq!(
+        run.calls,
+        ["GET https://api.orerve.net/2.0/elite/market/list"]
+    );
+    assert!(
+        run.stdout
+            .contains("== REQUEST  PUT /2.0/elite/market/trade ")
+    );
 
     // -- a batch fill -------------------------------------------------------
     // The first purchase fills the hold, so the second item is never reached
@@ -96,13 +127,27 @@ fn trading_end_to_end() {
         &FakeHttp::default().route("/2.0/elite/market/list", vec![sealed(&listing(10))]),
     );
     run.assert_exit(0);
-    assert_eq!(run.calls, ["GET https://api.orerve.net/2.0/elite/market/list"]);
+    assert_eq!(
+        run.calls,
+        ["GET https://api.orerve.net/2.0/elite/market/list"]
+    );
     assert!(run.stdout.contains("[1] would buy "));
     insta::assert_snapshot!("batch_dry_run", run.stdout);
 
     // Two guards `loadBatchSettings` applies before any request.
     let run = drive(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "a,b", "--qty", "1", "--fill"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "a,b",
+            "--qty",
+            "1",
+            "--fill",
+        ],
         &FakeHttp::default(),
     );
     run.assert_exit(1);
@@ -119,8 +164,14 @@ fn trading_end_to_end() {
 
     let leaked = drive(&json, &opaque());
     leaked.assert_exit(1);
-    assert!(leaked.stdout.contains("== PAYLOAD "), "the leak is the behaviour under test");
-    assert_eq!(leaked.stderr, "Market listing did not contain commodity data\n");
+    assert!(
+        leaked.stdout.contains("== PAYLOAD "),
+        "the leak is the behaviour under test"
+    );
+    assert_eq!(
+        leaked.stderr,
+        "Market listing did not contain commodity data\n"
+    );
 
     let strict = drive_with_env(
         &json,
@@ -128,6 +179,9 @@ fn trading_end_to_end() {
         vec![("EDM_STRICT_JSON".to_owned(), "1".to_owned())],
     );
     strict.assert_exit(1);
-    assert!(strict.stdout.is_empty(), "nothing may reach the JSON stream");
+    assert!(
+        strict.stdout.is_empty(),
+        "nothing may reach the JSON stream"
+    );
     assert!(strict.stderr.contains("== PAYLOAD "));
 }

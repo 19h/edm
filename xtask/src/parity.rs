@@ -105,7 +105,10 @@ pub(crate) fn run(options: &Options) -> Result<()> {
         .iter()
         .filter(|scenario| options.suite != Suite::Cli || !scenario.network)
         .filter(|scenario| {
-            options.filter.as_ref().is_none_or(|needle| scenario.name.contains(needle.as_str()))
+            options
+                .filter
+                .as_ref()
+                .is_none_or(|needle| scenario.name.contains(needle.as_str()))
         })
         .collect();
     if selected.is_empty() {
@@ -120,7 +123,10 @@ pub(crate) fn run(options: &Options) -> Result<()> {
 
     // A golden-only selection (`--filter route`) has nothing to ask Bun, so it
     // must not require Bun to be installed.
-    let bun = if selected.iter().any(|scenario| scenario.oracle == Oracle::Bun) {
+    let bun = if selected
+        .iter()
+        .any(|scenario| scenario.oracle == Oracle::Bun)
+    {
         Some(which("bun").context(
             "`bun` is not on PATH — the parity harness has nothing to measure against without it",
         )?)
@@ -135,7 +141,9 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     };
     // A port nothing is listening on: the `cli` suite must not reach a socket,
     // and if a scenario is mis-declared the connection failure will say so.
-    let base = mock.as_ref().map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
+    let base = mock
+        .as_ref()
+        .map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
 
     let work = root.join("target").join("xtask-parity");
     let _ = std::fs::remove_dir_all(&work);
@@ -145,8 +153,15 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     let mut passes = 0usize;
     for scenario in &selected {
         let started = Instant::now();
-        let mut report =
-            compare(scenario, &root, &work, bun.as_deref(), &binary, mock.as_ref(), &base)?;
+        let mut report = compare(
+            scenario,
+            &root,
+            &work,
+            bun.as_deref(),
+            &binary,
+            mock.as_ref(),
+            &base,
+        )?;
         // A registered divergence is asserted, not ignored: the row in
         // PORTING.md claims the two sides differ here, and a row that has
         // quietly become true again is a row that should be deleted.
@@ -157,7 +172,10 @@ pub(crate) fn run(options: &Options) -> Result<()> {
                      the register row is stale"
                 )]
             } else {
-                println!("        {row} holds: {}", report.join(" / ").replace('\n', " "));
+                println!(
+                    "        {row} holds: {}",
+                    report.join(" / ").replace('\n', " ")
+                );
                 Vec::new()
             };
         }
@@ -179,8 +197,16 @@ pub(crate) fn run(options: &Options) -> Result<()> {
         }
         println!();
     }
-    println!("{passes} passed, {} failed, {} total", failures.len(), selected.len());
-    if failures.is_empty() { Ok(()) } else { bail!("{} scenarios diverged", failures.len()) }
+    println!(
+        "{passes} passed, {} failed, {} total",
+        failures.len(),
+        selected.len()
+    );
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!("{} scenarios diverged", failures.len())
+    }
 }
 
 /// Runs one scenario on both sides and returns the differences, empty on parity.
@@ -200,7 +226,8 @@ fn compare(
     let bun_side = match scenario.oracle {
         Oracle::Bun => {
             let bun = bun.context("this scenario has an oracle but bun was never located")?;
-            let (side, notes) = ask_the_oracle(scenario, root, &dir, bun, mock, base, ordered_wire)?;
+            let (side, notes) =
+                ask_the_oracle(scenario, root, &dir, bun, mock, base, ordered_wire)?;
             problems.extend(notes);
             Some(side)
         }
@@ -211,7 +238,12 @@ fn compare(
 
     let rust_side = run_rust(scenario, root, &dir, binary, mock, base)?;
     let rust_observed = observe(mock, ordered_wire, &dir.join("rust"))?;
-    problems.extend(rust_observed.problems.into_iter().map(|note| format!("mock (rust): {note}")));
+    problems.extend(
+        rust_observed
+            .problems
+            .into_iter()
+            .map(|note| format!("mock (rust): {note}")),
+    );
     // Asserted on the Rust side alone, and deliberately: pacing is C27, a
     // divergence. The original has no pacer at all, so requiring a minimum gap
     // of Bun would be asserting the opposite of what the register records.
@@ -225,11 +257,17 @@ fn compare(
         problems.push("declared `network = false` but a request reached the mock".to_owned());
     }
 
-    let rust_side = Capture { wire: rust_observed.wire, ..rust_side };
+    let rust_side = Capture {
+        wire: rust_observed.wire,
+        ..rust_side
+    };
 
     let mut report = problems;
     if rust_side.timed_out {
-        report.push(format!("rust hit the {} s wall-clock limit", scenario.wall_clock_limit));
+        report.push(format!(
+            "rust hit the {} s wall-clock limit",
+            scenario.wall_clock_limit
+        ));
     }
 
     let Some(bun_side) = bun_side else {
@@ -237,7 +275,10 @@ fn compare(
         return Ok(report);
     };
     if bun_side.timed_out {
-        report.push(format!("bun hit the {} s wall-clock limit", scenario.wall_clock_limit));
+        report.push(format!(
+            "bun hit the {} s wall-clock limit",
+            scenario.wall_clock_limit
+        ));
     }
 
     if scenario.record_r86 {
@@ -246,7 +287,10 @@ fn compare(
 
     let multiset = scenario.order == Order::Multiset;
     if bun_side.code != rust_side.code {
-        report.push(format!("exit code: bun {} vs rust {}", bun_side.code, rust_side.code));
+        report.push(format!(
+            "exit code: bun {} vs rust {}",
+            bun_side.code, rust_side.code
+        ));
     }
     let bun_stdout = normalise_software_line(&normalise_side_dir(&bun_side.stdout, &bun_side.dir));
     let bun_stderr = normalise_software_line(&normalise_side_dir(&bun_side.stderr, &bun_side.dir));
@@ -258,10 +302,12 @@ fn compare(
         &canonicalise(&rust_side.stderr, base),
         &rust_side.dir,
     ));
-    if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, DIFFERENTIAL, multiset) {
+    if let Some(diff) = compare_stream("stdout", &bun_stdout, &rust_stdout, DIFFERENTIAL, multiset)
+    {
         report.push(diff);
     }
-    if let Some(diff) = compare_stream("stderr", &bun_stderr, &rust_stderr, DIFFERENTIAL, multiset) {
+    if let Some(diff) = compare_stream("stderr", &bun_stderr, &rust_stderr, DIFFERENTIAL, multiset)
+    {
         report.push(diff);
     }
     match (&bun_side.dump, &rust_side.dump) {
@@ -337,8 +383,18 @@ fn ask_the_oracle(
             .env("ARDENT_MODULE", ardent);
     })?;
     let observed = observe(mock, ordered_wire, &dir.join("bun"))?;
-    let notes = observed.problems.into_iter().map(|note| format!("mock (bun): {note}")).collect();
-    Ok((Capture { wire: observed.wire, ..side }, notes))
+    let notes = observed
+        .problems
+        .into_iter()
+        .map(|note| format!("mock (bun): {note}"))
+        .collect();
+    Ok((
+        Capture {
+            wire: observed.wire,
+            ..side
+        },
+        notes,
+    ))
 }
 
 /// Drains the mock into this side's artefacts.
@@ -349,7 +405,10 @@ fn ask_the_oracle(
 fn observe(mock: Option<&Mock>, ordered: bool, dir: &Path) -> Result<mock::Observed> {
     let observed = mock.map_or_else(mock::Observed::default, |mock| mock.observe(ordered));
     std::fs::write(dir.join("wire.txt"), &observed.wire)?;
-    std::fs::write(dir.join("timing.txt"), mock::format_timing(&observed.arrivals))?;
+    std::fs::write(
+        dir.join("timing.txt"),
+        mock::format_timing(&observed.arrivals),
+    )?;
     Ok(observed)
 }
 
@@ -416,8 +475,7 @@ fn against_goldens(
     for (label, actual) in golden_streams(rust, base) {
         let expected = std::fs::read(dir.join(label))
             .with_context(|| format!("reading the {label} golden"))?;
-        if let Some(diff) = compare_stream(label, &expected, &actual, ["golden", "rust"], false)
-        {
+        if let Some(diff) = compare_stream(label, &expected, &actual, ["golden", "rust"], false) {
             report.push(diff);
         }
     }
@@ -427,7 +485,10 @@ fn against_goldens(
         .parse()
         .context("the `exit` golden is not an integer")?;
     if expected != rust.code {
-        report.push(format!("exit code (golden): expected {expected}, got {}", rust.code));
+        report.push(format!(
+            "exit code (golden): expected {expected}, got {}",
+            rust.code
+        ));
     }
     if !report.is_empty() {
         report.push("re-bless with `cargo xtask bless --golden` if this is intended".to_owned());
@@ -442,15 +503,23 @@ fn against_goldens(
 /// this runs, the decision to overwrite has been taken.
 pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
     let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
-    let selected: Vec<&Scenario> =
-        scenarios.iter().filter(|scenario| scenario.oracle == Oracle::None).collect();
+    let selected: Vec<&Scenario> = scenarios
+        .iter()
+        .filter(|scenario| scenario.oracle == Oracle::None)
+        .collect();
     if selected.is_empty() {
         bail!("no scenario declares `oracle = \"none\"`, so there is nothing to bless");
     }
 
     let binary = build_rust_binary(root)?;
-    let mock = selected.iter().any(|scenario| scenario.network).then(Mock::start).transpose()?;
-    let base = mock.as_ref().map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
+    let mock = selected
+        .iter()
+        .any(|scenario| scenario.network)
+        .then(Mock::start)
+        .transpose()?;
+    let base = mock
+        .as_ref()
+        .map_or_else(|| "http://127.0.0.1:1".to_owned(), Mock::base_url);
     let work = root.join("target").join("xtask-golden");
     let _ = std::fs::remove_dir_all(&work);
 
@@ -516,12 +585,18 @@ fn run_rust(
     base: &str,
 ) -> Result<Capture> {
     let run = || {
-        execute(scenario, root, &dir.join("rust"), Command::new(binary), |command| {
-            command
-                .env("EDM_ORIGIN_OVERRIDE", base)
-                .env("EDM_ARDENT_BASE", format!("{base}/v2"))
-                .env("EDM_EDDN_URL", format!("{base}/upload/"));
-        })
+        execute(
+            scenario,
+            root,
+            &dir.join("rust"),
+            Command::new(binary),
+            |command| {
+                command
+                    .env("EDM_ORIGIN_OVERRIDE", base)
+                    .env("EDM_ARDENT_BASE", format!("{base}/v2"))
+                    .env("EDM_EDDN_URL", format!("{base}/upload/"));
+            },
+        )
     };
     if scenario.run_twice {
         if let Some(mock) = mock {
@@ -541,7 +616,10 @@ fn golden_streams(rust: &Capture, base: &str) -> [(&'static str, Vec<u8>); 2] {
     let clean = |bytes: &[u8]| {
         normalise_elapsed(&normalise_side_dir(&canonicalise(bytes, base), &rust.dir))
     };
-    [("stdout", clean(&rust.stdout)), ("stderr", clean(&rust.stderr))]
+    [
+        ("stdout", clean(&rust.stdout)),
+        ("stderr", clean(&rust.stderr)),
+    ]
 }
 
 /// Masks the coverage table's `elapsed` value.
@@ -553,7 +631,9 @@ fn golden_streams(rust: &Capture, base: &str) -> [(&'static str, Vec<u8>); 2] {
 /// this program formats is left in place and will diff, which keeps the
 /// rendering under test while the number is not.
 fn normalise_elapsed(bytes: &[u8]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
     let mut out = String::with_capacity(text.len());
     for (index, line) in text.split_inclusive('\n').enumerate() {
         if index > 0 {
@@ -592,7 +672,11 @@ fn elapsed_seconds_field(line: &str) -> Option<(&str, &str, &str)> {
     let rest = &line[at..];
     let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
     let value = rest[..end].trim_ascii();
-    if value.is_empty() || !value.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
+    if value.is_empty()
+        || !value
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == '-')
+    {
         return None;
     }
     Some((&line[..at], &line[at..at + end], &line[at + end..]))
@@ -612,9 +696,12 @@ fn elapsed_cell(line: &str) -> Option<(&str, &str, &str)> {
     let cell = &trimmed[middle + 1..close];
     let value = cell.trim_matches(' ');
     // Only a duration this program formats: `4s`, `2m 5s`, `1h 30m`.
-    let formatted = value
-        .split(' ')
-        .all(|part| part.ends_with(['s', 'm', 'h']) && part[..part.len() - 1].chars().all(|c| c.is_ascii_digit() || c == ','));
+    let formatted = value.split(' ').all(|part| {
+        part.ends_with(['s', 'm', 'h'])
+            && part[..part.len() - 1]
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == ',')
+    });
     if value.is_empty() || !formatted {
         return None;
     }
@@ -623,7 +710,10 @@ fn elapsed_cell(line: &str) -> Option<(&str, &str, &str)> {
 }
 
 fn golden_dir(root: &Path, name: &str) -> PathBuf {
-    root.join("xtask").join("scenarios").join("golden").join(name)
+    root.join("xtask")
+        .join("scenarios")
+        .join("golden")
+        .join(name)
 }
 
 /// Spawns one side, with the environment scrubbed down to what the scenario
@@ -645,7 +735,11 @@ fn execute(
     let stderr_path = dir.join("stderr");
 
     for token in &scenario.argv {
-        let token = if token == "{dump}" { dump_path.as_os_str().to_owned() } else { OsString::from(token) };
+        let token = if token == "{dump}" {
+            dump_path.as_os_str().to_owned()
+        } else {
+            OsString::from(token)
+        };
         command.arg(token);
     }
 
@@ -681,7 +775,9 @@ fn execute(
         .stdout(Stdio::from(std::fs::File::create(&stdout_path)?))
         .stderr(Stdio::from(std::fs::File::create(&stderr_path)?));
 
-    let mut child = command.spawn().context("spawning a side of the comparison")?;
+    let mut child = command
+        .spawn()
+        .context("spawning a side of the comparison")?;
     let deadline = Instant::now() + Duration::from_secs(scenario.wall_clock_limit);
     let (code, timed_out) = loop {
         if let Some(status) = child.try_wait()? {
@@ -699,7 +795,10 @@ fn execute(
         stdout: std::fs::read(&stdout_path)?,
         stderr: std::fs::read(&stderr_path)?,
         code,
-        dump: scenario.dump.then(|| std::fs::read(&dump_path).ok()).flatten(),
+        dump: scenario
+            .dump
+            .then(|| std::fs::read(&dump_path).ok())
+            .flatten(),
         wire: String::new(),
         timed_out,
         dir: dir.to_string_lossy().into_owned(),
@@ -714,7 +813,9 @@ fn execute(
 /// is a narrower change than rewriting the TypeScript's constants would be, and
 /// it is unambiguous: the three profiles occupy disjoint path prefixes.
 fn canonicalise(bytes: &[u8], base: &str) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(index) = rest.find(base) {
@@ -739,7 +840,9 @@ fn canonicalise(bytes: &[u8], base: &str) -> Vec<u8> {
 /// differs for a reason that is entirely the harness's doing. Everything else
 /// about the dump — its contents, its reported length — is still diffed.
 fn normalise_side_dir(bytes: &[u8], dir: &str) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
     text.replace(dir, "<OUTDIR>").into_bytes()
 }
 
@@ -754,7 +857,9 @@ fn normalise_side_dir(bytes: &[u8], dir: &str) -> Vec<u8> {
 /// including the lines either side of this one, so the mask cannot hide a
 /// second change.
 fn normalise_software_line(bytes: &[u8]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
         // The exact indented prefix: `str::trim_start` is banned here \[R25\],
@@ -797,10 +902,13 @@ fn normalise_timestamps(text: &str) -> String {
 fn is_iso_instant(value: &str) -> bool {
     let shape = b"0000-00-00T00:00:00.000Z";
     value.len() == shape.len()
-        && value.bytes().zip(shape).all(|(byte, pattern)| match pattern {
-            b'0' => byte.is_ascii_digit(),
-            other => byte == *other,
-        })
+        && value
+            .bytes()
+            .zip(shape)
+            .all(|(byte, pattern)| match pattern {
+                b'0' => byte.is_ascii_digit(),
+                other => byte == *other,
+            })
 }
 
 /// Diffs two streams, naming which side each line came from.
@@ -819,8 +927,10 @@ fn compare_stream(
     let width = sides[0].len().max(sides[1].len());
     if multiset {
         let bag = |bytes: &[u8]| -> Vec<String> {
-            let mut lines: Vec<String> =
-                String::from_utf8_lossy(bytes).lines().map(str::to_owned).collect();
+            let mut lines: Vec<String> = String::from_utf8_lossy(bytes)
+                .lines()
+                .map(str::to_owned)
+                .collect();
             lines.sort();
             lines
         };
@@ -842,9 +952,14 @@ fn compare_stream(
     if left == right {
         return None;
     }
-    let left_lines: Vec<&str> = std::str::from_utf8(left).unwrap_or("<non-UTF-8>").lines().collect();
-    let right_lines: Vec<&str> =
-        std::str::from_utf8(right).unwrap_or("<non-UTF-8>").lines().collect();
+    let left_lines: Vec<&str> = std::str::from_utf8(left)
+        .unwrap_or("<non-UTF-8>")
+        .lines()
+        .collect();
+    let right_lines: Vec<&str> = std::str::from_utf8(right)
+        .unwrap_or("<non-UTF-8>")
+        .lines()
+        .collect();
     let first = left_lines
         .iter()
         .zip(&right_lines)
@@ -862,8 +977,12 @@ fn compare_stream(
             (None, None) => break,
             (left, right) => {
                 let number = index + 1;
-                let _ =
-                    write!(out, "\n    {:<width$} {number}| {}", sides[0], left.unwrap_or(&"<eof>"));
+                let _ = write!(
+                    out,
+                    "\n    {:<width$} {number}| {}",
+                    sides[0],
+                    left.unwrap_or(&"<eof>")
+                );
                 let _ = write!(
                     out,
                     "\n    {:<width$} {number}| {}",
@@ -888,7 +1007,11 @@ fn record_r86(root: &Path, bun: &Capture) -> Result<()> {
     let text = String::from_utf8_lossy(&bun.stdout);
     let observed = text
         .lines()
-        .chain(String::from_utf8_lossy(&bun.stderr).lines().collect::<Vec<_>>())
+        .chain(
+            String::from_utf8_lossy(&bun.stderr)
+                .lines()
+                .collect::<Vec<_>>(),
+        )
         .find_map(|line| {
             if line.contains("aborted (timeout)") {
                 Some("aborted (timeout)")
@@ -900,7 +1023,10 @@ fn record_r86(root: &Path, bun: &Capture) -> Result<()> {
         })
         .unwrap_or("<neither wording appeared>");
 
-    let path = root.join("xtask").join("fixtures").join("r86-timeout-wording.txt");
+    let path = root
+        .join("xtask")
+        .join("fixtures")
+        .join("r86-timeout-wording.txt");
     std::fs::create_dir_all(path.parent().unwrap_or(root))?;
     std::fs::write(
         &path,
@@ -926,8 +1052,8 @@ fn build_rust_binary(root: &Path) -> Result<PathBuf> {
     if !status.success() {
         bail!("cargo build -p edm failed");
     }
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map_or_else(|| root.join("target"), PathBuf::from);
+    let target =
+        std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
     let binary = target.join("debug").join("edm");
     if !binary.exists() {
         bail!("built, but {} is missing", binary.display());
@@ -958,8 +1084,14 @@ mod tests {
              eddn {base}/upload/\nunrouted {base}/nope\n"
         );
         let out = String::from_utf8(canonicalise(input.as_bytes(), base)).unwrap();
-        assert!(out.contains("https://api.orerve.net/2.0/elite/market/list?abc"), "{out}");
-        assert!(out.contains("https://api.ardent-insight.com/v2/system/name/Sol"), "{out}");
+        assert!(
+            out.contains("https://api.orerve.net/2.0/elite/market/list?abc"),
+            "{out}"
+        );
+        assert!(
+            out.contains("https://api.ardent-insight.com/v2/system/name/Sol"),
+            "{out}"
+        );
         assert!(out.contains("https://eddn.edcd.io:4430/upload/"), "{out}");
         assert!(out.contains("unrouted http://127.0.0.1:4321/nope"), "{out}");
     }
@@ -993,7 +1125,10 @@ mod tests {
     fn arrivals(millis: &[u128]) -> Vec<mock::Arrival> {
         millis
             .iter()
-            .map(|millis| mock::Arrival { profile: Profile::Frontier, millis: *millis })
+            .map(|millis| mock::Arrival {
+                profile: Profile::Frontier,
+                millis: *millis,
+            })
             .collect()
     }
 

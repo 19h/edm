@@ -30,13 +30,21 @@ pub fn document(
     obj(vec![
         ("coverage", coverage),
         ("single", routes(&solution.single, markets, commodities)),
-        ("roundTrip", routes(&solution.round_trip, markets, commodities)),
+        (
+            "roundTrip",
+            routes(&solution.round_trip, markets, commodities),
+        ),
         ("loops", routes(&solution.loops, markets, commodities)),
     ])
 }
 
 fn routes(routes: &[Route], markets: &[Market], commodities: &Commodities) -> JsValue {
-    JsValue::Arr(routes.iter().map(|route| one(route, markets, commodities)).collect())
+    JsValue::Arr(
+        routes
+            .iter()
+            .map(|route| one(route, markets, commodities))
+            .collect(),
+    )
 }
 
 fn one(route: &Route, markets: &[Market], commodities: &Commodities) -> JsValue {
@@ -54,14 +62,23 @@ fn one(route: &Route, markets: &[Market], commodities: &Commodities) -> JsValue 
             obj(vec![
                 (
                     "creditsPerHour",
-                    claim.steady.map_or(JsValue::Null, |steady| num(steady.credits_per_hour_floor())),
+                    claim
+                        .steady
+                        .map_or(JsValue::Null, |steady| num(steady.credits_per_hour_floor())),
                 ),
-                ("firstLapCreditsPerHour", num(claim.first_lap.credits_per_hour_floor())),
+                (
+                    "firstLapCreditsPerHour",
+                    num(claim.first_lap.credits_per_hour_floor()),
+                ),
                 ("guarantee", guarantee(claim.guarantee)),
                 (
                     "caveats",
                     JsValue::Arr(
-                        claim.caveats.iter().map(|c| JsValue::Str(caveat(*c).into())).collect(),
+                        claim
+                            .caveats
+                            .iter()
+                            .map(|c| JsValue::Str(caveat(*c).into()))
+                            .collect(),
                     ),
                 ),
             ]),
@@ -86,7 +103,10 @@ fn one(route: &Route, markets: &[Market], commodities: &Commodities) -> JsValue 
                             ("buyPrice", num(leg.choice.buy_price.0)),
                             ("sellPrice", num(leg.choice.sell_price.0)),
                             ("profit", num(leg.choice.profit.0)),
-                            ("limitedBy", JsValue::Str(limiter(leg.choice.limiter).into())),
+                            (
+                                "limitedBy",
+                                JsValue::Str(limiter(leg.choice.limiter).into()),
+                            ),
                             ("distanceLy", JsValue::Num(leg.distance_ly)),
                             ("millis", num(leg.millis.0)),
                             ("demandAssumed", JsValue::Bool(leg.choice.demand_assumed)),
@@ -122,15 +142,17 @@ fn station(markets: &[Market], index: u32) -> JsValue {
 /// A guarantee, with its parameter where it has one.
 fn guarantee(guarantee: Guarantee) -> JsValue {
     match guarantee {
-        Guarantee::ProvedOptimal => {
-            obj(vec![("kind", JsValue::Str("provedOptimal".into()))])
-        }
-        Guarantee::OptimalForStartingCredits => {
-            obj(vec![("kind", JsValue::Str("optimalForStartingCredits".into()))])
-        }
+        Guarantee::ProvedOptimal => obj(vec![("kind", JsValue::Str("provedOptimal".into()))]),
+        Guarantee::OptimalForStartingCredits => obj(vec![(
+            "kind",
+            JsValue::Str("optimalForStartingCredits".into()),
+        )]),
         Guarantee::BoundedGap { upper } => obj(vec![
             ("kind", JsValue::Str("boundedGap".into())),
-            ("upperCreditsPerHour", num(Ratio::credits_per_hour_floor(upper))),
+            (
+                "upperCreditsPerHour",
+                num(Ratio::credits_per_hour_floor(upper)),
+            ),
         ]),
         Guarantee::Heuristic { reason } => obj(vec![
             ("kind", JsValue::Str("heuristic".into())),
@@ -182,7 +204,10 @@ fn num(value: i64) -> JsValue {
 
 fn obj(fields: Vec<(&str, JsValue)>) -> JsValue {
     JsValue::Obj(JsObject::from_document_order(
-        fields.into_iter().map(|(key, value)| (key.into(), value)).collect(),
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.into(), value))
+            .collect(),
     ))
 }
 
@@ -198,9 +223,14 @@ mod tests {
         let JsValue::Obj(document) = one(&route, &[], &Commodities::new()) else {
             panic!("an object")
         };
-        let Some(JsValue::Obj(rate)) = document.get("rate") else { panic!("a rate object") };
+        let Some(JsValue::Obj(rate)) = document.get("rate") else {
+            panic!("a rate object")
+        };
         assert!(rate.get("creditsPerHour").is_some());
-        assert!(rate.get("guarantee").is_some(), "the guarantee travels with the rate");
+        assert!(
+            rate.get("guarantee").is_some(),
+            "the guarantee travels with the rate"
+        );
         assert!(rate.get("caveats").is_some(), "and so do the caveats");
     }
 
@@ -215,7 +245,9 @@ mod tests {
         };
         let text = document(&solution, &[], &Commodities::new(), JsValue::Null).stringify(2);
         let parsed = JsValue::parse(&text).expect("one well-formed document");
-        let JsValue::Obj(root) = parsed else { panic!("an object") };
+        let JsValue::Obj(root) = parsed else {
+            panic!("an object")
+        };
         for key in ["coverage", "single", "roundTrip", "loops"] {
             assert!(root.get(key).is_some(), "missing {key}");
         }
@@ -259,17 +291,22 @@ mod tests {
         let JsValue::Obj(document) = one(&route, &[], &Commodities::new()) else {
             panic!("route object")
         };
-        let Some(JsValue::Arr(legs)) = document.get("legs") else { panic!("legs") };
-        let JsValue::Obj(first) = &legs[0] else { panic!("first leg") };
+        let Some(JsValue::Arr(legs)) = document.get("legs") else {
+            panic!("legs")
+        };
+        let JsValue::Obj(first) = &legs[0] else {
+            panic!("first leg")
+        };
         assert_eq!(
             first.get("priceProvenance").and_then(JsValue::as_str),
             Some("empiricalBulkEstimate")
         );
-        let JsValue::Obj(second) = &legs[1] else { panic!("second leg") };
+        let JsValue::Obj(second) = &legs[1] else {
+            panic!("second leg")
+        };
         assert_eq!(
             second.get("priceProvenance").and_then(JsValue::as_str),
             Some("verifiedListing")
         );
     }
-
 }

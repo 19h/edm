@@ -18,15 +18,15 @@ use edm_core::domain::starsystem::read_market_points;
 use edm_core::js;
 use edm_core::js::json::JsValue;
 
-use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::exchange::SendOptions;
+use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::net::HttpTransport;
 use crate::out::Out;
 use crate::ports::{Clock, Entropy, Fs, Timer};
 use crate::route::cache::{Cache, Hits};
-use crate::route::relay::{self, Relayed};
 use crate::route::pacer::Pacer;
 use crate::route::pool::{self, Abandoned, Job, Outcome, Pool};
+use crate::route::relay::{self, Relayed};
 use crate::sweep::next_stamp;
 
 /// `commodities not currently available at this market`.
@@ -82,7 +82,9 @@ pub struct Eddn<'a> {
 
 impl std::fmt::Debug for Eddn<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Eddn").field("url", &self.url).finish_non_exhaustive()
+        f.debug_struct("Eddn")
+            .field("url", &self.url)
+            .finish_non_exhaustive()
     }
 }
 
@@ -171,13 +173,11 @@ pub struct Prepared {
 }
 
 /// Consult the cache for every selected market.
-pub fn prepare<F: Fs>(
-    cache: &Cache,
-    fs: &F,
-    markets: &[ArdentStation],
-    now_ms: f64,
-) -> Prepared {
-    let mut prepared = Prepared { cached: Vec::with_capacity(markets.len()), ..Prepared::default() };
+pub fn prepare<F: Fs>(cache: &Cache, fs: &F, markets: &[ArdentStation], now_ms: f64) -> Prepared {
+    let mut prepared = Prepared {
+        cached: Vec::with_capacity(markets.len()),
+        ..Prepared::default()
+    };
     for market in markets {
         let lookup = cache.get(fs, market.market_id, now_ms);
         match lookup {
@@ -239,7 +239,11 @@ where
     F: Fs,
     T: Timer,
 {
-    let Prepared { cached: mut listings, mut to_poll, hits } = prepared;
+    let Prepared {
+        cached: mut listings,
+        mut to_poll,
+        hits,
+    } = prepared;
 
     // A cached listing is never relayed — it was read at some earlier instant,
     // and republishing it would stamp that old reading with the current time.
@@ -279,7 +283,10 @@ where
         to_poll.clear();
         listings.clear();
         for (name, address) in systems {
-            to_poll.push(Job::System { name: name.clone(), address: *address });
+            to_poll.push(Job::System {
+                name: name.clone(),
+                address: *address,
+            });
         }
         let fresh = RefCell::new(Vec::<Listing>::new());
         let pool = Pool {
@@ -295,16 +302,24 @@ where
             async move {
                 match job {
                     Job::System { name, address } => read_system(cx, &name, address).await,
-                    Job::Market { market_id, station, system } => {
-                        poll(cx, market_id, &station, &system, fresh).await
-                    }
+                    Job::Market {
+                        market_id,
+                        station,
+                        system,
+                    } => poll(cx, market_id, &station, &system, fresh).await,
                 }
             }
         })
         .await;
         let mut found = fresh.into_inner();
         found.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
-        return Acquired { listings: found, unreached, cache: hits, tally, relayed: cx.relayed.borrow().clone() };
+        return Acquired {
+            listings: found,
+            unreached,
+            cache: hits,
+            tally,
+            relayed: cx.relayed.borrow().clone(),
+        };
     }
 
     let fresh = RefCell::new(Vec::<Listing>::new());
@@ -319,7 +334,12 @@ where
     let (tally, unreached) = pool::run(&pool, to_poll, |job| {
         let fresh = &fresh;
         async move {
-            let Job::Market { market_id, station, system } = job else {
+            let Job::Market {
+                market_id,
+                station,
+                system,
+            } = job
+            else {
                 // The sweep seeds market jobs only; a system job here would be
                 // a programming error, not a runtime condition.
                 return Outcome::default();
@@ -334,15 +354,17 @@ where
     // runs over the same region rank identically.
     listings.sort_by(|a, b| a.market_id.total_cmp(&b.market_id));
 
-    Acquired { listings, unreached, cache: hits, tally, relayed: cx.relayed.borrow().clone() }
+    Acquired {
+        listings,
+        unreached,
+        cache: hits,
+        tally,
+        relayed: cx.relayed.borrow().clone(),
+    }
 }
 
 /// One `starsystem` read, whose market list becomes the pool's next stage.
-async fn read_system<H, C, E, F, T>(
-    cx: &Cx<'_, H, C, E, F, T>,
-    name: &str,
-    address: f64,
-) -> Outcome
+async fn read_system<H, C, E, F, T>(cx: &Cx<'_, H, C, E, F, T>, name: &str, address: f64) -> Outcome
 where
     H: HttpTransport,
     C: Clock,
@@ -361,7 +383,13 @@ where
         cx.origin,
         STARSYSTEM,
         cx.method_override,
-        game_api::starsystem_fields(address, cx.language, 0.0, cx.credentials, stamp.frontier_time),
+        game_api::starsystem_fields(
+            address,
+            cx.language,
+            0.0,
+            cx.credentials,
+            stamp.frontier_time,
+        ),
         stamp,
         cx.headers,
     );
@@ -370,22 +398,42 @@ where
         cx.out,
         &request,
         false,
-        SendOptions { quiet: true, ignore_dry_run: false },
+        SendOptions {
+            quiet: true,
+            ignore_dry_run: false,
+        },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),
     )
     .await;
 
     let Some(exchange) = exchange else {
-        return Outcome { status: None, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: None,
+            ok: false,
+            ..Outcome::default()
+        };
     };
     let retry_after = exchange.headers.get("retry-after");
     if !(200..300).contains(&exchange.status) {
-        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: Some(exchange.status),
+            retry_after,
+            ok: false,
+            ..Outcome::default()
+        };
     }
-    let document = exchange.decrypted.as_deref().and_then(|text| JsValue::parse(text).ok());
+    let document = exchange
+        .decrypted
+        .as_deref()
+        .and_then(|text| JsValue::parse(text).ok());
     let Some(JsValue::Obj(payload)) = document else {
-        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: Some(exchange.status),
+            retry_after,
+            ok: false,
+            ..Outcome::default()
+        };
     };
 
     let follow_on = read_market_points(&payload)
@@ -396,7 +444,14 @@ where
             system: name.to_owned(),
         })
         .collect();
-    Outcome { status: Some(exchange.status), retry_after, ok: true, absent: false, tradable: None, follow_on }
+    Outcome {
+        status: Some(exchange.status),
+        retry_after,
+        ok: true,
+        absent: false,
+        tradable: None,
+        follow_on,
+    }
 }
 
 /// One market poll.
@@ -425,7 +480,11 @@ where
         cx.origin,
         MARKET_LIST,
         cx.method_override,
-        game_api::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
+        game_api::list_fields(
+            &js::js_number(market_id),
+            cx.credentials,
+            stamp.frontier_time,
+        ),
         stamp,
         cx.headers,
     );
@@ -439,7 +498,10 @@ where
         cx.out,
         &request,
         false,
-        SendOptions { quiet: true, ignore_dry_run: false },
+        SendOptions {
+            quiet: true,
+            ignore_dry_run: false,
+        },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),
     )
@@ -448,7 +510,11 @@ where
     let Some(exchange) = exchange else {
         // No status at all: a transport failure or a timeout, which
         // `is_transient_status` treats as worth retrying.
-        return Outcome { status: None, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: None,
+            ok: false,
+            ..Outcome::default()
+        };
     };
 
     let retry_after = exchange.headers.get("retry-after");
@@ -471,14 +537,24 @@ where
         };
     }
     if !(200..300).contains(&exchange.status) {
-        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: Some(exchange.status),
+            retry_after,
+            ok: false,
+            ..Outcome::default()
+        };
     }
 
     let Some(document) = document else {
         // A 200 that does not decrypt to a market listing is not a success.
         // Treating it as one would put an empty market in the graph and rank a
         // route through it as unprofitable rather than as unread.
-        return Outcome { status: Some(exchange.status), retry_after, ok: false, ..Outcome::default() };
+        return Outcome {
+            status: Some(exchange.status),
+            retry_after,
+            ok: false,
+            ..Outcome::default()
+        };
     };
     let tradable = Some(tradable_rows(&document));
 
@@ -574,7 +650,6 @@ async fn publish<H, C, E, F, T>(
         )
     };
 
-
     // Wait for EDDN's own bucket, reserved then released before the await —
     // the same discipline `Pacer::acquire` uses and for the same reason.
     let at_ms = {
@@ -634,7 +709,6 @@ fn tradable_rows(document: &JsValue) -> usize {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,7 +730,11 @@ mod tests {
             station_type: Some("Orbis".to_owned()),
             max_landing_pad_size: Some(3.0),
             distance_to_arrival: Some(500.0),
-            coordinates: Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+            coordinates: Coordinates {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
         };
 
         let prepared = prepare(&cache, &fs, &[station], 2_000.0);

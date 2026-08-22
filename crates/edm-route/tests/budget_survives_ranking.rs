@@ -14,13 +14,13 @@
 //! have read a route 19% below the optimum as an ordinary runner-up.
 
 use edm_core::domain::id64::Coordinates;
+use edm_route::Wanted;
 use edm_route::model::{
     Commodities, IngestCounts, Limits, Market, MarketIdentity, RawCommodity, RowFloors, ShipConfig,
 };
 use edm_route::report::{Guarantee, HeuristicReason};
 use edm_route::time::TimeModel;
 use edm_route::watch::Watch;
-use edm_route::Wanted;
 
 /// Twenty-four stations in a ring, each supplying its own commodity and paying
 /// most for its successor's — so the optimum is a long cycle the warm start
@@ -63,7 +63,11 @@ fn ring() -> Vec<Market> {
                     station: format!("Station {i}"),
                     system: format!("System {i}"),
                     system_address: i,
-                    coords: Coordinates { x: i as f64 * 0.01, y: 0.0, z: 0.0 },
+                    coords: Coordinates {
+                        x: i as f64 * 0.01,
+                        y: 0.0,
+                        z: 0.0,
+                    },
                     arrival_ls: 0.0,
                 },
                 &rows,
@@ -76,7 +80,10 @@ fn ring() -> Vec<Market> {
 }
 
 fn ship() -> ShipConfig {
-    ShipConfig { cargo: edm_route::num::Tons(500), credits: edm_route::num::Credits(1_000_000_000_000) }
+    ShipConfig {
+        cargo: edm_route::num::Tons(500),
+        credits: edm_route::num::Credits(1_000_000_000_000),
+    }
 }
 
 #[test]
@@ -113,14 +120,19 @@ fn an_abandoned_search_says_so_on_every_route_it_returns() {
         Wanted::all(),
         Watch::unlimited().until(&always),
     );
-    assert!(!stopped.loops.is_empty(), "an abandoned search still reports what it holds");
+    assert!(
+        !stopped.loops.is_empty(),
+        "an abandoned search still reports what it holds"
+    );
 
     // The claim survives re-ranking and truncation, on *every* row — not just
     // on a head that the sort has since buried.
     for (index, route) in stopped.loops.iter().enumerate() {
         assert_eq!(
             route.guarantee,
-            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted },
+            Guarantee::Heuristic {
+                reason: HeuristicReason::SearchBudgetExhausted
+            },
             "route {index} of an abandoned search claims {:?}",
             route.guarantee
         );
@@ -128,8 +140,14 @@ fn an_abandoned_search_says_so_on_every_route_it_returns() {
 
     // And it is a weaker answer than the proved one, which is the whole reason
     // the label has to survive: without it this reads as an ordinary ranking.
-    let best_proved = proved.loops[0].rate().steady.expect("a loop has a steady rate");
-    let best_stopped = stopped.loops[0].rate().steady.expect("a loop has a steady rate");
+    let best_proved = proved.loops[0]
+        .rate()
+        .steady
+        .expect("a loop has a steady rate");
+    let best_stopped = stopped.loops[0]
+        .rate()
+        .steady
+        .expect("a loop has a steady rate");
     assert!(
         best_stopped < best_proved,
         "the abandoned search should be worse: {best_stopped:?} vs {best_proved:?}"

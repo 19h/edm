@@ -57,18 +57,28 @@ fn parse_errors_match_the_original() {
             // Not every exit-2 case is a parse error: an unknown *command*
             // parses fine and is rejected by the dispatcher.
             Ok(args) => {
-                let is_command_rejection =
-                    expected.starts_with("Unknown command ") && !cli::is_known_command(&args.command);
+                let is_command_rejection = expected.starts_with("Unknown command ")
+                    && !cli::is_known_command(&args.command);
                 if !is_command_rejection {
-                    failures.push(format!("  {}: parsed, but bun said {expected:?}", case.name));
+                    failures.push(format!(
+                        "  {}: parsed, but bun said {expected:?}",
+                        case.name
+                    ));
                 }
             }
         }
         checked += 1;
     }
 
-    assert!(checked >= 10, "expected a meaningful parse-error corpus, got {checked}");
-    assert!(failures.is_empty(), "{checked} cases:\n{}", failures.join("\n"));
+    assert!(
+        checked >= 10,
+        "expected a meaningful parse-error corpus, got {checked}"
+    );
+    assert!(
+        failures.is_empty(),
+        "{checked} cases:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// `--help` and the `help` command both succeed, whatever else is on the line.
@@ -79,8 +89,11 @@ fn help_always_wins() {
         let args = cli::parse(&case.argv)
             .unwrap_or_else(|e| panic!("{} should parse, got {e}", case.name));
         let wants_help = args.command == "help"
-            || matches!(cli::Cli::new(&args, &cli::EnvSnapshot::empty())
-                .switch_value(cli::Flag::Help, false), Ok(true));
+            || matches!(
+                cli::Cli::new(&args, &cli::EnvSnapshot::empty())
+                    .switch_value(cli::Flag::Help, false),
+                Ok(true)
+            );
         assert!(wants_help, "{} should have asked for help", case.name);
     }
 }

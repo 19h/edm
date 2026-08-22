@@ -22,9 +22,9 @@
 
 pub mod access;
 pub mod config;
+pub mod feed;
 pub mod flag;
 pub mod parse;
-pub mod feed;
 pub mod route_usage;
 pub mod usage;
 pub mod vendor;
@@ -72,6 +72,16 @@ pub struct Parsed {
     pub base: Result<Args, ArgError>,
     /// `Some` only when the extended parse succeeded and named an extension.
     pub route: Option<Args>,
+    /// The extended table's own complaint, when argv opens with an extension
+    /// command and that reading failed.
+    ///
+    /// Without it, `edm route --quick --radius 200` reports `Unknown option
+    /// --quick`, which is false: `--quick` is a route option that was simply
+    /// given no value. The base table cannot say so — route-only names are
+    /// invisible to it by construction \[C26\] — so the base error is the
+    /// wrong answer to print, in the same way and for the same reason that
+    /// `parsed.route` is consulted before it.
+    pub misread: Option<ArgError>,
 }
 
 /// Parses against both tables and decides which reading governs.
@@ -86,8 +96,86 @@ pub struct Parsed {
 /// accepted it.
 #[must_use]
 pub fn parse_dispatch(argv: &[String]) -> Parsed {
-    let route = parse_with(argv, Table::Extended)
+    let extended = parse_with(argv, Table::Extended);
+    // Keyed on the *first token* rather than on the parsed command, because
+    // there is no parsed command when the parse failed. That under-fires —
+    // `edm --json route --quick` keeps the base message — and never over-fires,
+    // which is the direction that matters: a leading bare word is always the
+    // command, so a ported command's argv can never reach this and no pinned
+    // message can change.
+    let misread = match (&extended, argv.first()) {
+        (Err(error), Some(first)) if is_extended_command(&first.to_ascii_lowercase()) => {
+            Some(error.clone())
+        }
+        _ => None,
+    };
+    let route = extended
         .ok()
         .filter(|args| is_extended_command(&args.command));
-    Parsed { base: parse(argv), route }
+    Parsed {
+        base: parse(argv),
+        route,
+        misread,
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    fn argv(tokens: &[&str]) -> Vec<String> {
+        tokens.iter().map(|token| (*token).to_owned()).collect()
+    }
+
+    /// A route-only flag left without its value used to be reported as unknown,
+    /// which is the one thing it is not. The base table cannot see route names
+    /// at all [C26], so its error is the wrong reading of this argv.
+    #[test]
+    fn a_route_flag_missing_its_value_is_not_reported_as_unknown() {
+        for tokens in [
+            &["route", "--quick", "--radius", "200", "--eddn", "FROG"][..],
+            &["route", "--radius", "--top", "5", "Sol"][..],
+            &["vendor", "--radius", "--json"][..],
+        ] {
+            let parsed = parse_dispatch(&argv(tokens));
+            assert!(
+                parsed.route.is_none(),
+                "{tokens:?} does not parse as an extension"
+            );
+            let misread = parsed
+                .misread
+                .expect("the extended reading explains itself");
+            assert!(
+                misread.to_string().ends_with("requires a value"),
+                "{tokens:?}: {misread}"
+            );
+        }
+    }
+
+    /// And a name that really is unknown keeps saying so, in both tables.
+    #[test]
+    fn an_unknown_name_is_still_unknown_under_either_table() {
+        let parsed = parse_dispatch(&argv(&["route", "--bogus", "5", "Sol"]));
+        assert_eq!(
+            parsed.misread.map(|error| error.to_string()),
+            Some("Unknown option --bogus".to_owned())
+        );
+    }
+
+    /// The guard is the leading token, so no ported command's message can move.
+    /// `market` is not an extension, so its base error stands whatever the
+    /// extended table would have made of the same argv.
+    #[test]
+    fn a_ported_commands_message_is_never_replaced() {
+        for tokens in [
+            &["market", "--radius", "--top", "5"][..],
+            &["market", "--bogus"][..],
+            &["trade", "--qty"][..],
+        ] {
+            assert!(
+                parse_dispatch(&argv(tokens)).misread.is_none(),
+                "{tokens:?} is a ported command line"
+            );
+        }
+    }
 }

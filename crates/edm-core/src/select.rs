@@ -70,6 +70,22 @@ const REASONS: [Reason; 5] = [
     Reason::BeyondTheRadius,
 ];
 
+/// Where a label belongs in the report order above.
+///
+/// A caller that runs the filter more than once — `--quick` selects a price
+/// prefix per commodity and per side — has to merge several ledgers, and
+/// merging in encounter order would print them in whatever order the data
+/// happened to trigger them, contradicting the promise that the list reads as
+/// the order the filters ran. A label this module does not own sorts last,
+/// which is where a filter applied after these ones belongs.
+#[must_use]
+pub fn exclusion_rank(label: &str) -> usize {
+    REASONS
+        .iter()
+        .position(|reason| reason.describe().0 == label)
+        .unwrap_or(REASONS.len())
+}
+
 /// A station type that is an on-foot settlement.
 ///
 /// Matched on the prefix because the Odyssey types are a family —
@@ -92,7 +108,11 @@ pub fn is_settlement(station_type: Option<&str>) -> bool {
 /// coordinates were never filled carries `NaN` and fails the radius test — the
 /// direction that costs an answer rather than a wrong one.
 #[must_use]
-pub fn select(stations: Vec<ArdentStation>, config: &RouteConfig, centre: &Coordinates) -> Selection {
+pub fn select(
+    stations: Vec<ArdentStation>,
+    config: &RouteConfig,
+    centre: &Coordinates,
+) -> Selection {
     let considered = stations.len();
     let mut removed = [0usize; REASONS.len()];
     let mut keep = Vec::with_capacity(considered);
@@ -115,11 +135,19 @@ pub fn select(stations: Vec<ArdentStation>, config: &RouteConfig, centre: &Coord
         .filter(|(_, count)| *count > 0)
         .map(|(reason, count)| {
             let (label, keep_with) = reason.describe();
-            Exclusion { label, removed: count, keep_with }
+            Exclusion {
+                label,
+                removed: count,
+                keep_with,
+            }
         })
         .collect();
 
-    Selection { keep, exclusions, considered }
+    Selection {
+        keep,
+        exclusions,
+        considered,
+    }
 }
 
 /// The first reason this station is not worth a request, or `None` to keep it.
@@ -171,7 +199,9 @@ fn reject(station: &ArdentStation, config: &RouteConfig, centre: &Coordinates) -
 fn allowed_type(kind: Option<&str>, config: &RouteConfig) -> bool {
     if let Some(allowed) = &config.station_types {
         return kind.is_some_and(|kind| {
-            allowed.iter().any(|wanted| wanted.eq_ignore_ascii_case(kind))
+            allowed
+                .iter()
+                .any(|wanted| wanted.eq_ignore_ascii_case(kind))
         });
     }
     // The opt-in switches are themselves explicit type admissions. Previously
@@ -223,7 +253,11 @@ mod tests {
         }
     }
 
-    const ORIGIN: Coordinates = Coordinates { x: 0.0, y: 0.0, z: 0.0 };
+    const ORIGIN: Coordinates = Coordinates {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
 
     /// The headline: settlements and carriers go, starports stay, and every
     /// removal is named with the flag that undoes it.
@@ -267,7 +301,11 @@ mod tests {
             at("Outpost", 4.0),
             at("Coriolis", 999.0),
         ];
-        let selection = select(stations, &config(&["route", "Sol", "--radius", "30"]), &ORIGIN);
+        let selection = select(
+            stations,
+            &config(&["route", "Sol", "--radius", "30"]),
+            &ORIGIN,
+        );
 
         let dropped: usize = selection.exclusions.iter().map(|e| e.removed).sum();
         assert_eq!(dropped + selection.keep.len(), selection.considered);
@@ -280,7 +318,10 @@ mod tests {
         let stations = vec![at("Outpost", 1.0), at("OnFootSettlement", 2.0)];
 
         let large = select(stations.clone(), &config(&["route", "Sol"]), &ORIGIN);
-        assert!(large.keep.is_empty(), "an outpost cannot berth a large ship");
+        assert!(
+            large.keep.is_empty(),
+            "an outpost cannot berth a large ship"
+        );
 
         let medium = select(stations, &config(&["route", "Sol", "--pad", "M"]), &ORIGIN);
         assert_eq!(medium.keep.len(), 1, "the outpost is now usable");
@@ -295,7 +336,11 @@ mod tests {
     #[test]
     fn an_unplaced_station_is_excluded_rather_than_placed_at_the_origin() {
         let mut station = at("Coriolis", 1.0);
-        station.coordinates = Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN };
+        station.coordinates = Coordinates {
+            x: f64::NAN,
+            y: f64::NAN,
+            z: f64::NAN,
+        };
 
         let selection = select(vec![station], &config(&["route", "Sol"]), &ORIGIN);
 
@@ -324,8 +369,11 @@ mod tests {
     fn an_explicit_type_list_replaces_the_default() {
         let stations = vec![at("Coriolis", 1.0), at("Outpost", 2.0), at("MegaShip", 3.0)];
 
-        let selection =
-            select(stations, &config(&["route", "Sol", "--station-types", "outpost,megaship"]), &ORIGIN);
+        let selection = select(
+            stations,
+            &config(&["route", "Sol", "--station-types", "outpost,megaship"]),
+            &ORIGIN,
+        );
 
         assert_eq!(selection.keep.len(), 2);
         assert_eq!(selection.keep[0].station_type.as_deref(), Some("Outpost"));
@@ -336,7 +384,11 @@ mod tests {
     /// outside the radius.
     #[test]
     fn a_station_is_counted_once_under_its_first_reason() {
-        let selection = select(vec![at("FleetCarrier", 999.0)], &config(&["route", "Sol"]), &ORIGIN);
+        let selection = select(
+            vec![at("FleetCarrier", 999.0)],
+            &config(&["route", "Sol"]),
+            &ORIGIN,
+        );
 
         assert_eq!(selection.exclusions.len(), 1);
         assert_eq!(selection.exclusions[0].label, "fleet carriers");
@@ -347,13 +399,21 @@ mod tests {
     /// route that cannot be flown.
     #[test]
     fn the_settlement_test_covers_the_family() {
-        for kind in ["OnFootSettlement", "onfootsettlement", "SurfaceSettlement", "OnFoot"] {
+        for kind in [
+            "OnFootSettlement",
+            "onfootsettlement",
+            "SurfaceSettlement",
+            "OnFoot",
+        ] {
             assert!(is_settlement(Some(kind)), "{kind}");
         }
         for kind in ["Coriolis", "Outpost", "PlanetaryPort", "CraterPort"] {
             assert!(!is_settlement(Some(kind)), "{kind}");
         }
-        assert!(!is_settlement(None), "an unreported type is not a settlement");
+        assert!(
+            !is_settlement(None),
+            "an unreported type is not a settlement"
+        );
     }
 
     /// Opting a type in must survive both halves of the filter. These switches
@@ -380,7 +440,9 @@ mod tests {
             &config(&["route", "Sol", "--settlements"]),
             &ORIGIN,
         );
-        assert!(too_large.keep.is_empty(), "the default large ship cannot use a settlement");
+        assert!(
+            too_large.keep.is_empty(),
+            "the default large ship cannot use a settlement"
+        );
     }
-
 }

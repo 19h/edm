@@ -3,23 +3,23 @@ enumerating systems within 10 Ly of Sol...
 3 systems; reading their market lists (16 at a time)...
   3 / 3 systems read, 4 stations found
 == ROUTE PLAN ======================================================================================
-+-------------------------+----------------------------------------------+
-| Field                   | Value                                        |
-+=========================+==============================================+
-| reference               | Sol                                          |
-| radius                  | 10 Ly (complete, 1 Ardent query)             |
-| systems                 | 3 in radius                                  |
-| stations known          | 4 (Ardent)                                   |
-|   - Odyssey settlements | -1   (--settlements to keep)                 |
-|   - fleet carriers      | -1   (--include-carriers to keep)            |
-| markets to poll         | 0                                            |
-| cached and still fresh  | 2                                            |
-| game-internal API requests           | 0  (one per market)                          |
-| estimated transfer      | 0-0 KB  (prior: 500 KB/system, 20 KB/market) |
-| pacing                  | 8 req/s                                      |
-| estimated wall clock    | 0s                                           |
-| ceiling                 | 0 of 2,000   (--max-requests to raise)       |
-+-------------------------+----------------------------------------------+
++----------------------------+----------------------------------------------+
+| Field                      | Value                                        |
++============================+==============================================+
+| reference                  | Sol                                          |
+| radius                     | 10 Ly (complete, 1 Ardent query)             |
+| systems                    | 3 in radius                                  |
+| stations known             | 4 (Ardent)                                   |
+|   - Odyssey settlements    | -1   (--settlements to keep)                 |
+|   - fleet carriers         | -1   (--include-carriers to keep)            |
+| markets to poll            | 0                                            |
+| cached and still fresh     | 2                                            |
+| game-internal API requests | 0  (one per market)                          |
+| estimated transfer         | 0-0 KB  (prior: 500 KB/system, 20 KB/market) |
+| pacing                     | 8 req/s                                      |
+| estimated wall clock       | 0s                                           |
+| ceiling                    | 0 of 2,000   (--max-requests to raise)       |
++----------------------------+----------------------------------------------+
 [1/2] Galileo (Sol)  cached  2 tradable
 [2/2] Titan City (Sol)  cached  2 tradable
 == ROUTE COVERAGE ==================================================================================

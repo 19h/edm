@@ -86,7 +86,9 @@ impl Args {
 
     /// Iterates the populated slots in [`Flag`] discriminant order.
     pub fn iter(&self) -> impl Iterator<Item = (Flag, &Value)> {
-        Flag::ALL.iter().filter_map(|&flag| self.get(flag).map(|value| (flag, value)))
+        Flag::ALL
+            .iter()
+            .filter_map(|&flag| self.get(flag).map(|value| (flag, value)))
     }
 }
 
@@ -216,7 +218,11 @@ pub fn parse_with(argv: &[String], table: Table) -> Result<Args, ArgError> {
 
     Ok(Args {
         // `command || "market"` (`game-internal-api.ts:954`).
-        command: if command.is_empty() { "market".to_owned() } else { command },
+        command: if command.is_empty() {
+            "market".to_owned()
+        } else {
+            command
+        },
         slots,
         positionals,
     })

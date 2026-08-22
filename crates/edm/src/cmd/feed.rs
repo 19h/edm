@@ -73,13 +73,17 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     note(format!(
         "resolving {} {} through Ardent ({} at a time)...",
         js::format_integer(config.targets.len() as f64),
-        if config.targets.len() == 1 { "target" } else { "targets" },
+        if config.targets.len() == 1 {
+            "target"
+        } else {
+            "targets"
+        },
         js::format_integer(ARDENT_CONCURRENCY as f64),
     ));
     // A counter rewritten in place: 629 lines of "resolved X" is not a progress
     // report, it is the output.
-    let resolve_report = (!config.quiet).then_some(
-        move |done: usize, total: usize, found: usize| {
+    let resolve_report =
+        (!config.quiet).then_some(move |done: usize, total: usize, found: usize| {
             if done.is_multiple_of(32) || done == total {
                 out.progress(&format!(
                     "  {} / {} targets resolved, {} markets found",
@@ -88,8 +92,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                     js::format_integer(found as f64),
                 ));
             }
-        },
-    );
+        });
     let (stations, skipped) = resolve(
         &ardent,
         &atlas,
@@ -112,7 +115,10 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             Skip::NoMarkets => note(format!("{} has no markets", skip.target)),
             Skip::Unknown => {
                 failed += 1;
-                out.error(&format!("Ardent has no system or market called \"{}\"", skip.target));
+                out.error(&format!(
+                    "Ardent has no system or market called \"{}\"",
+                    skip.target
+                ));
             }
             Skip::Failed(why) => {
                 failed += 1;
@@ -153,7 +159,10 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let relayed = Relayed::new(cache.root(), config.eddn_max_age_minutes);
     let options = edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials)
         .map_err(|error| error.message().to_owned())?;
-    let options = edm_core::domain::eddn::EddnOptions { test: config.test, ..options };
+    let options = edm_core::domain::eddn::EddnOptions {
+        test: config.test,
+        ..options
+    };
 
     let stamp_overrides = app.stamp_overrides()?;
     let query = edm_core::cli::config::starsystem_query(
@@ -236,8 +245,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         verify_systems: false,
         language: &query.language,
         report: (!config.quiet).then_some(&report as crate::route::pool::Report<'_>),
-        trace: (config.verbose && !config.quiet)
-            .then_some(&trace as crate::route::pool::Trace<'_>),
+        trace: (config.verbose && !config.quiet).then_some(&trace as crate::route::pool::Trace<'_>),
         total,
     };
 
@@ -271,26 +279,31 @@ fn summary(
 ) -> Vec<edm_core::render::Block<'static>> {
     use edm_core::render::views::{EddnCoverage, RouteCoverage};
 
-    let mut blocks = edm_core::render::views::coverage_titled("EDDN IMPORT", &RouteCoverage {
-        ranked: false,
-        eddn_refusal: acquired.relayed.first_refusal.clone(),
-        markets_found: acquired.listings.len() + acquired.unreached.len() + acquired.tally.markets_absent,
-        markets_polled: acquired.listings.len(),
-        markets_priced: acquired.listings.len(),
-        markets_failed: acquired.unreached.len(),
-        markets_absent: acquired.tally.markets_absent,
-        eddn: Some(EddnCoverage {
-            sent: acquired.relayed.sent,
-            failed: acquired.relayed.failed,
-            recent: acquired.relayed.recent,
-            cached: acquired.relayed.cached,
-            unnamed: acquired.relayed.unnamed,
-            abandoned: acquired.relayed.abandoned,
-        }),
-        requests_sent: spent.requests,
-        throttled: spent.throttled,
-        ..RouteCoverage::default()
-    });
+    let mut blocks = edm_core::render::views::coverage_titled(
+        "EDDN IMPORT",
+        &RouteCoverage {
+            ranked: false,
+            eddn_refusal: acquired.relayed.first_refusal.clone(),
+            markets_found: acquired.listings.len()
+                + acquired.unreached.len()
+                + acquired.tally.markets_absent,
+            markets_polled: acquired.listings.len(),
+            markets_priced: acquired.listings.len(),
+            markets_failed: acquired.unreached.len(),
+            markets_absent: acquired.tally.markets_absent,
+            eddn: Some(EddnCoverage {
+                sent: acquired.relayed.sent,
+                failed: acquired.relayed.failed,
+                recent: acquired.relayed.recent,
+                cached: acquired.relayed.cached,
+                unnamed: acquired.relayed.unnamed,
+                abandoned: acquired.relayed.abandoned,
+            }),
+            requests_sent: spent.requests,
+            throttled: spent.throttled,
+            ..RouteCoverage::default()
+        },
+    );
     if test {
         blocks.push(edm_core::render::Block::Note(
             "sent to the test schema: the gateway accepts these and does not relay them onward"
@@ -384,7 +397,10 @@ async fn resolve<H: HttpTransport, F: Fs>(
     for (target, answer) in targets.iter().zip(answers) {
         match answer {
             Ok(mut found) => stations.append(&mut found),
-            Err(why) => skipped.push(Skipped { target: label(target), why }),
+            Err(why) => skipped.push(Skipped {
+                target: label(target),
+                why,
+            }),
         }
     }
 
@@ -423,7 +439,11 @@ async fn resolve_one<H: HttpTransport, F: Fs>(
                 max_landing_pad_size: None,
                 distance_to_arrival: None,
                 // Never read: nothing here filters by distance.
-                coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
+                coordinates: Coordinates {
+                    x: f64::NAN,
+                    y: f64::NAN,
+                    z: f64::NAN,
+                },
             }]),
             // `station_by_market_id` swallows every failure alike \[R81\], so
             // this is the one place the three cases cannot be told apart — and
@@ -434,9 +454,16 @@ async fn resolve_one<H: HttpTransport, F: Fs>(
             let reference = edm_core::ardent::ReferenceSystem {
                 name: name.clone(),
                 address: 0.0,
-                coordinates: Coordinates { x: f64::NAN, y: f64::NAN, z: f64::NAN },
+                coordinates: Coordinates {
+                    x: f64::NAN,
+                    y: f64::NAN,
+                    z: f64::NAN,
+                },
             };
-            match ardent.system_markets_cached_status(atlas, fs, now_ms, &reference).await {
+            match ardent
+                .system_markets_cached_status(atlas, fs, now_ms, &reference)
+                .await
+            {
                 Ok(found) if !found.is_empty() => Ok(found),
                 Ok(_) => Err(Skip::NoMarkets),
                 // The status itself, not a substring of the message: 404 is
@@ -462,7 +489,10 @@ fn pacing(config: &FeedConfig) -> Pacing {
             min_rate: js::js_min(config.rate_per_second, 0.5),
         },
         budget: Budget {
-            per_job_ms: js::js_min(Budget::default().per_job_ms, config.deadline_seconds * 1000.0),
+            per_job_ms: js::js_min(
+                Budget::default().per_job_ms,
+                config.deadline_seconds * 1000.0,
+            ),
             run_deadline_ms: config.deadline_seconds * 1000.0,
             ..Budget::default()
         },

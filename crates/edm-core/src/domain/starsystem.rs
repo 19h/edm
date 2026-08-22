@@ -124,14 +124,24 @@ fn normalise_poi_type(raw: &str) -> Option<&'static str> {
 }
 
 /// Display order for the type bands: places you can dock and trade at first.
-pub const POI_TYPE_ORDER: [&str; 7] =
-    ["starport", "outpost", "planetary", "settlement", "megaship", "poi", "carrier"];
+pub const POI_TYPE_ORDER: [&str; 7] = [
+    "starport",
+    "outpost",
+    "planetary",
+    "settlement",
+    "megaship",
+    "poi",
+    "carrier",
+];
 
 /// Sort key for a type band. Unknown types sort after every known one, then
 /// alphabetically among themselves.
 #[must_use]
 pub fn poi_type_rank(kind: &str) -> usize {
-    POI_TYPE_ORDER.iter().position(|k| *k == kind).unwrap_or(POI_TYPE_ORDER.len())
+    POI_TYPE_ORDER
+        .iter()
+        .position(|k| *k == kind)
+        .unwrap_or(POI_TYPE_ORDER.len())
 }
 
 /// The economy with the largest proportion, first one winning a tie.
@@ -139,7 +149,9 @@ fn primary_economy(market: &JsObject) -> Option<&str> {
     let economies = market.record("economies")?;
     let mut best: Option<(&str, f64)> = None;
     for (_, entry) in economies.iter() {
-        let Some(record) = entry.as_record() else { continue };
+        let Some(record) = entry.as_record() else {
+            continue;
+        };
         let name = record.string("name");
         let proportion = record.num("proportion");
         if !name.is_empty() && best.is_none_or(|(_, top)| proportion > top) {
@@ -197,14 +209,24 @@ fn lookup_faction<'a>(factions: &'a JsObject, id: Option<&JsValue>) -> Option<&'
 /// `readMarketPoints` (ts:2715).
 #[must_use]
 pub fn read_market_points(payload: &JsObject) -> Vec<MarketPoint<'_>> {
-    let Some(outer) = payload.record("starsystem") else { return Vec::new() };
-    let Some(polities) = outer.record("polities") else { return Vec::new() };
-    let factions = outer.record("starsystem").and_then(|core| core.record("minorFactions"));
+    let Some(outer) = payload.record("starsystem") else {
+        return Vec::new();
+    };
+    let Some(polities) = outer.record("polities") else {
+        return Vec::new();
+    };
+    let factions = outer
+        .record("starsystem")
+        .and_then(|core| core.record("minorFactions"));
 
     let mut points = Vec::new();
     for (_, polity_value) in polities.iter() {
-        let Some(polity) = polity_value.as_record() else { continue };
-        let Some(markets) = polity.record("markets") else { continue };
+        let Some(polity) = polity_value.as_record() else {
+            continue;
+        };
+        let Some(markets) = polity.record("markets") else {
+            continue;
+        };
 
         let faction = factions
             .and_then(|f| lookup_faction(f, polity.get("controllingMinorFaction")))
@@ -212,7 +234,9 @@ pub fn read_market_points(payload: &JsObject) -> Vec<MarketPoint<'_>> {
             .filter(|name| !name.is_empty());
 
         for (key, value) in markets.iter() {
-            let Some(market) = value.as_record() else { continue };
+            let Some(market) = value.as_record() else {
+                continue;
+            };
             // Only two fallbacks here, where `toCommodity` has three — so a
             // key that is not numeric leaves this as NaN and the guard below
             // drops the market. R16.
@@ -273,12 +297,30 @@ pub struct PointOfInterest<'a> {
 }
 
 const MARKET_ID_KEYS: [&str; 3] = ["marketid", "market_id", "marketids"];
-const NAME_KEYS: [&str; 6] =
-    ["name", "stationname", "station_name", "marketname", "portname", "settlementname"];
-const TYPE_KEYS: [&str; 6] = ["type", "stationtype", "station_type", "porttype", "subtype", "kind"];
+const NAME_KEYS: [&str; 6] = [
+    "name",
+    "stationname",
+    "station_name",
+    "marketname",
+    "portname",
+    "settlementname",
+];
+const TYPE_KEYS: [&str; 6] = [
+    "type",
+    "stationtype",
+    "station_type",
+    "porttype",
+    "subtype",
+    "kind",
+];
 const ECONOMY_KEYS: [&str; 4] = ["economy", "primaryeconomy", "economyname", "economy_name"];
-const FACTION_KEYS: [&str; 5] =
-    ["faction", "controllingfaction", "minorfaction", "owner", "ownername"];
+const FACTION_KEYS: [&str; 5] = [
+    "faction",
+    "controllingfaction",
+    "minorfaction",
+    "owner",
+    "ownername",
+];
 
 /// Keys lowercased once per record, as `lowerKeys` (ts:2546) does.
 struct LowerKeys<'a>(Vec<(String, &'a JsValue)>);
@@ -346,7 +388,9 @@ fn walk<'a>(
         }
         return;
     }
-    let Some(record) = value.as_record() else { return };
+    let Some(record) = value.as_record() else {
+        return;
+    };
 
     let fields = LowerKeys::of(record);
     let market_id = fields.pick_number(&MARKET_ID_KEYS);
@@ -363,9 +407,17 @@ fn walk<'a>(
                 || fields.has("dockingaccess")
                 || kind.is_some_and(|k| {
                     let lower = k.to_ascii_lowercase();
-                    ["station", "port", "settlement", "outpost", "carrier", "hub", "dock"]
-                        .iter()
-                        .any(|needle| lower.contains(needle))
+                    [
+                        "station",
+                        "port",
+                        "settlement",
+                        "outpost",
+                        "carrier",
+                        "hub",
+                        "dock",
+                    ]
+                    .iter()
+                    .any(|needle| lower.contains(needle))
                 })));
 
     if looks_like_port && let Some(name) = name {
@@ -389,7 +441,11 @@ fn walk<'a>(
     }
 
     for (key, child) in record.iter() {
-        let child_path = if path.is_empty() { key.to_owned() } else { format!("{path}.{key}") };
+        let child_path = if path.is_empty() {
+            key.to_owned()
+        } else {
+            format!("{path}.{key}")
+        };
         walk(child, &child_path, depth + 1, found);
     }
 }

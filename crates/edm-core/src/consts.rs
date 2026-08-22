@@ -14,24 +14,43 @@ pub struct Endpoint {
 
 /// The verbs come from the game's own `methodCode` values: 1 = GET, 3 = PUT.
 /// `trade` answers `Allow: PUT, OPTIONS`, and a GET there is rejected with 405.
-pub const MARKET_LIST: Endpoint = Endpoint { path: "/2.0/elite/market/list", method: "GET" };
-pub const MARKET_TRADE: Endpoint = Endpoint { path: "/2.0/elite/market/trade", method: "PUT" };
+pub const MARKET_LIST: Endpoint = Endpoint {
+    path: "/2.0/elite/market/list",
+    method: "GET",
+};
+pub const MARKET_TRADE: Endpoint = Endpoint {
+    path: "/2.0/elite/market/trade",
+    method: "PUT",
+};
 /// Read-only Pioneer Supplies and bartender inventory for one market.
-pub const VENDOR_ITEMS: Endpoint =
-    Endpoint { path: "/2.0/elite/vendors/items", method: "GET" };
-pub const STARSYSTEM: Endpoint = Endpoint { path: "/2.0/elite/starsystem", method: "GET" };
+pub const VENDOR_ITEMS: Endpoint = Endpoint {
+    path: "/2.0/elite/vendors/items",
+    method: "GET",
+};
+pub const STARSYSTEM: Endpoint = Endpoint {
+    path: "/2.0/elite/starsystem",
+    method: "GET",
+};
 /// Read-only bulk market metadata and candidate prices, keyed by system address.
-pub const STARSYSTEM_MARKETDATA: Endpoint =
-    Endpoint { path: "/2.0/elite/starsystem/marketdata", method: "GET" };
+pub const STARSYSTEM_MARKETDATA: Endpoint = Endpoint {
+    path: "/2.0/elite/starsystem/marketdata",
+    method: "GET",
+};
 /// Read-only paged snapshot of populated-system topology and status.
-pub const STARSYSTEM_DAILY_DIGEST: Endpoint =
-    Endpoint { path: "/2.0/elite/starsystem/dailydigest_part", method: "GET" };
+pub const STARSYSTEM_DAILY_DIGEST: Endpoint = Endpoint {
+    path: "/2.0/elite/starsystem/dailydigest_part",
+    method: "GET",
+};
 /// Read-only server-side market discovery limits and cache policy.
-pub const RESOURCE_FINANCE: Endpoint =
-    Endpoint { path: "/2.0/elite/resources/finance", method: "GET" };
+pub const RESOURCE_FINANCE: Endpoint = Endpoint {
+    path: "/2.0/elite/resources/finance",
+    method: "GET",
+};
 /// Read-only canonical commodity catalogue.
-pub const RESOURCE_COMMODITIES: Endpoint =
-    Endpoint { path: "/2.0/elite/resources/commodities", method: "GET" };
+pub const RESOURCE_COMMODITIES: Endpoint = Endpoint {
+    path: "/2.0/elite/resources/commodities",
+    method: "GET",
+};
 
 /// Frontier's own client batches five system addresses per marketdata request.
 pub const MARKETDATA_BATCH_MAX: usize = 5;

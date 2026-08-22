@@ -32,7 +32,11 @@ pub enum Job {
     /// Read a system's `starsystem` payload.
     System { name: String, address: f64 },
     /// Read one market's listing.
-    Market { market_id: f64, station: String, system: String },
+    Market {
+        market_id: f64,
+        station: String,
+        system: String,
+    },
 }
 
 impl Job {
@@ -170,7 +174,10 @@ struct Ticket {
 /// The return is the tally plus every job that was given up on. Those are the
 /// markets the coverage table must name: absent from the ranking because they
 /// were never read, not because they ranked low.
-#[expect(clippy::too_many_lines, reason = "the retirement invariant spans the loop")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the retirement invariant spans the loop"
+)]
 pub async fn run<C, T, E, F, Fut>(
     pool: &Pool<'_, C, T, E>,
     seed: Vec<Job>,
@@ -190,7 +197,11 @@ where
     let queued = seed.len();
     let (tx, rx) = async_channel::unbounded::<Ticket>();
     for job in seed {
-        let _ = tx.try_send(Ticket { job, attempts: 0, first_attempt_ms: f64::NAN });
+        let _ = tx.try_send(Ticket {
+            job,
+            attempts: 0,
+            first_attempt_ms: f64::NAN,
+        });
     }
 
     // INVARIANT, as in `sweep`: `outstanding` counts queued plus held-by-a-
@@ -239,7 +250,9 @@ where
                 if let Some(reason) = pool.pacer.tripped() {
                     if let (Some(trace), 0) = (pool.trace, tally.borrow().abandoned) {
                         // Once, on the first job to find the breaker open.
-                        trace(&PaceEvent::BreakerTripped { reason: &format!("{reason:?}") });
+                        trace(&PaceEvent::BreakerTripped {
+                            reason: &format!("{reason:?}"),
+                        });
                     }
                     tally.borrow_mut().abandoned += 1;
                     count_failure(tally, &ticket.job);
@@ -349,9 +362,22 @@ where
                 // counter never dips through zero between a system landing and
                 // its markets being queued — which would close the channel with
                 // work still to do.
-                let Outcome { follow_on, status, retry_after, ok, tradable, absent } = outcome;
-                let outcome =
-                    Outcome { status, retry_after, ok, tradable, absent, follow_on: Vec::new() };
+                let Outcome {
+                    follow_on,
+                    status,
+                    retry_after,
+                    ok,
+                    tradable,
+                    absent,
+                } = outcome;
+                let outcome = Outcome {
+                    status,
+                    retry_after,
+                    ok,
+                    tradable,
+                    absent,
+                    follow_on: Vec::new(),
+                };
                 for next in follow_on {
                     outstanding.set(outstanding.get() + 1);
                     let _ = tx.try_send(Ticket {
@@ -431,12 +457,19 @@ mod tests {
         names
             .iter()
             .enumerate()
-            .map(|(n, name)| Job::System { name: (*name).to_owned(), address: n as f64 })
+            .map(|(n, name)| Job::System {
+                name: (*name).to_owned(),
+                address: n as f64,
+            })
             .collect()
     }
 
     fn market(id: f64, station: &str, system: &str) -> Job {
-        Job::Market { market_id: id, station: station.to_owned(), system: system.to_owned() }
+        Job::Market {
+            market_id: id,
+            station: station.to_owned(),
+            system: system.to_owned(),
+        }
     }
 
     struct Bed {
@@ -449,7 +482,10 @@ mod tests {
     impl Default for Bed {
         fn default() -> Self {
             Self {
-                clock: FixedClock { now_ms: 0.0, uptime_seconds: 0.0 },
+                clock: FixedClock {
+                    now_ms: 0.0,
+                    uptime_seconds: 0.0,
+                },
                 timer: RecordingTimer::default(),
                 entropy: CountingEntropy::default(),
                 out: Out::capturing(200, Metric::Utf16, false),
@@ -465,21 +501,45 @@ mod tests {
     fn follow_on_work_keeps_the_queue_open() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 4,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
         let seen = RefCell::new(Vec::<String>::new());
 
         let (tally, abandoned) = block_on(run(&pool, systems(&["Sol"]), |job| {
             seen.borrow_mut().push(job.label().to_owned());
             let follow_on = match job {
                 Job::System { .. } => {
-                    vec![market(1.0, "Abraham Lincoln", "Sol"), market(2.0, "Galileo", "Sol")]
+                    vec![
+                        market(1.0, "Abraham Lincoln", "Sol"),
+                        market(2.0, "Galileo", "Sol"),
+                    ]
                 }
                 Job::Market { .. } => Vec::new(),
             };
-            async move { Outcome { status: Some(200), ok: true, follow_on, ..Outcome::default() } }
+            async move {
+                Outcome {
+                    status: Some(200),
+                    ok: true,
+                    follow_on,
+                    ..Outcome::default()
+                }
+            }
         }));
 
-        assert_eq!(tally, Tally { systems_read: 1, markets_polled: 2, ..Tally::default() });
+        assert_eq!(
+            tally,
+            Tally {
+                systems_read: 1,
+                markets_polled: 2,
+                ..Tally::default()
+            }
+        );
         assert!(abandoned.is_empty());
         assert_eq!(seen.borrow().len(), 3);
     }
@@ -496,11 +556,22 @@ mod tests {
                 hard_attempts: 3,
                 run_deadline_ms: 1e9,
             },
-            breaker: Breaker { window: 100, threshold: 1.1, ..Breaker::default() },
+            breaker: Breaker {
+                window: 100,
+                threshold: 1.1,
+                ..Breaker::default()
+            },
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 2, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 2,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
         let tries = Cell::new(0usize);
 
         let (tally, abandoned) = block_on(run(
@@ -508,7 +579,13 @@ mod tests {
             vec![market(7.0, "Sisyphus Dock", "Nowhere")],
             |_| {
                 tries.set(tries.get() + 1);
-                async { Outcome { status: Some(503), ok: false, ..Outcome::default() } }
+                async {
+                    Outcome {
+                        status: Some(503),
+                        ok: false,
+                        ..Outcome::default()
+                    }
+                }
             },
         ));
 
@@ -526,12 +603,25 @@ mod tests {
     fn a_non_transient_failure_is_not_retried() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 1,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
         let tries = Cell::new(0usize);
 
         let (_, abandoned) = block_on(run(&pool, systems(&["Nowhere"]), |_| {
             tries.set(tries.get() + 1);
-            async { Outcome { status: Some(404), ok: false, ..Outcome::default() } }
+            async {
+                Outcome {
+                    status: Some(404),
+                    ok: false,
+                    ..Outcome::default()
+                }
+            }
         }));
 
         assert_eq!(tries.get(), 1);
@@ -543,13 +633,30 @@ mod tests {
     #[test]
     fn concurrency_does_not_raise_the_rate() {
         let bed = Bed::default();
-        let pacing =
-            Pacing { bucket: Bucket { rate: 2.0, burst: 1.0, min_rate: 0.5 }, ..Pacing::default() };
+        let pacing = Pacing {
+            bucket: Bucket {
+                rate: 2.0,
+                burst: 1.0,
+                min_rate: 0.5,
+            },
+            ..Pacing::default()
+        };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 8, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 8,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
 
         block_on(run(&pool, systems(&["A", "B", "C", "D"]), |_| async {
-            Outcome { status: Some(200), ok: true, ..Outcome::default() }
+            Outcome {
+                status: Some(200),
+                ok: true,
+                ..Outcome::default()
+            }
         }));
 
         // One free from the burst, then 500 ms apart. The clock is frozen, so
@@ -563,7 +670,11 @@ mod tests {
     fn a_tripped_breaker_stops_issuing_requests() {
         let bed = Bed::default();
         let pacing = Pacing {
-            breaker: Breaker { window: 4, threshold: 0.5, ..Breaker::default() },
+            breaker: Breaker {
+                window: 4,
+                threshold: 0.5,
+                ..Breaker::default()
+            },
             budget: edm_core::pace::Budget {
                 per_job_ms: 1e9,
                 hard_attempts: 1,
@@ -572,21 +683,41 @@ mod tests {
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 1, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 1,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
         let tries = Cell::new(0usize);
 
         let jobs: Vec<Job> = (0..40).map(|n| market(f64::from(n), "X", "Y")).collect();
         let (tally, abandoned) = block_on(run(&pool, jobs, |_| {
             tries.set(tries.get() + 1);
-            async { Outcome { status: Some(500), ok: false, ..Outcome::default() } }
+            async {
+                Outcome {
+                    status: Some(500),
+                    ok: false,
+                    ..Outcome::default()
+                }
+            }
         }));
 
         assert!(pacer.tripped().is_some(), "the breaker must have tripped");
         assert!(tries.get() < 40, "it stopped early: {} of 40", tries.get());
         assert!(tally.abandoned > 0);
-        assert_eq!(tally.markets_failed, 40, "every job is a typed terminal failure");
+        assert_eq!(
+            tally.markets_failed, 40,
+            "every job is a typed terminal failure"
+        );
         assert_eq!(abandoned.len(), 40);
-        assert!(abandoned.iter().any(|a| a.reason == GiveUpReason::CircuitBreaker));
+        assert!(
+            abandoned
+                .iter()
+                .any(|a| a.reason == GiveUpReason::CircuitBreaker)
+        );
     }
 
     /// An empty region is not an error and costs nothing.
@@ -594,7 +725,14 @@ mod tests {
     fn an_empty_seed_sends_nothing() {
         let bed = Bed::default();
         let pacer = Pacer::new(Pacing::default(), &bed.clock, &bed.timer, &bed.entropy);
-        let pool = Pool { pacer: &pacer, out: &bed.out, workers: 4, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &bed.out,
+            workers: 4,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
 
         let (tally, abandoned) = block_on(run(&pool, Vec::new(), |_| async {
             unreachable!("nothing to do")
@@ -612,7 +750,7 @@ mod deadline_tests {
     use crate::ports::CountingEntropy;
     use crate::route::pacer::Pacing;
     use edm_core::js::text::Metric;
-    use edm_core::pace::{Breaker, Budget, Bucket};
+    use edm_core::pace::{Breaker, Bucket, Budget};
 
     /// A clock that advances only when the timer sleeps, so the run's own
     /// deadline is reached by pacing rather than by wall time.
@@ -649,14 +787,32 @@ mod deadline_tests {
         let out = Out::capturing(200, Metric::Utf16, false);
         let pacing = Pacing {
             // One request per second, and two seconds to spend.
-            bucket: Bucket { rate: 1.0, burst: 1.0, min_rate: 0.5 },
-            budget: Budget { per_job_ms: 1e9, hard_attempts: 8, run_deadline_ms: 2_000.0 },
-            breaker: Breaker { window: 100, threshold: 1.1, ..Breaker::default() },
+            bucket: Bucket {
+                rate: 1.0,
+                burst: 1.0,
+                min_rate: 0.5,
+            },
+            budget: Budget {
+                per_job_ms: 1e9,
+                hard_attempts: 8,
+                run_deadline_ms: 2_000.0,
+            },
+            breaker: Breaker {
+                window: 100,
+                threshold: 1.1,
+                ..Breaker::default()
+            },
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
-        let pool =
-            Pool { pacer: &pacer, out: &out, workers: 1, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &out,
+            workers: 1,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
 
         let jobs: Vec<Job> = (0..20)
             .map(|n| Job::Market {
@@ -671,18 +827,32 @@ mod deadline_tests {
             .build()
             .expect("a current-thread runtime")
             .block_on(run(&pool, jobs, |_| async {
-                Outcome { status: Some(200), ok: true, ..Outcome::default() }
+                Outcome {
+                    status: Some(200),
+                    ok: true,
+                    ..Outcome::default()
+                }
             }));
 
-        assert!(tally.markets_out_of_time > 0, "the deadline must cut the run short: {tally:?}");
-        assert!(tally.markets_polled < 20, "and some markets must be left unpolled: {tally:?}");
+        assert!(
+            tally.markets_out_of_time > 0,
+            "the deadline must cut the run short: {tally:?}"
+        );
+        assert!(
+            tally.markets_polled < 20,
+            "and some markets must be left unpolled: {tally:?}"
+        );
         assert_eq!(
             tally.markets_polled + tally.markets_out_of_time,
             20,
             "every job is accounted for: {tally:?}"
         );
         assert_eq!(abandoned.len(), tally.markets_out_of_time);
-        assert!(abandoned.iter().all(|a| a.reason == GiveUpReason::RunDeadline));
+        assert!(
+            abandoned
+                .iter()
+                .all(|a| a.reason == GiveUpReason::RunDeadline)
+        );
     }
 
     #[test]
@@ -691,20 +861,40 @@ mod deadline_tests {
         let entropy = CountingEntropy::default();
         let out = Out::capturing(200, Metric::Utf16, false);
         let pacing = Pacing {
-            budget: Budget { per_job_ms: 1.0, hard_attempts: 1, run_deadline_ms: 0.0 },
+            budget: Budget {
+                per_job_ms: 1.0,
+                hard_attempts: 1,
+                run_deadline_ms: 0.0,
+            },
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
-        let pool = Pool { pacer: &pacer, out: &out, workers: 1, quiet: true, report: None, trace: None };
+        let pool = Pool {
+            pacer: &pacer,
+            out: &out,
+            workers: 1,
+            quiet: true,
+            report: None,
+            trace: None,
+        };
         let jobs = vec![
-            Job::System { name: "Sol".to_owned(), address: 1.0 },
-            Job::Market { market_id: 2.0, station: "Galileo".to_owned(), system: "Sol".to_owned() },
+            Job::System {
+                name: "Sol".to_owned(),
+                address: 1.0,
+            },
+            Job::Market {
+                market_id: 2.0,
+                station: "Galileo".to_owned(),
+                system: "Sol".to_owned(),
+            },
         ];
         let (tally, abandoned) = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
             .expect("a current-thread runtime")
-            .block_on(run(&pool, jobs, |_| async { panic!("deadline must prevent attempts") }));
+            .block_on(run(&pool, jobs, |_| async {
+                panic!("deadline must prevent attempts")
+            }));
 
         assert_eq!(tally.systems_failed, 1);
         assert_eq!(tally.systems_out_of_time, 1);
@@ -712,5 +902,4 @@ mod deadline_tests {
         assert_eq!(tally.markets_out_of_time, 1);
         assert_eq!(abandoned.len(), 2);
     }
-
 }

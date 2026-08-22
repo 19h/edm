@@ -12,7 +12,7 @@
 //! integer. That is why the payload is serialized through
 //! [`crate::js::json`] and never through `serde_json`. See F2.
 
-use crate::consts::{EDDN_SCHEMA, EDDN_SOFTWARE_NAME, EDDN_SOFTWARE_VERSION, EDDN_GAME_VERSION};
+use crate::consts::{EDDN_GAME_VERSION, EDDN_SCHEMA, EDDN_SOFTWARE_NAME, EDDN_SOFTWARE_VERSION};
 use crate::js::json::{JsObject, JsValue};
 
 use super::Commodity;
@@ -137,8 +137,14 @@ pub fn build_message(
     let count = rows.len();
 
     let mut message = vec![
-        ("systemName", JsValue::Str(station.system_name.clone().into_boxed_str())),
-        ("stationName", JsValue::Str(station.station_name.clone().into_boxed_str())),
+        (
+            "systemName",
+            JsValue::Str(station.system_name.clone().into_boxed_str()),
+        ),
+        (
+            "stationName",
+            JsValue::Str(station.station_name.clone().into_boxed_str()),
+        ),
         ("marketId", JsValue::Num(market_id)),
         ("timestamp", JsValue::Str(timestamp.into())),
         ("commodities", JsValue::Arr(rows)),
@@ -179,18 +185,33 @@ pub fn build_message(
     };
 
     let payload = JsValue::Obj(JsObject::from_document_order(vec![
-        ("$schemaRef".into(), JsValue::Str(schema_ref.into_boxed_str())),
+        (
+            "$schemaRef".into(),
+            JsValue::Str(schema_ref.into_boxed_str()),
+        ),
         (
             "header".into(),
             object([
-                ("uploaderID", JsValue::Str(options.uploader_id.clone().into_boxed_str())),
-                ("softwareName", JsValue::Str(options.software_name.clone().into_boxed_str())),
+                (
+                    "uploaderID",
+                    JsValue::Str(options.uploader_id.clone().into_boxed_str()),
+                ),
+                (
+                    "softwareName",
+                    JsValue::Str(options.software_name.clone().into_boxed_str()),
+                ),
                 (
                     "softwareVersion",
                     JsValue::Str(options.software_version.clone().into_boxed_str()),
                 ),
-                ("gameversion", JsValue::Str(options.game_version.clone().into_boxed_str())),
-                ("gamebuild", JsValue::Str(options.game_build.clone().into_boxed_str())),
+                (
+                    "gameversion",
+                    JsValue::Str(options.game_version.clone().into_boxed_str()),
+                ),
+                (
+                    "gamebuild",
+                    JsValue::Str(options.game_build.clone().into_boxed_str()),
+                ),
             ]),
         ),
         ("message".into(), object(message)),

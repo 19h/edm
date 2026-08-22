@@ -14,7 +14,8 @@
 //! belongs permanently.
 
 use edm_core::cli::{
-    self, ArgError, Args, Cli, EnvSnapshot, Flag, POISON_TYPE_ERROR, Table, Value, boolean_literal, normalize, usage,
+    self, ArgError, Args, Cli, EnvSnapshot, Flag, POISON_TYPE_ERROR, Table, Value, boolean_literal,
+    normalize, usage,
 };
 use edm_core::js;
 use proptest::prelude::*;
@@ -99,7 +100,10 @@ const CASES: &[Case] = &[
     Case {
         name: "R39 --dry-run Colonia does not consume Colonia",
         argv: &["market", "--dry-run", "Colonia"],
-        expect: Expect::Ok(&[Check::Switch(Flag::DryRun, true), Check::Positionals(&["Colonia"])]),
+        expect: Expect::Ok(&[
+            Check::Switch(Flag::DryRun, true),
+            Check::Positionals(&["Colonia"]),
+        ]),
     },
     Case {
         name: "R39 boolean literals are matched case insensitively",
@@ -119,12 +123,18 @@ const CASES: &[Case] = &[
     Case {
         name: "R39 2 is not a literal",
         argv: &["market", "--detail", "2"],
-        expect: Expect::Ok(&[Check::Switch(Flag::Detail, true), Check::Positionals(&["2"])]),
+        expect: Expect::Ok(&[
+            Check::Switch(Flag::Detail, true),
+            Check::Positionals(&["2"]),
+        ]),
     },
     Case {
         name: "R39 a following flag is never a literal",
         argv: &["market", "--json", "--detail"],
-        expect: Expect::Ok(&[Check::Switch(Flag::Json, true), Check::Switch(Flag::Detail, true)]),
+        expect: Expect::Ok(&[
+            Check::Switch(Flag::Json, true),
+            Check::Switch(Flag::Detail, true),
+        ]),
     },
     Case {
         name: "R39 a trailing switch defaults to true",
@@ -170,7 +180,10 @@ const CASES: &[Case] = &[
     Case {
         name: "R40 a negation does not consume a following literal",
         argv: &["market", "--no-detail", "1"],
-        expect: Expect::Ok(&[Check::Switch(Flag::Detail, false), Check::Positionals(&["1"])]),
+        expect: Expect::Ok(&[
+            Check::Switch(Flag::Detail, false),
+            Check::Positionals(&["1"]),
+        ]),
     },
     // --- R41: strip every separator, then lowercase with full Unicode
     Case {
@@ -289,7 +302,17 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "R46 every concurrency alias lands in one slot",
-        argv: &["market", "--rate", "2", "--workers", "3", "--jobs", "4", "--parallel", "5"],
+        argv: &[
+            "market",
+            "--rate",
+            "2",
+            "--workers",
+            "3",
+            "--jobs",
+            "4",
+            "--parallel",
+            "5",
+        ],
         expect: Expect::Ok(&[Check::Text(Flag::Concurrency, "5")]),
     },
     // --- R47: the two prototype-reachable boolean literals
@@ -321,7 +344,10 @@ const CASES: &[Case] = &[
     Case {
         name: "R47 hasOwnProperty does not survive lowercasing",
         argv: &["market", "--detail", "hasOwnProperty"],
-        expect: Expect::Ok(&[Check::Switch(Flag::Detail, true), Check::Positionals(&["hasOwnProperty"])]),
+        expect: Expect::Ok(&[
+            Check::Switch(Flag::Detail, true),
+            Check::Positionals(&["hasOwnProperty"]),
+        ]),
     },
     // --- last-wins, mixed forms, and the plain happy paths
     Case {
@@ -355,7 +381,17 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "a realistic sweep",
-        argv: &["market", "Colonia", "--eddn", "--concurrency", "8", "--timeout", "2.5", "--requeue", "1"],
+        argv: &[
+            "market",
+            "Colonia",
+            "--eddn",
+            "--concurrency",
+            "8",
+            "--timeout",
+            "2.5",
+            "--requeue",
+            "1",
+        ],
         expect: Expect::Ok(&[
             Check::Command("market"),
             Check::Positionals(&["Colonia"]),
@@ -380,7 +416,10 @@ fn vectors() {
         let outcome = parse(case.argv);
         match (&case.expect, outcome) {
             (Expect::Err(want), Ok(_)) => {
-                failures.push(format!("{}: expected error {want:?}, parsed successfully", case.name));
+                failures.push(format!(
+                    "{}: expected error {want:?}, parsed successfully",
+                    case.name
+                ));
             }
             (Expect::Err(want), Err(got)) => {
                 let got = got.to_string();
@@ -401,7 +440,12 @@ fn vectors() {
         }
     }
 
-    assert!(failures.is_empty(), "{} vector(s) failed:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} vector(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 fn verify(args: &Args, check: &Check) -> Result<(), String> {
@@ -410,31 +454,49 @@ fn verify(args: &Args, check: &Check) -> Result<(), String> {
             if args.command == *want {
                 Ok(())
             } else {
-                Err(format!("command: expected {want:?}, got {:?}", args.command))
+                Err(format!(
+                    "command: expected {want:?}, got {:?}",
+                    args.command
+                ))
             }
         }
         Check::Positionals(want) => {
             if args.positionals == *want {
                 Ok(())
             } else {
-                Err(format!("positionals: expected {want:?}, got {:?}", args.positionals))
+                Err(format!(
+                    "positionals: expected {want:?}, got {:?}",
+                    args.positionals
+                ))
             }
         }
         Check::Text(flag, want) => match args.get(*flag) {
             Some(Value::Text(got)) if &**got == *want => Ok(()),
-            other => Err(format!("{}: expected text {want:?}, got {other:?}", flag.display())),
+            other => Err(format!(
+                "{}: expected text {want:?}, got {other:?}",
+                flag.display()
+            )),
         },
         Check::Switch(flag, want) => match args.get(*flag) {
             Some(Value::Bool(got)) if got == want => Ok(()),
-            other => Err(format!("{}: expected {want}, got {other:?}", flag.display())),
+            other => Err(format!(
+                "{}: expected {want}, got {other:?}",
+                flag.display()
+            )),
         },
         Check::Poisoned(flag) => match args.get(*flag) {
             Some(Value::Poison) => Ok(()),
-            other => Err(format!("{}: expected a poisoned slot, got {other:?}", flag.display())),
+            other => Err(format!(
+                "{}: expected a poisoned slot, got {other:?}",
+                flag.display()
+            )),
         },
         Check::Absent(flag) => match args.get(*flag) {
             None => Ok(()),
-            other => Err(format!("{}: expected no value, got {other:?}", flag.display())),
+            other => Err(format!(
+                "{}: expected no value, got {other:?}",
+                flag.display()
+            )),
         },
     }
 }
@@ -444,14 +506,21 @@ fn verify(args: &Args, check: &Check) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn env(pairs: &[(&str, &str)]) -> EnvSnapshot {
-    EnvSnapshot::from_pairs(pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())))
+    EnvSnapshot::from_pairs(
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned())),
+    )
 }
 
 #[test]
 fn optional_value_trims_on_read() {
     let args = parse(&["market", "--qty", "  5  "]).unwrap();
     let env = EnvSnapshot::empty();
-    assert_eq!(Cli::new(&args, &env).optional_value(Flag::Qty, None), Some("5"));
+    assert_eq!(
+        Cli::new(&args, &env).optional_value(Flag::Qty, None),
+        Some("5")
+    );
 }
 
 #[test]
@@ -460,9 +529,17 @@ fn r56_a_blank_flag_falls_through_to_the_environment() {
 
     // Present but empty (R43's `--qty=`), present but whitespace, and absent
     // must all reach the environment.
-    for argv in [&["market", "--qty="][..], &["market", "--qty", "   "][..], &["market"][..]] {
+    for argv in [
+        &["market", "--qty="][..],
+        &["market", "--qty", "   "][..],
+        &["market"][..],
+    ] {
         let args = parse(argv).unwrap();
-        assert_eq!(Cli::new(&args, &env).optional_value(Flag::Qty, Some("QTY")), Some("12"), "{argv:?}");
+        assert_eq!(
+            Cli::new(&args, &env).optional_value(Flag::Qty, Some("QTY")),
+            Some("12"),
+            "{argv:?}"
+        );
     }
 }
 
@@ -470,7 +547,10 @@ fn r56_a_blank_flag_falls_through_to_the_environment() {
 fn a_blank_environment_variable_is_not_a_value() {
     let args = parse(&["market"]).unwrap();
     let env = env(&[("QTY", "   ")]);
-    assert_eq!(Cli::new(&args, &env).optional_value(Flag::Qty, Some("QTY")), None);
+    assert_eq!(
+        Cli::new(&args, &env).optional_value(Flag::Qty, Some("QTY")),
+        None
+    );
 }
 
 #[test]
@@ -488,7 +568,9 @@ fn require_value_messages() {
     // ts:995 and ts:996 — the presence of an environment fallback picks the
     // message, and the flag is named by its documented spelling.
     assert_eq!(
-        cli.require_value(Flag::MarketId, Some("MARKET_ID")).unwrap_err().to_string(),
+        cli.require_value(Flag::MarketId, Some("MARKET_ID"))
+            .unwrap_err()
+            .to_string(),
         "Missing --market-id (or MARKET_ID in the environment)"
     );
     assert_eq!(
@@ -503,7 +585,10 @@ fn r46_accessor_errors_name_the_canonical_spelling() {
     let empty = EnvSnapshot::empty();
     // Typed `--capacity`, told about `--cargo`.
     assert_eq!(
-        Cli::new(&args, &empty).optional_number(Flag::Cargo).unwrap_err().to_string(),
+        Cli::new(&args, &empty)
+            .optional_number(Flag::Cargo)
+            .unwrap_err()
+            .to_string(),
         "--cargo must be an unsigned decimal integer"
     );
 }
@@ -520,11 +605,21 @@ fn optional_number_rejections() {
         ("\u{FF11}", "--qty must be an unsigned decimal integer"),
         // R11: this one passes the pattern and fails the range check, so it
         // gets the *second* message.
-        (hundred_digits.as_str(), "--qty is outside the safe integer range"),
+        (
+            hundred_digits.as_str(),
+            "--qty is outside the safe integer range",
+        ),
     ];
     for (input, want) in rows {
         let args = parse(&["market", "--qty", input]).unwrap();
-        assert_eq!(Cli::new(&args, &empty).optional_number(Flag::Qty).unwrap_err().to_string(), *want, "{input:?}");
+        assert_eq!(
+            Cli::new(&args, &empty)
+                .optional_number(Flag::Qty)
+                .unwrap_err()
+                .to_string(),
+            *want,
+            "{input:?}"
+        );
     }
 }
 
@@ -532,21 +627,39 @@ fn optional_number_rejections() {
 fn optional_number_accepts_and_ignores_the_environment() {
     let args = parse(&["market", "--qty", " 42 "]).unwrap();
     let env = env(&[("QTY", "7")]);
-    assert_eq!(Cli::new(&args, &env).optional_number(Flag::Qty).unwrap(), Some(42.0));
+    assert_eq!(
+        Cli::new(&args, &env).optional_number(Flag::Qty).unwrap(),
+        Some(42.0)
+    );
 
     // `optionalNumber` passes no environment name (ts:1003), so a bare `--qty`
     // stays absent even with QTY set.
     let bare = parse(&["market"]).unwrap();
-    assert_eq!(Cli::new(&bare, &env).optional_number(Flag::Qty).unwrap(), None);
+    assert_eq!(
+        Cli::new(&bare, &env).optional_number(Flag::Qty).unwrap(),
+        None
+    );
 }
 
 #[test]
 fn optional_decimal_uses_number_not_a_rust_float_parse() {
     let empty = EnvSnapshot::empty();
-    let accepted: &[(&str, f64)] = &[("1.5", 1.5), (" 1.5 ", 1.5), ("1e3", 1000.0), ("0x10", 16.0), (".5", 0.5)];
+    let accepted: &[(&str, f64)] = &[
+        ("1.5", 1.5),
+        (" 1.5 ", 1.5),
+        ("1e3", 1000.0),
+        ("0x10", 16.0),
+        (".5", 0.5),
+    ];
     for (input, want) in accepted {
         let args = parse(&["market", "--interval", input]).unwrap();
-        assert_eq!(Cli::new(&args, &empty).optional_decimal(Flag::Interval).unwrap(), Some(*want), "{input:?}");
+        assert_eq!(
+            Cli::new(&args, &empty)
+                .optional_decimal(Flag::Interval)
+                .unwrap(),
+            Some(*want),
+            "{input:?}"
+        );
     }
 
     // `Infinity` parses but is not finite; `inf` and `1_0` are not numbers at
@@ -559,7 +672,11 @@ fn optional_decimal_uses_number_not_a_rust_float_parse() {
             // A blank flag is absent, not invalid (R56).
             assert_eq!(outcome.unwrap(), None);
         } else {
-            assert_eq!(outcome.unwrap_err().to_string(), "--interval must be a positive number", "{input:?}");
+            assert_eq!(
+                outcome.unwrap_err().to_string(),
+                "--interval must be a positive number",
+                "{input:?}"
+            );
         }
     }
 }
@@ -572,8 +689,16 @@ fn r47_a_poisoned_switch_throws_rather_than_failing_to_parse() {
 
     // Exit 1 with an engine message, not exit 2 with a parse error — and the
     // token was consumed, so it is not a positional either.
-    assert_eq!(cli.optional_switch(Flag::Detail).unwrap_err().to_string(), POISON_TYPE_ERROR);
-    assert_eq!(cli.switch_value(Flag::Detail, false).unwrap_err().to_string(), POISON_TYPE_ERROR);
+    assert_eq!(
+        cli.optional_switch(Flag::Detail).unwrap_err().to_string(),
+        POISON_TYPE_ERROR
+    );
+    assert_eq!(
+        cli.switch_value(Flag::Detail, false)
+            .unwrap_err()
+            .to_string(),
+        POISON_TYPE_ERROR
+    );
     assert!(args.positionals.is_empty());
 }
 
@@ -596,7 +721,11 @@ fn r48_help_is_reachable_from_an_unknown_command() {
     // `main` tests the command, then the switch, and only then the known set,
     // so this run prints USAGE and exits 0.
     assert!(!cli::is_known_command(&args.command));
-    assert!(Cli::new(&args, &empty).switch_value(Flag::Help, false).unwrap());
+    assert!(
+        Cli::new(&args, &empty)
+            .switch_value(Flag::Help, false)
+            .unwrap()
+    );
 
     let help = parse(&["help"]).unwrap();
     assert_eq!(help.command, "help");
@@ -621,7 +750,10 @@ fn usage_advertises_the_constants_it_runs_on() {
         "per-attempt timeout, default {}",
         js::js_number(cli::usage::DEFAULT_TIMEOUT_SECONDS)
     )));
-    assert!(text.contains(&format!("default {} (EDDN posts", js::js_number(cli::usage::DEFAULT_REQUEUES))));
+    assert!(text.contains(&format!(
+        "default {} (EDDN posts",
+        js::js_number(cli::usage::DEFAULT_REQUEUES)
+    )));
     assert!(text.contains(cli::usage::EDDN_UPLOAD_URL));
     assert!(text.contains(cli::usage::MARKET_TRADE_PATH));
     // R49: the text carries no trailing newline; `console.log` adds it.
@@ -657,7 +789,10 @@ fn token() -> impl Strategy<Value = String> {
 /// Every flag's canonical spelling, derived from the message spelling rather
 /// than restated from the parser's own table.
 fn canonical_names() -> Vec<(String, Flag)> {
-    Flag::ALL.iter().map(|&flag| (normalize(&flag.display()[2..]), flag)).collect()
+    Flag::ALL
+        .iter()
+        .map(|&flag| (normalize(&flag.display()[2..]), flag))
+        .collect()
 }
 
 proptest! {

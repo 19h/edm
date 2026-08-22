@@ -59,8 +59,9 @@ impl Threading<'_> {
                 route.guarantee = Guarantee::ProvedOptimal;
             }
             if threaded.greedy_fill {
-                route.guarantee =
-                    Guarantee::Heuristic { reason: HeuristicReason::MultiCommodityFill };
+                route.guarantee = Guarantee::Heuristic {
+                    reason: HeuristicReason::MultiCommodityFill,
+                };
             }
         }
         // Descending: the ranking key orders better routes greater.
@@ -77,7 +78,10 @@ impl Threading<'_> {
             .iter()
             .flat_map(|market| &market.supply)
             .map(|row| row.buy_price)
-            .fold(Credits::ZERO, |most, price| if price > most { price } else { most });
+            .fold(
+                Credits::ZERO,
+                |most, price| if price > most { price } else { most },
+            );
         if dearest.0 <= 0 {
             return true;
         }
@@ -104,7 +108,11 @@ impl Threading<'_> {
                 Some(Ratio::new(profit, route.cycle_millis))
             }
         };
-        Threaded { profit, steady, greedy_fill: self.limits.fill == FillPolicy::GreedyFill }
+        Threaded {
+            profit,
+            steady,
+            greedy_fill: self.limits.fill == FillPolicy::GreedyFill,
+        }
     }
 
     /// The leg's own trade, re-priced at the balance in hand.
@@ -120,13 +128,17 @@ impl Threading<'_> {
         credits: Credits,
     ) -> Credits {
         let commodity = leg.choice.commodity;
-        let Some(supply) =
-            self.markets[from as usize].supply.iter().find(|row| row.commodity == commodity)
+        let Some(supply) = self.markets[from as usize]
+            .supply
+            .iter()
+            .find(|row| row.commodity == commodity)
         else {
             return leg.choice.profit;
         };
-        let Some(demand) =
-            self.markets[to as usize].demand.iter().find(|row| row.commodity == commodity)
+        let Some(demand) = self.markets[to as usize]
+            .demand
+            .iter()
+            .find(|row| row.commodity == commodity)
         else {
             return leg.choice.profit;
         };
@@ -140,7 +152,9 @@ impl Threading<'_> {
             .supply
             .iter()
             .filter_map(|supply| {
-                let demand = wanted.iter().find(|row| row.commodity == supply.commodity)?;
+                let demand = wanted
+                    .iter()
+                    .find(|row| row.commodity == supply.commodity)?;
                 Some((*supply, *demand))
             })
             .collect();
@@ -176,18 +190,28 @@ mod tests {
 
     #[test]
     fn threading_never_lowers_a_routes_profit() {
-        let ship = ShipConfig { cargo: Tons(100), credits: Credits(20_000) };
+        let ship = ShipConfig {
+            cargo: Tons(100),
+            credits: Credits(20_000),
+        };
         let solution = solved(ship, limits());
         let route = &solution.round_trip[0];
         let threaded = route.threaded.expect("a threaded evaluation");
-        assert!(threaded.profit >= route.profit, "{threaded:?} vs {:?}", route.profit);
+        assert!(
+            threaded.profit >= route.profit,
+            "{threaded:?} vs {:?}",
+            route.profit
+        );
     }
 
     #[test]
     fn a_binding_credit_cap_is_relaxed_by_the_second_leg() {
         // 100 tons of hold, but only enough credits for 50 tons at 100 each.
         // The first leg is credit-limited; by the second the balance is not.
-        let ship = ShipConfig { cargo: Tons(100), credits: Credits(5_000) };
+        let ship = ShipConfig {
+            cargo: Tons(100),
+            credits: Credits(5_000),
+        };
         let solution = solved(ship, limits());
         let route = &solution.round_trip[0];
         assert_eq!(route.legs[0].choice.units, Tons(50));
@@ -198,7 +222,10 @@ mod tests {
 
     #[test]
     fn an_unbindable_credit_cap_upgrades_the_guarantee_and_changes_nothing_else() {
-        let ship = ShipConfig { cargo: Tons(100), credits: Credits(1_000_000_000) };
+        let ship = ShipConfig {
+            cargo: Tons(100),
+            credits: Credits(1_000_000_000),
+        };
         let solution = solved(ship, limits());
         let route = &solution.round_trip[0];
         assert_eq!(route.guarantee, Guarantee::ProvedOptimal);
@@ -211,13 +238,21 @@ mod tests {
         // hold with a second is a two-resource knapsack under a credit cap, and
         // no bound for it was found. The extra profit is real and it is
         // reported — but not as an optimum.
-        let ship = ShipConfig { cargo: Tons(1_000), credits: Credits(1_000_000_000) };
-        let limits = Limits { fill: crate::model::FillPolicy::GreedyFill, ..limits() };
+        let ship = ShipConfig {
+            cargo: Tons(1_000),
+            credits: Credits(1_000_000_000),
+        };
+        let limits = Limits {
+            fill: crate::model::FillPolicy::GreedyFill,
+            ..limits()
+        };
         let solution = solved(ship, limits);
         let route = &solution.round_trip[0];
         assert_eq!(
             route.rate().guarantee,
-            Guarantee::Heuristic { reason: crate::report::HeuristicReason::MultiCommodityFill }
+            Guarantee::Heuristic {
+                reason: crate::report::HeuristicReason::MultiCommodityFill
+            }
         );
         assert!(route.threaded.expect("threaded").greedy_fill);
     }
@@ -225,14 +260,28 @@ mod tests {
     #[test]
     fn the_cap_test_is_taken_over_the_whole_instance() {
         let markets = instance();
-        let ship = ShipConfig { cargo: Tons(100), credits: Credits(10_000) };
+        let ship = ShipConfig {
+            cargo: Tons(100),
+            credits: Credits(10_000),
+        };
         let limits = limits();
-        let threading = Threading { markets: &markets, ship: &ship, limits: &limits };
+        let threading = Threading {
+            markets: &markets,
+            ship: &ship,
+            limits: &limits,
+        };
         // 100 tons at 100 credits is exactly 10,000: the cap is reachable but
         // does not bind.
         assert!(threading.credit_cap_never_binds());
-        let poorer = ShipConfig { cargo: Tons(100), credits: Credits(9_999) };
-        let threading = Threading { markets: &markets, ship: &poorer, limits: &limits };
+        let poorer = ShipConfig {
+            cargo: Tons(100),
+            credits: Credits(9_999),
+        };
+        let threading = Threading {
+            markets: &markets,
+            ship: &poorer,
+            limits: &limits,
+        };
         assert!(!threading.credit_cap_never_binds());
     }
 }

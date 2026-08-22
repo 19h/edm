@@ -66,8 +66,11 @@ where
         return None;
     }
 
-    let headers: Vec<(&str, String)> =
-        request.headers.iter().map(|(name, value)| (*name, value.clone())).collect();
+    let headers: Vec<(&str, String)> = request
+        .headers
+        .iter()
+        .map(|(name, value)| (*name, value.clone()))
+        .collect();
     let response = http
         .send(HttpRequest {
             profile: Profile::GameApi,
@@ -114,7 +117,10 @@ where
 
     // A 2xx is validated in a fixed order, and each step has its own message.
     let nonce_header = exchange.headers.get("nonce");
-    let Some(nonce) = nonce_header.as_deref().and_then(Nonce::from_response_header) else {
+    let Some(nonce) = nonce_header
+        .as_deref()
+        .and_then(Nonce::from_response_header)
+    else {
         out.error(&format!(
             "Missing or invalid response Nonce header: {}",
             // `JSON.stringify` — an absent header renders as an unquoted
@@ -190,16 +196,13 @@ fn report_failure(out: &Out, request: &PreparedRequest, exchange: &Exchange) {
 
     // Failure bodies are encrypted too, so decode what can be decoded rather
     // than dumping base64 at the terminal.
-    let decoded = exchange
-        .headers
-        .get("nonce")
-        .and_then(|nonce| {
-            wire::open_opaque(
-                &exchange.raw,
-                &nonce,
-                exchange.headers.get("uncompressedsize").as_deref(),
-            )
-        });
+    let decoded = exchange.headers.get("nonce").and_then(|nonce| {
+        wire::open_opaque(
+            &exchange.raw,
+            &nonce,
+            exchange.headers.get("uncompressedsize").as_deref(),
+        )
+    });
 
     if let Some(decoded) = decoded {
         out.emit(&[edm_core::render::Block::Heading("ERROR PAYLOAD".to_owned())]);
@@ -213,9 +216,7 @@ fn report_failure(out: &Out, request: &PreparedRequest, exchange: &Exchange) {
 fn quote_or_null(value: Option<&str>) -> String {
     value.map_or_else(
         || "null".to_owned(),
-        |text| {
-            edm_core::js::json::JsValue::Str(text.into()).stringify_compact()
-        },
+        |text| edm_core::js::json::JsValue::Str(text.into()).stringify_compact(),
     )
 }
 

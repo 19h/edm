@@ -56,7 +56,11 @@ pub fn terminal_width(columns_env: Option<&str>, tty_columns: Option<usize>) -> 
         if !override_value.is_empty() && override_value.bytes().all(|b| b.is_ascii_digit()) {
             let parsed = crate::js::to_number(override_value);
             let floored = crate::js::js_max(MIN_WIDTH as f64, parsed);
-            return if floored >= MAX_WIDTH as f64 { MAX_WIDTH } else { floored as usize };
+            return if floored >= MAX_WIDTH as f64 {
+                MAX_WIDTH
+            } else {
+                floored as usize
+            };
         }
     }
     match tty_columns {
@@ -78,7 +82,11 @@ pub enum Block<'a> {
     Heading(String),
     /// `emitTable` (`game-internal-api.ts:488`): a heading, the frame, and — when
     /// columns had to be dropped — a note naming them.
-    Table { title: String, columns: &'a [Column], rows: Vec<Row<'a>> },
+    Table {
+        title: String,
+        columns: &'a [Column],
+        rows: Vec<Row<'a>>,
+    },
     /// `emitNote` (`game-internal-api.ts:473`): indented, word-wrapped commentary.
     Note(String),
     /// A line printed as-is, clamped to the terminal width — the streamed
@@ -113,7 +121,11 @@ pub fn write_blocks(out: &mut String, blocks: &[Block<'_>], width: usize, metric
                 push_line(out, &text::clamp(line, width.cast_signed(), metric));
             }
             Block::Raw(text) => push_line(out, text),
-            Block::Table { title, columns, rows } => {
+            Block::Table {
+                title,
+                columns,
+                rows,
+            } => {
                 push_line(out, &heading(title, width, metric));
                 let rendered = render_table(columns, rows, width, metric);
                 for line in &rendered.lines {

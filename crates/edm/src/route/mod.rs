@@ -16,8 +16,8 @@
 pub mod acquire;
 pub mod atlas;
 pub mod cache;
-pub mod discover;
 pub mod digest;
+pub mod discover;
 pub mod ingest;
 pub mod marketdata;
 pub mod pacer;

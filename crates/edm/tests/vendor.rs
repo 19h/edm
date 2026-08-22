@@ -104,11 +104,13 @@ fn vendor_dispatches_and_aggregates_market_scoped_stock() {
         1_785_999_600u64
     );
     assert_eq!(
-        document["markets"][0]["items"][0]["symbol"],
-        "Wpn_S_Pistol_Plasma_Charged",
+        document["markets"][0]["items"][0]["symbol"], "Wpn_S_Pistol_Plasma_Charged",
         "items are sorted by their player-facing names"
     );
-    assert_eq!(document["markets"][0]["items"][0]["name"], "Manticore Tormentor");
+    assert_eq!(
+        document["markets"][0]["items"][0]["name"],
+        "Manticore Tormentor"
+    );
     assert_eq!(document["markets"][0]["items"][1]["name"], "Takada Zenith");
 
     let wrong_shape_http = FakeHttp::default()

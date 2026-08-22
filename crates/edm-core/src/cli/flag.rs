@@ -81,7 +81,8 @@ pub enum Flag {
     /// same market. A value flag, so it lives before `DryRun` — `takes_value`
     /// is a discriminant compare against it.
     EddnMaxAge,
-    /// `--category <a,b,c>`: only these `categoryname`s are ranked.
+    /// `--category <a,b,c>`: only these `categoryname`s are ranked. With `--quick`,
+    /// also the commodity source when `--item` is omitted.
     Category,
     /// `--from-file <path>`: one system name or market id per line.
     FromFile,
@@ -90,6 +91,10 @@ pub enum Flag {
     EddnRps,
     /// `--min-level <n>`: minimum Pioneer Supplies item grade for `vendor`.
     MinLevel,
+    /// `--quick <n>`: use Ardent's price-ranked candidates rather than survey every
+    /// market in the region. `--item` and/or `--category` supply the commodity list
+    /// and `n` is the number of highest-rate hops kept per commodity.
+    Quick,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -149,7 +154,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 85] = [
+    pub const ALL: [Self; 86] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -208,6 +213,7 @@ impl Flag {
         Self::FromFile,
         Self::EddnRps,
         Self::MinLevel,
+        Self::Quick,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -300,6 +306,9 @@ impl Flag {
             "fromfile" | "file" => Self::FromFile,
             "eddnrps" => Self::EddnRps,
             "minlevel" | "mingrade" => Self::MinLevel,
+            // A hyphen in `--quick-lookup` normalises away. Commodity and
+            // quantity keep their established `--item` and `--qty` spellings.
+            "quick" | "quicklookup" => Self::Quick,
             "yes" => Self::Yes,
             "settlements" | "includesettlements" => Self::Settlements,
             "cache" => Self::Cache,
@@ -373,6 +382,7 @@ impl Flag {
             Self::FromFile => "--from-file",
             Self::EddnRps => "--eddn-rps",
             Self::MinLevel => "--min-level",
+            Self::Quick => "--quick",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

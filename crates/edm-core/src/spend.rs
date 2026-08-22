@@ -57,7 +57,11 @@ pub struct SizePrior {
 
 impl Default for SizePrior {
     fn default() -> Self {
-        Self { system_bytes: 500.0 * 1024.0, market_bytes: 20.0 * 1024.0, spread: 0.3 }
+        Self {
+            system_bytes: 500.0 * 1024.0,
+            market_bytes: 20.0 * 1024.0,
+            spread: 0.3,
+        }
     }
 }
 
@@ -105,9 +109,19 @@ impl Estimate {
     /// Requests, transfer and wall clock, from counts that cost nothing to
     /// obtain.
     #[must_use]
-    pub fn build(counts: Counts, exclusions: Vec<Exclusion>, rate_per_second: f64, prior: &SizePrior) -> Self {
-        let Counts { systems, systems_to_read, stations_known, markets_to_poll, cached_fresh } =
-            counts;
+    pub fn build(
+        counts: Counts,
+        exclusions: Vec<Exclusion>,
+        rate_per_second: f64,
+        prior: &SizePrior,
+    ) -> Self {
+        let Counts {
+            systems,
+            systems_to_read,
+            stations_known,
+            markets_to_poll,
+            cached_fresh,
+        } = counts;
         let to_poll = markets_to_poll.saturating_sub(cached_fresh);
         let requests = systems_to_read as f64 + to_poll as f64;
         let bytes =
@@ -126,7 +140,11 @@ impl Estimate {
             // Pacing, not concurrency, is what bounds a paced sweep: sixteen
             // workers behind a four-per-second bucket still issue four per
             // second. Concurrency only decides how much of the latency hides.
-            seconds: if rate_per_second > 0.0 { requests / rate_per_second } else { 0.0 },
+            seconds: if rate_per_second > 0.0 {
+                requests / rate_per_second
+            } else {
+                0.0
+            },
         }
     }
 }
@@ -154,12 +172,7 @@ pub enum Refusal {
 /// mistake and naming it directly is more use than reporting the forty thousand
 /// requests it implies.
 #[must_use]
-pub fn verdict(
-    estimate: &Estimate,
-    radius_ly: f64,
-    max_requests: f64,
-    confirmed: bool,
-) -> Verdict {
+pub fn verdict(estimate: &Estimate, radius_ly: f64, max_requests: f64, confirmed: bool) -> Verdict {
     if radius_ly > MAX_RADIUS_LY {
         return Verdict::Refused(Refusal::RadiusTooWide);
     }
@@ -176,7 +189,12 @@ pub fn verdict(
 /// change the answer, because a refusal that does not say how to proceed is
 /// just an obstacle.
 #[must_use]
-pub fn refusal_message(refusal: &Refusal, estimate: &Estimate, radius_ly: f64, max_requests: f64) -> String {
+pub fn refusal_message(
+    refusal: &Refusal,
+    estimate: &Estimate,
+    radius_ly: f64,
+    max_requests: f64,
+) -> String {
     match refusal {
         Refusal::RadiusTooWide => format!(
             "--radius {} exceeds the {} Ly ceiling. Nothing has been sent.",
@@ -228,7 +246,11 @@ pub fn duration_estimate(seconds: f64) -> String {
     }
     let minutes = (seconds / 60.0).floor();
     if minutes < 90.0 {
-        return format!("{}m {}s", js::format_integer(minutes), js::format_integer(js::js_round(seconds % 60.0)));
+        return format!(
+            "{}m {}s",
+            js::format_integer(minutes),
+            js::format_integer(js::js_round(seconds % 60.0))
+        );
     }
     format!(
         "{}h {}m",
@@ -253,9 +275,21 @@ mod tests {
                 cached_fresh: 0,
             },
             vec![
-                Exclusion { label: "fleet carriers", removed: 488, keep_with: "--include-carriers" },
-                Exclusion { label: "settlements", removed: 313, keep_with: "--settlements" },
-                Exclusion { label: "pad below L", removed: 46, keep_with: "--pad M" },
+                Exclusion {
+                    label: "fleet carriers",
+                    removed: 488,
+                    keep_with: "--include-carriers",
+                },
+                Exclusion {
+                    label: "settlements",
+                    removed: 313,
+                    keep_with: "--settlements",
+                },
+                Exclusion {
+                    label: "pad below L",
+                    removed: 46,
+                    keep_with: "--pad M",
+                },
             ],
             4.0,
             &SizePrior::default(),
@@ -265,8 +299,14 @@ mod tests {
     #[test]
     fn the_defaults_keep_a_nearby_sweep_inside_the_ceiling() {
         let estimate = sol_20_ly();
-        assert_eq!(estimate.requests, 276.0, "119 starsystem reads plus 157 market polls");
-        assert_eq!(verdict(&estimate, 20.0, DEFAULT_MAX_REQUESTS, true), Verdict::Proceed);
+        assert_eq!(
+            estimate.requests, 276.0,
+            "119 starsystem reads plus 157 market polls"
+        );
+        assert_eq!(
+            verdict(&estimate, 20.0, DEFAULT_MAX_REQUESTS, true),
+            Verdict::Proceed
+        );
         // Large enough to be worth saying out loud, though.
         assert_eq!(
             verdict(&estimate, 20.0, DEFAULT_MAX_REQUESTS, false),
@@ -278,13 +318,37 @@ mod tests {
     /// the size and the ceiling would refuse it.
     #[test]
     fn without_the_station_filter_the_ceiling_bites() {
-        let unfiltered =
-            Estimate::build(Counts { systems: 119, systems_to_read: 119, stations_known: 1_004, markets_to_poll: 1_004, cached_fresh: 0 }, Vec::new(), 4.0, &SizePrior::default());
+        let unfiltered = Estimate::build(
+            Counts {
+                systems: 119,
+                systems_to_read: 119,
+                stations_known: 1_004,
+                markets_to_poll: 1_004,
+                cached_fresh: 0,
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
         assert_eq!(unfiltered.requests, 1_123.0);
-        assert_eq!(verdict(&unfiltered, 20.0, DEFAULT_MAX_REQUESTS, true), Verdict::Proceed);
+        assert_eq!(
+            verdict(&unfiltered, 20.0, DEFAULT_MAX_REQUESTS, true),
+            Verdict::Proceed
+        );
 
         // And at 50 Ly it is refused outright rather than quietly attempted.
-        let wide = Estimate::build(Counts { systems: 1_245, systems_to_read: 1_245, stations_known: 21_900, markets_to_poll: 10_333, cached_fresh: 0 }, Vec::new(), 4.0, &SizePrior::default());
+        let wide = Estimate::build(
+            Counts {
+                systems: 1_245,
+                systems_to_read: 1_245,
+                stations_known: 21_900,
+                markets_to_poll: 10_333,
+                cached_fresh: 0,
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
         assert_eq!(
             verdict(&wide, 50.0, DEFAULT_MAX_REQUESTS, true),
             Verdict::Refused(Refusal::TooManyRequests)
@@ -303,7 +367,10 @@ mod tests {
         // And the ceiling itself is accepted: it is Ardent's clamp, not a
         // judgement about size, and `--max-requests` is what refuses a sweep
         // for being too big.
-        assert_eq!(verdict(&estimate, MAX_RADIUS_LY, 1e9, true), Verdict::Proceed);
+        assert_eq!(
+            verdict(&estimate, MAX_RADIUS_LY, 1e9, true),
+            Verdict::Proceed
+        );
         let message = refusal_message(&Refusal::RadiusTooWide, &estimate, 5_000.0, 1e9);
         // Ungrouped: the message quotes back what was typed, so it can be edited
         // and re-run rather than retyped.
@@ -313,7 +380,18 @@ mod tests {
 
     #[test]
     fn a_refusal_says_how_to_proceed() {
-        let wide = Estimate::build(Counts { systems: 1_245, systems_to_read: 1_245, stations_known: 21_900, markets_to_poll: 10_333, cached_fresh: 0 }, Vec::new(), 4.0, &SizePrior::default());
+        let wide = Estimate::build(
+            Counts {
+                systems: 1_245,
+                systems_to_read: 1_245,
+                stations_known: 21_900,
+                markets_to_poll: 10_333,
+                cached_fresh: 0,
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
         let message = refusal_message(&Refusal::TooManyRequests, &wide, 50.0, DEFAULT_MAX_REQUESTS);
         assert!(message.contains("11,578"), "the actual count: {message}");
         assert!(message.contains("2,000"), "the ceiling: {message}");
@@ -323,8 +401,30 @@ mod tests {
     /// Cached markets are not polled, so they must not be paid for either.
     #[test]
     fn a_warm_cache_lowers_the_estimate() {
-        let cold = Estimate::build(Counts { systems: 10, systems_to_read: 10, stations_known: 100, markets_to_poll: 100, cached_fresh: 0 }, Vec::new(), 4.0, &SizePrior::default());
-        let warm = Estimate::build(Counts { systems: 10, systems_to_read: 10, stations_known: 100, markets_to_poll: 100, cached_fresh: 90 }, Vec::new(), 4.0, &SizePrior::default());
+        let cold = Estimate::build(
+            Counts {
+                systems: 10,
+                systems_to_read: 10,
+                stations_known: 100,
+                markets_to_poll: 100,
+                cached_fresh: 0,
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
+        let warm = Estimate::build(
+            Counts {
+                systems: 10,
+                systems_to_read: 10,
+                stations_known: 100,
+                markets_to_poll: 100,
+                cached_fresh: 90,
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
         assert_eq!(cold.requests, 110.0);
         assert_eq!(warm.requests, 20.0);
         assert!(warm.bytes_high < cold.bytes_high);
@@ -335,9 +435,20 @@ mod tests {
     #[test]
     fn a_sparse_region_costs_almost_nothing() {
         // 662 systems within 50 Ly of Skaudai, not one with a market.
-        let sparse = Estimate::build(Counts { systems: 662, ..Counts::default() }, Vec::new(), 4.0, &SizePrior::default());
+        let sparse = Estimate::build(
+            Counts {
+                systems: 662,
+                ..Counts::default()
+            },
+            Vec::new(),
+            4.0,
+            &SizePrior::default(),
+        );
         assert_eq!(sparse.requests, 0.0);
-        assert_eq!(verdict(&sparse, 50.0, DEFAULT_MAX_REQUESTS, false), Verdict::Proceed);
+        assert_eq!(
+            verdict(&sparse, 50.0, DEFAULT_MAX_REQUESTS, false),
+            Verdict::Proceed
+        );
     }
 
     #[test]

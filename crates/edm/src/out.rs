@@ -236,7 +236,6 @@ impl Out {
         }
     }
 
-
     /// Everything written so far, stdout and stderr interleaved in write order.
     #[must_use]
     pub fn captured(&self) -> String {
@@ -271,7 +270,10 @@ mod tests {
     #[test]
     fn the_exit_code_is_last_write_wins_and_never_resets() {
         let out = Out::new(100, Metric::Utf16, false);
-        assert_eq!(format!("{:?}", out.exit_code()), format!("{:?}", std::process::ExitCode::SUCCESS));
+        assert_eq!(
+            format!("{:?}", out.exit_code()),
+            format!("{:?}", std::process::ExitCode::SUCCESS)
+        );
         out.set_exit(EXIT_FAILURE);
         out.set_exit(EXIT_FAILURE);
         assert_eq!(out.exit.get(), 1);

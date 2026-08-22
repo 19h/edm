@@ -138,7 +138,9 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
         let now = self.clock.now_ms();
         let hold = retry_after.and_then(|header| retry_after_ms(header, now));
         let mut inner = self.inner.borrow_mut();
-        self.pacing.bucket.on_throttled(&mut inner.tokens, now, hold);
+        self.pacing
+            .bucket
+            .on_throttled(&mut inner.tokens, now, hold);
         inner.spent.throttled += 1;
         self.record(&mut inner, false, true);
     }
@@ -150,7 +152,10 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
     }
 
     fn record(&self, inner: &mut Mutable, ok: bool, throttled: bool) {
-        if let BreakerState::Tripped(reason) = self.pacing.breaker.observe(&mut inner.window, ok, throttled)
+        if let BreakerState::Tripped(reason) =
+            self.pacing
+                .breaker
+                .observe(&mut inner.window, ok, throttled)
         {
             // First trip wins: the reason a run stopped is the one that stopped
             // it, not whichever failure happened to arrive last.
@@ -193,13 +198,20 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
     ) -> Option<GiveUpReason> {
         let now = self.clock.now_ms();
         let verdict =
-            self.pacing.budget.verdict(transient, attempts, first_attempt_ms, now, self.started_ms);
+            self.pacing
+                .budget
+                .verdict(transient, attempts, first_attempt_ms, now, self.started_ms);
         if let RetryVerdict::GiveUp(reason) = verdict {
             return Some(reason);
         }
 
         let jitter = self.entropy.jitter_unit();
-        let delay = backoff_ms(attempts, self.pacing.backoff_base_ms, self.pacing.backoff_cap_ms, jitter);
+        let delay = backoff_ms(
+            attempts,
+            self.pacing.backoff_base_ms,
+            self.pacing.backoff_cap_ms,
+            jitter,
+        );
         // The bucket's own gate may already be further out than the backoff —
         // if a peer's 429 set a hold-off, this job waits for the later of the
         // two rather than jumping the queue.
@@ -291,7 +303,11 @@ mod tests {
         let bed = TestBed::default();
         let entropy = CountingEntropy::default();
         let pacing = Pacing {
-            bucket: Bucket { rate: 4.0, burst: 1.0, min_rate: 0.5 },
+            bucket: Bucket {
+                rate: 4.0,
+                burst: 1.0,
+                min_rate: 0.5,
+            },
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
@@ -322,7 +338,11 @@ mod tests {
 
         assert_eq!(*bed.delays.borrow(), vec![30_000.0]);
         // And the rate halved, so the run does not walk straight back into it.
-        assert!(pacer.rate() < Pacing::default().bucket.rate, "{}", pacer.rate());
+        assert!(
+            pacer.rate() < Pacing::default().bucket.rate,
+            "{}",
+            pacer.rate()
+        );
     }
 
     /// A `Retry-After` in the past is a real thing servers send, usually a
@@ -351,7 +371,11 @@ mod tests {
         let bed = TestBed::default();
         let entropy = FixedJitter(1.0);
         let pacing = Pacing {
-            budget: Budget { per_job_ms: 5_000.0, hard_attempts: 1_000, run_deadline_ms: 1e9 },
+            budget: Budget {
+                per_job_ms: 5_000.0,
+                hard_attempts: 1_000,
+                run_deadline_ms: 1e9,
+            },
             backoff_base_ms: 1_000.0,
             ..Pacing::default()
         };
@@ -383,7 +407,11 @@ mod tests {
         let bed = TestBed::default();
         let entropy = FixedJitter(0.0);
         let pacing = Pacing {
-            budget: Budget { per_job_ms: 5_000.0, hard_attempts: 6, run_deadline_ms: 1e9 },
+            budget: Budget {
+                per_job_ms: 5_000.0,
+                hard_attempts: 6,
+                run_deadline_ms: 1e9,
+            },
             ..Pacing::default()
         };
         let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
@@ -401,7 +429,10 @@ mod tests {
 
         assert_eq!(reason, GiveUpReason::AttemptCap);
         assert_eq!(attempts, 6);
-        assert!(bed.delays.borrow().is_empty(), "and it never slept, hence the cap");
+        assert!(
+            bed.delays.borrow().is_empty(),
+            "and it never slept, hence the cap"
+        );
     }
 
     /// A 4xx that is not 408 or 429 is not retried at all: repeating a wrong
@@ -415,17 +446,29 @@ mod tests {
         let reason = block_on(pacer.retry_after_failure(false, 1, 0.0));
 
         assert_eq!(reason, Some(GiveUpReason::NotTransient));
-        assert!(bed.delays.borrow().is_empty(), "and it does not sleep first");
+        assert!(
+            bed.delays.borrow().is_empty(),
+            "and it does not sleep first"
+        );
     }
 
     /// The recorded timer is the one the harness uses; assert it composes.
     #[test]
     fn the_recording_timer_captures_the_sequence() {
-        let clock = FixedClock { now_ms: 0.0, uptime_seconds: 0.0 };
+        let clock = FixedClock {
+            now_ms: 0.0,
+            uptime_seconds: 0.0,
+        };
         let timer = RecordingTimer::default();
         let entropy = CountingEntropy::default();
-        let pacing =
-            Pacing { bucket: Bucket { rate: 2.0, burst: 1.0, min_rate: 0.5 }, ..Pacing::default() };
+        let pacing = Pacing {
+            bucket: Bucket {
+                rate: 2.0,
+                burst: 1.0,
+                min_rate: 0.5,
+            },
+            ..Pacing::default()
+        };
         let pacer = Pacer::new(pacing, &clock, &timer, &entropy);
 
         block_on(async {

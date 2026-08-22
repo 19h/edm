@@ -5,8 +5,8 @@
 mod support;
 
 use support::{
-    GAME_INTERNAL_API, FakeHttp, NOT_A_LISTING, RESPONSE_NONCE, Reply, drive, drive_with_env, listing, reply,
-    sealed,
+    FakeHttp, GAME_INTERNAL_API, NOT_A_LISTING, RESPONSE_NONCE, Reply, drive, drive_with_env,
+    listing, reply, sealed,
 };
 
 fn http(replies: Vec<Reply>) -> FakeHttp {
@@ -16,7 +16,10 @@ fn http(replies: Vec<Reply>) -> FakeHttp {
 #[test]
 fn one_market_by_id_end_to_end() {
     // -- success ------------------------------------------------------------
-    let run = drive(&["market", "--market-id", "4306502403"], &http(vec![sealed(&listing(10))]));
+    let run = drive(
+        &["market", "--market-id", "4306502403"],
+        &http(vec![sealed(&listing(10))]),
+    );
     run.assert_exit(0);
     assert!(run.stderr.is_empty());
     insta::assert_snapshot!("success", run.stdout);
@@ -28,7 +31,10 @@ fn one_market_by_id_end_to_end() {
         &http(vec![sealed(&listing(10))]),
     );
     run.assert_exit(0);
-    assert!(run.stdout.starts_with('{'), "no table precedes the document");
+    assert!(
+        run.stdout.starts_with('{'),
+        "no table precedes the document"
+    );
     insta::assert_snapshot!("success_json", run.stdout);
 
     // -- 405, with a diagnosis ---------------------------------------------
@@ -87,10 +93,16 @@ fn one_market_by_id_end_to_end() {
         &http(vec![reply(200, &[("uncompressedsize", "64")], "")]),
     );
     run.assert_exit(1);
-    assert_eq!(run.stderr, "Missing or invalid response Nonce header: null\n");
+    assert_eq!(
+        run.stderr,
+        "Missing or invalid response Nonce header: null\n"
+    );
 
     // -- a body that opens but is not a listing ----------------------------
-    let run = drive(&["market", "--market-id", "4306502403"], &http(vec![sealed(NOT_A_LISTING)]));
+    let run = drive(
+        &["market", "--market-id", "4306502403"],
+        &http(vec![sealed(NOT_A_LISTING)]),
+    );
     // Nothing failed: the market simply had nothing to say.
     run.assert_exit(0);
     assert!(run.stdout.contains("== PAYLOAD "));
@@ -99,21 +111,35 @@ fn one_market_by_id_end_to_end() {
     // -- --dry-run ----------------------------------------------------------
     // R74: the REQUEST table prints *before* the bail, so a dry run still shows
     // exactly what would have been sent — and sends nothing.
-    let run = drive(&["market", "--market-id", "4306502403", "--dry-run"], &http(vec![]));
+    let run = drive(
+        &["market", "--market-id", "4306502403", "--dry-run"],
+        &http(vec![]),
+    );
     run.assert_exit(0);
-    assert!(run.stdout.contains("== REQUEST  GET /2.0/elite/market/list "));
+    assert!(
+        run.stdout
+            .contains("== REQUEST  GET /2.0/elite/market/list ")
+    );
     assert!(!run.stdout.contains("== RESPONSE"));
     assert!(run.calls.is_empty());
 
     // -- C24: the origin override moves the request and the table -----------
     let run = drive_with_env(
         &["market", "--market-id", "4306502403"],
-        &FakeHttp::default()
-            .route("http://localhost:9/2.0/elite/market/list", vec![sealed(&listing(10))]),
-        vec![("EDM_ORIGIN_OVERRIDE".to_owned(), "http://localhost:9".to_owned())],
+        &FakeHttp::default().route(
+            "http://localhost:9/2.0/elite/market/list",
+            vec![sealed(&listing(10))],
+        ),
+        vec![(
+            "EDM_ORIGIN_OVERRIDE".to_owned(),
+            "http://localhost:9".to_owned(),
+        )],
     );
     run.assert_exit(0);
     assert_eq!(run.calls, ["GET http://localhost:9/2.0/elite/market/list"]);
-    assert!(run.stdout.contains("http://localhost:9/2.0/elite/market/list"));
+    assert!(
+        run.stdout
+            .contains("http://localhost:9/2.0/elite/market/list")
+    );
     assert!(!run.stdout.contains(GAME_INTERNAL_API));
 }

@@ -3,9 +3,9 @@
 
 mod support;
 
+use edm_route::Wanted;
 use edm_route::num::{Credits, Millis, Ratio, Tons};
 use edm_route::report::{Caveat, Guarantee, RouteKind};
-use edm_route::Wanted;
 use edm_route::time::TimeModel;
 use edm_route::watch::Watch;
 use edm_route::{bounded, distinct, model, ratio, round, solve};
@@ -59,13 +59,24 @@ fn three_markets_by_hand() {
     // reported figure floors.
     assert_eq!(best.rate.credits_per_hour_floor(), 18_580_645);
 
-    assert_eq!(round::best_ratio(&graph), None, "every pair here is one-way");
+    assert_eq!(
+        round::best_ratio(&graph),
+        None,
+        "every pair here is one-way"
+    );
 }
 
 #[test]
 fn three_markets_end_to_end() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all(), Watch::unlimited());
+    let solution = solve(
+        &markets,
+        TimeModel::default(),
+        &ship(),
+        &limits(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
 
     assert!(solution.round_trip.is_empty());
 
@@ -77,7 +88,10 @@ fn three_markets_end_to_end() {
     // 20 s supercruise + 60 s docking + 30 s market.
     assert_eq!(loop_route.first_lap_millis, Millis(575_000));
     let claim = loop_route.rate();
-    assert_eq!(claim.steady, Some(Ratio::new(Credits(2_400_000), Millis(465_000))));
+    assert_eq!(
+        claim.steady,
+        Some(Ratio::new(Credits(2_400_000), Millis(465_000)))
+    );
     assert_eq!(claim.guarantee, Guarantee::ProvedOptimal);
 
     let hop = &solution.single[0];
@@ -92,7 +106,14 @@ fn three_markets_end_to_end() {
 #[test]
 fn a_full_hold_and_a_full_purse_prove_the_result_outright() {
     let markets = three_markets();
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all(), Watch::unlimited());
+    let solution = solve(
+        &markets,
+        TimeModel::default(),
+        &ship(),
+        &limits(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
     for route in solution.loops.iter().chain(&solution.single) {
         // Every route in the list is either proved or explicitly labelled;
         // there is no third state where a rate reads as proved by omission.
@@ -102,15 +123,28 @@ fn a_full_hold_and_a_full_purse_prove_the_result_outright() {
         }
     }
     let threaded = solution.loops[0].threaded.expect("finalists are threaded");
-    assert_eq!(threaded.profit, solution.loops[0].profit, "an unbindable cap changes nothing");
+    assert_eq!(
+        threaded.profit, solution.loops[0].profit,
+        "an unbindable cap changes nothing"
+    );
 }
 
 #[test]
 fn a_thinner_purse_says_so_instead() {
     let markets = three_markets();
     // 50,000 credits buys 500 tons at 100 each: the cap binds on every leg.
-    let poor = model::ShipConfig { cargo: Tons(1_000), credits: Credits(50_000) };
-    let solution = solve(&markets, TimeModel::default(), &poor, &limits(), Wanted::all(), Watch::unlimited());
+    let poor = model::ShipConfig {
+        cargo: Tons(1_000),
+        credits: Credits(50_000),
+    };
+    let solution = solve(
+        &markets,
+        TimeModel::default(),
+        &poor,
+        &limits(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
     let route = &solution.loops[0];
     assert_eq!(route.legs[0].choice.units, Tons(500));
     assert_eq!(route.rate().guarantee, Guarantee::OptimalForStartingCredits);
@@ -153,11 +187,19 @@ fn the_completion_bound_does_not_prune_a_short_winner() {
     // true winner. Folding numerator and denominator into one quantity before
     // bounding, as `beyond_reach` does, leaves nothing to get backwards.
     let markets = two_triangles_and_a_shuttle();
-    let limits = model::Limits { max_stops: Some(5), min_distinct: Some(3), ..limits() };
+    let limits = model::Limits {
+        max_stops: Some(5),
+        min_distinct: Some(3),
+        ..limits()
+    };
     let graph = graph_of(&markets, &limits);
 
     let free = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
-    assert_eq!(free.nodes, vec![6, 7], "the unconstrained optimum is the two-stop shuttle");
+    assert_eq!(
+        free.nodes,
+        vec![6, 7],
+        "the unconstrained optimum is the two-stop shuttle"
+    );
 
     let winner = Ratio::new(Credits(900_000), Millis(465_000));
     let runner_up = Ratio::new(Credits(870_000), Millis(465_000));
@@ -178,7 +220,10 @@ fn the_completion_bound_does_not_prune_a_short_winner() {
     assert_eq!(found.rate, winner);
     assert_eq!(found.nodes, vec![3, 4, 5]);
     assert!(found.proved);
-    assert_eq!(found.upper, free.rate, "the free optimum is what bounds the constrained one");
+    assert_eq!(
+        found.upper, free.rate,
+        "the free optimum is what bounds the constrained one"
+    );
 
     // And the brute force agrees, which is what makes the two assertions above
     // a statement about the answer rather than about this implementation.
@@ -188,7 +233,11 @@ fn the_completion_bound_does_not_prune_a_short_winner() {
 #[test]
 fn the_shuttle_is_still_found_when_the_floor_allows_it() {
     let markets = two_triangles_and_a_shuttle();
-    let limits = model::Limits { max_stops: Some(5), min_distinct: Some(2), ..limits() };
+    let limits = model::Limits {
+        max_stops: Some(5),
+        min_distinct: Some(2),
+        ..limits()
+    };
     let graph = graph_of(&markets, &limits);
     let found =
         distinct::best_with_min_stops(&graph, &limits, 2, Watch::unlimited()).expect("a loop");
@@ -202,17 +251,27 @@ fn reduced_weights_do_not_overflow_at_instance_bounds() {
     // reduced weight reaches 2^36 * 2^35 = 2^71 and a Bellman-Ford distance
     // accumulates those to 2^84. Both are far outside `i64`, which is why every
     // reduced weight in this crate is `i128` with no narrow fast path.
-    let rate = Ratio { credits: 1 << 48, millis: 1 << 36 };
+    let rate = Ratio {
+        credits: 1 << 48,
+        millis: 1 << 36,
+    };
     let widest = ratio::reduced(rate, Credits(1 << 35), Millis(1 << 22));
-    assert_eq!(widest, (1i128 << 36) * (1i128 << 35) - (1i128 << 48) * (1i128 << 22));
+    assert_eq!(
+        widest,
+        (1i128 << 36) * (1i128 << 35) - (1i128 << 48) * (1i128 << 22)
+    );
     assert_eq!(widest, 1i128 << 70);
-    assert!(widest > i128::from(i64::MAX), "the bound is not being exercised");
+    assert!(
+        widest > i128::from(i64::MAX),
+        "the bound is not being exercised"
+    );
 
     // A ring of the largest markets the design admits, with every edge at the
     // widest reduced weight. The primitive accumulates all of them.
     let stations = 2_048usize;
-    let edges: Vec<(u32, u32)> =
-        (0..stations as u32).map(|i| (i, (i + 1) % stations as u32)).collect();
+    let edges: Vec<(u32, u32)> = (0..stations as u32)
+        .map(|i| (i, (i + 1) % stations as u32))
+        .collect();
     let weights = vec![1i128 << 71; stations];
     let cycle = ratio::positive_cycle(stations, &edges, &weights).expect("a positive ring");
     assert_eq!(cycle.len(), stations);
@@ -240,7 +299,10 @@ fn a_maximum_scale_cycle_prices_without_overflow() {
             )
         })
         .collect();
-    let ship = model::ShipConfig { cargo: Tons(1 << 15), credits: Credits(1 << 40) };
+    let ship = model::ShipConfig {
+        cargo: Tons(1 << 15),
+        credits: Credits(1 << 40),
+    };
     let graph = edm_route::graph::TradeGraph::build(
         &edm_route::graph::Pools::from_markets(&markets),
         &edm_route::time::Geometry::new(&markets, TimeModel::default()),
@@ -252,7 +314,10 @@ fn a_maximum_scale_cycle_prices_without_overflow() {
     assert!(best.proved);
     assert_eq!(best.nodes.len(), stations);
     let (profit, _, _) = round::price_cycle(&graph, &best.nodes).expect("a priced ring");
-    assert_eq!(profit, Credits(stations as i64 * (1 << 15) * ((1 << 20) - 1)));
+    assert_eq!(
+        profit,
+        Credits(stations as i64 * (1 << 15) * ((1 << 20) - 1))
+    );
     // The same instance through the bounded solver, which multiplies the
     // largest quantities of the two.
     assert_eq!(

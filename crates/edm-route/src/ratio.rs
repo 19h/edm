@@ -91,8 +91,7 @@ const MAX_ROUNDS: u32 = 4_096;
 /// cycle is positive exactly when the cycle does.
 #[must_use]
 pub fn reduced(rate: Ratio, weight: Credits, millis: Millis) -> i128 {
-    i128::from(rate.millis) * i128::from(weight.0)
-        - i128::from(rate.credits) * i128::from(millis.0)
+    i128::from(rate.millis) * i128::from(weight.0) - i128::from(rate.credits) * i128::from(millis.0)
 }
 
 /// What one probe established.
@@ -187,9 +186,13 @@ pub fn positive_cycle_within(
     // `Proved` because of what is known at that point: a relaxation survived
     // the n-th sweep, so a positive cycle *does* exist and failing to extract
     // it is not evidence that it does not.
-    let Some(mut node) = relaxed else { return Probe::Proved };
+    let Some(mut node) = relaxed else {
+        return Probe::Proved;
+    };
     for _ in 0..n {
-        let Some(&previous) = pred.get(node as usize) else { return Probe::Abandoned };
+        let Some(&previous) = pred.get(node as usize) else {
+            return Probe::Abandoned;
+        };
         node = previous;
         if node == u32::MAX {
             return Probe::Abandoned;
@@ -325,14 +328,21 @@ impl<'a> Component<'a> {
                     .map(|(&weight, &millis)| reduced(rate, weight, millis)),
             ),
             Membership::Subset(index) => buffer.extend(index.iter().map(|&edge| {
-                reduced(rate, self.graph.weight(edge as usize), self.graph.millis(edge as usize))
+                reduced(
+                    rate,
+                    self.graph.weight(edge as usize),
+                    self.graph.millis(edge as usize),
+                )
             })),
         }
     }
 
     /// Translates a node list back into the outer graph's numbering.
     pub(crate) fn to_global(&self, local: &[u32]) -> Vec<u32> {
-        local.iter().map(|&node| self.global[node as usize]).collect()
+        local
+            .iter()
+            .map(|&node| self.global[node as usize])
+            .collect()
     }
 
     /// What the component's `i`-th edge earns and costs.
@@ -382,7 +392,12 @@ impl<'a> Component<'a> {
                 index.push(edge as u32);
             }
         }
-        Self { graph, global: nodes.to_vec(), edges, membership: Membership::Subset(index) }
+        Self {
+            graph,
+            global: nodes.to_vec(),
+            edges,
+            membership: Membership::Subset(index),
+        }
     }
 
     fn beating(&self, rate: Ratio, reduced: &mut Vec<i128>, watch: Watch<'_>) -> Probe {
@@ -470,10 +485,20 @@ pub fn max_ratio_cycle(graph: &TradeGraph, watch: Watch<'_>) -> Option<MaxRatioC
             // had" for a route that was never going to appear.
             let nodes = witness?;
             watch.report(Event::Abandoned);
-            return Some(MaxRatioCycle { nodes, rate, rounds: round_index, proved: false });
+            return Some(MaxRatioCycle {
+                nodes,
+                rate,
+                rounds: round_index,
+                proved: false,
+            });
         }
         let Some(cycle) = found else {
-            return Some(MaxRatioCycle { nodes: witness?, rate, rounds: round_index, proved: true });
+            return Some(MaxRatioCycle {
+                nodes: witness?,
+                rate,
+                rounds: round_index,
+                proved: true,
+            });
         };
         let (profit, millis, _) = round::price_cycle(graph, &cycle)?;
         let next = Ratio::new(profit, millis);
@@ -485,7 +510,12 @@ pub fn max_ratio_cycle(graph: &TradeGraph, watch: Watch<'_>) -> Option<MaxRatioC
         witness = Some(cycle);
     }
 
-    Some(MaxRatioCycle { nodes: witness?, rate, rounds: MAX_ROUNDS, proved: false })
+    Some(MaxRatioCycle {
+        nodes: witness?,
+        rate,
+        rounds: MAX_ROUNDS,
+        proved: false,
+    })
 }
 
 /// The best repeatable loops, best first.
@@ -501,14 +531,20 @@ pub fn solve(
     limits: &Limits,
     watch: Watch<'_>,
 ) -> Vec<Route> {
-    let Some(best) = max_ratio_cycle(graph, watch) else { return Vec::new() };
+    let Some(best) = max_ratio_cycle(graph, watch) else {
+        return Vec::new();
+    };
     let head_guarantee = if best.proved {
         Guarantee::OptimalForStartingCredits
     } else {
-        Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+        Guarantee::Heuristic {
+            reason: HeuristicReason::SearchBudgetExhausted,
+        }
     };
 
-    let Some(head) = round::route_of(graph, geometry, &best.nodes) else { return Vec::new() };
+    let Some(head) = round::route_of(graph, geometry, &best.nodes) else {
+        return Vec::new();
+    };
     let mut listing = round::listing(
         graph,
         geometry,
@@ -523,7 +559,9 @@ pub fn solve(
 
 #[cfg(test)]
 mod tests {
-    use super::{Component, Probe, max_ratio_cycle, positive_cycle, positive_cycle_within, reduced};
+    use super::{
+        Component, Probe, max_ratio_cycle, positive_cycle, positive_cycle_within, reduced,
+    };
     use crate::fixture::{geometry, limits, market, ship};
     use crate::graph::{Pools, TradeGraph};
     use crate::model::Market;
@@ -581,7 +619,10 @@ mod tests {
         // Every consecutive pair, and the wrap, must be a real edge.
         for i in 0..cycle.len() {
             let pair = (cycle[i], cycle[(i + 1) % cycle.len()]);
-            assert!(edges.contains(&pair), "{pair:?} is not an edge of {cycle:?}");
+            assert!(
+                edges.contains(&pair),
+                "{pair:?} is not an edge of {cycle:?}"
+            );
         }
     }
 
@@ -600,9 +641,18 @@ mod tests {
     fn reduced_weight_changes_sign_at_the_rate_the_edge_earns() {
         let weight = Credits(1_000);
         let millis = Millis(500);
-        let below = Ratio { credits: 1, millis: 1 };
-        let equal = Ratio { credits: 2, millis: 1 };
-        let above = Ratio { credits: 3, millis: 1 };
+        let below = Ratio {
+            credits: 1,
+            millis: 1,
+        };
+        let equal = Ratio {
+            credits: 2,
+            millis: 1,
+        };
+        let above = Ratio {
+            credits: 3,
+            millis: 1,
+        };
         assert!(reduced(below, weight, millis) > 0);
         assert_eq!(reduced(equal, weight, millis), 0);
         assert!(reduced(above, weight, millis) < 0);
@@ -618,8 +668,10 @@ mod tests {
 
     #[test]
     fn a_graph_with_no_cycle_has_no_answer() {
-        let markets =
-            [market(1, 0.0, &[(0, 100, 500)], &[]), market(2, 5.0, &[], &[(0, 900, 500)])];
+        let markets = [
+            market(1, 0.0, &[(0, 100, 500)], &[]),
+            market(2, 5.0, &[], &[(0, 900, 500)]),
+        ];
         assert!(max_ratio_cycle(&build(&markets), Watch::unlimited()).is_none());
     }
 
@@ -633,7 +685,10 @@ mod tests {
             positive_cycle_within(2, &edges, &[5, 5], Watch::unlimited().until(&spent)),
             Probe::Abandoned
         );
-        assert_eq!(positive_cycle_within(2, &edges, &[5, -5], Watch::unlimited()), Probe::Proved);
+        assert_eq!(
+            positive_cycle_within(2, &edges, &[5, -5], Watch::unlimited()),
+            Probe::Proved
+        );
     }
 
     #[test]
@@ -647,7 +702,10 @@ mod tests {
         let spent = || true;
         let stopped =
             max_ratio_cycle(&graph, Watch::unlimited().until(&spent)).expect("the warm start");
-        assert!(!stopped.proved, "nothing was searched, so nothing was proved");
+        assert!(
+            !stopped.proved,
+            "nothing was searched, so nothing was proved"
+        );
         // The round trip the warm start found is a real route and is still
         // returned; it is the *claim* that is withdrawn, not the answer.
         assert_eq!(stopped.nodes.len(), 2);
@@ -660,11 +718,17 @@ mod tests {
         let graph = build(&markets);
         let geometry = geometry(&markets);
         let spent = || true;
-        let routes =
-            super::solve(&graph, &geometry, &limits(), Watch::unlimited().until(&spent));
+        let routes = super::solve(
+            &graph,
+            &geometry,
+            &limits(),
+            Watch::unlimited().until(&spent),
+        );
         assert_eq!(
             routes[0].guarantee,
-            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+            Guarantee::Heuristic {
+                reason: HeuristicReason::SearchBudgetExhausted
+            }
         );
     }
 
@@ -678,10 +742,13 @@ mod tests {
                 seen.borrow_mut().push((round, rate, stops));
             }
         };
-        let best =
-            max_ratio_cycle(&graph, Watch::unlimited().reporting(&sink)).expect("a cycle");
+        let best = max_ratio_cycle(&graph, Watch::unlimited().reporting(&sink)).expect("a cycle");
         let seen = seen.into_inner();
-        assert_eq!(seen.len(), best.rounds as usize, "one report per round: {seen:?}");
+        assert_eq!(
+            seen.len(),
+            best.rounds as usize,
+            "one report per round: {seen:?}"
+        );
         // Round numbers count from one, and the rate a watcher is shown is the
         // rate of a cycle that exists — so it can only climb.
         for (i, &(round, rate, stops)) in seen.iter().enumerate() {
@@ -691,7 +758,10 @@ mod tests {
                 assert!(rate > seen[i - 1].1, "{seen:?}");
             }
         }
-        assert!(seen.len() >= 2, "this instance improves on its warm start: {seen:?}");
+        assert!(
+            seen.len() >= 2,
+            "this instance improves on its warm start: {seen:?}"
+        );
     }
 
     #[test]
@@ -711,7 +781,10 @@ mod tests {
         assert_eq!(components[0].nodes(), general.nodes());
         assert_eq!(components[0].edge_list(), general.edge_list());
         assert_eq!(components[0].adjacency(), general.adjacency());
-        let rate = Ratio { credits: 1, millis: 3 };
+        let rate = Ratio {
+            credits: 1,
+            millis: 3,
+        };
         let (mut shortcut_weights, mut general_weights) = (Vec::new(), Vec::new());
         components[0].reduce_into(rate, &mut shortcut_weights);
         general.reduce_into(rate, &mut general_weights);
@@ -736,7 +809,11 @@ mod tests {
         assert!(!components[0].covers_the_graph());
         assert_eq!(components[0].nodes(), [0, 1]);
         // And the answer is the same one the shortcut would have given.
-        assert!(max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle").proved);
+        assert!(
+            max_ratio_cycle(&graph, Watch::unlimited())
+                .expect("a cycle")
+                .proved
+        );
     }
 
     #[test]
@@ -752,8 +829,16 @@ mod tests {
         let graph = build(&markets);
         let components = Component::all(&graph);
         assert_eq!(components.len(), 2);
-        assert!(components.iter().all(|component| !component.covers_the_graph()));
-        assert!(components.iter().all(|component| component.nodes().len() == 2));
+        assert!(
+            components
+                .iter()
+                .all(|component| !component.covers_the_graph())
+        );
+        assert!(
+            components
+                .iter()
+                .all(|component| component.nodes().len() == 2)
+        );
     }
 
     #[test]
@@ -766,7 +851,13 @@ mod tests {
         component.reduce_into(Ratio::ZERO, &mut buffer);
         assert_eq!(buffer.len(), edges);
         let first = buffer.clone();
-        component.reduce_into(Ratio { credits: 1, millis: 1 }, &mut buffer);
+        component.reduce_into(
+            Ratio {
+                credits: 1,
+                millis: 1,
+            },
+            &mut buffer,
+        );
         assert_eq!(buffer.len(), edges, "the second fill replaced the first");
         assert_ne!(buffer, first, "and it used the new rate");
     }

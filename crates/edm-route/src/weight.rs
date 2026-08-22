@@ -252,7 +252,10 @@ pub fn greedy_fill(
             break;
         }
         let (supply, demand) = &pairs[i];
-        let remaining = ShipConfig { cargo: hold_left, credits: purse };
+        let remaining = ShipConfig {
+            cargo: hold_left,
+            credits: purse,
+        };
         let Some(mut choice) = leg_weight(supply, demand, &remaining, purse, min_units) else {
             continue;
         };
@@ -265,7 +268,11 @@ pub fn greedy_fill(
         picks.push(choice);
     }
 
-    FillPlan { picks, profit, units: units_total }
+    FillPlan {
+        picks,
+        profit,
+        units: units_total,
+    }
 }
 
 #[cfg(test)]
@@ -275,15 +282,27 @@ mod tests {
     use crate::num::{Credits, Tons};
 
     fn ship(cargo: i64, credits: i64) -> ShipConfig {
-        ShipConfig { cargo: Tons(cargo), credits: Credits(credits) }
+        ShipConfig {
+            cargo: Tons(cargo),
+            credits: Credits(credits),
+        }
     }
 
     fn supply(price: i64, stock: i64) -> Supply {
-        Supply { commodity: CommodityId(0), buy_price: Credits(price), stock: Tons(stock) }
+        Supply {
+            commodity: CommodityId(0),
+            buy_price: Credits(price),
+            stock: Tons(stock),
+        }
     }
 
     fn demand(price: i64, qty: DemandQty) -> Demand {
-        Demand { commodity: CommodityId(0), sell_price: Credits(price), qty, bulk: None }
+        Demand {
+            commodity: CommodityId(0),
+            sell_price: Credits(price),
+            qty,
+            bulk: None,
+        }
     }
 
     #[test]
@@ -417,14 +436,37 @@ mod tests {
     fn each_cap_is_named_when_it_binds() {
         let s = ship(100, 1_000_000);
         let cases = [
-            (Tons(500), DemandQty::Published(Tons(500)), 1_000_000, Limiter::Cargo, 100),
-            (Tons(30), DemandQty::Published(Tons(500)), 1_000_000, Limiter::Stock, 30),
-            (Tons(500), DemandQty::Published(Tons(20)), 1_000_000, Limiter::Demand, 20),
-            (Tons(500), DemandQty::Published(Tons(500)), 550, Limiter::Credits, 5),
+            (
+                Tons(500),
+                DemandQty::Published(Tons(500)),
+                1_000_000,
+                Limiter::Cargo,
+                100,
+            ),
+            (
+                Tons(30),
+                DemandQty::Published(Tons(500)),
+                1_000_000,
+                Limiter::Stock,
+                30,
+            ),
+            (
+                Tons(500),
+                DemandQty::Published(Tons(20)),
+                1_000_000,
+                Limiter::Demand,
+                20,
+            ),
+            (
+                Tons(500),
+                DemandQty::Published(Tons(500)),
+                550,
+                Limiter::Credits,
+                5,
+            ),
         ];
         for (stock, qty, credits, expect, units) in cases {
-            let (got, limiter, _) =
-                trade_units(Credits(100), stock, qty, &s, Credits(credits));
+            let (got, limiter, _) = trade_units(Credits(100), stock, qty, &s, Credits(credits));
             assert_eq!(limiter, expect);
             assert_eq!(got, Tons(units));
         }
@@ -459,15 +501,30 @@ mod tests {
                 mean_price: Credits(12_650),
             }),
         };
-        let choice = leg_weight(&seller, &buyer, &ship(1_040, i64::MAX), Credits(i64::MAX), Tons(1))
-            .expect("observed trade remains profitable");
+        let choice = leg_weight(
+            &seller,
+            &buyer,
+            &ship(1_040, i64::MAX),
+            Credits(i64::MAX),
+            Tons(1),
+        )
+        .expect("observed trade remains profitable");
         assert_eq!(choice.sell_price, Credits(14_102));
         assert_eq!(choice.profit, Credits((14_102 - 1_000) * 1_040));
         assert!(choice.bulk_estimated);
 
-        let smaller = leg_weight(&seller, &buyer, &ship(520, i64::MAX), Credits(i64::MAX), Tons(1))
-            .expect("smaller cargo");
-        assert!(smaller.sell_price > choice.sell_price, "cargo size must affect the quote");
+        let smaller = leg_weight(
+            &seller,
+            &buyer,
+            &ship(520, i64::MAX),
+            Credits(i64::MAX),
+            Tons(1),
+        )
+        .expect("smaller cargo");
+        assert!(
+            smaller.sell_price > choice.sell_price,
+            "cargo size must affect the quote"
+        );
     }
 
     #[test]
@@ -482,7 +539,16 @@ mod tests {
                 mean_price: Credits(1_096),
             }),
         };
-        assert!(leg_weight(&seller, &buyer, &ship(1_232, i64::MAX), Credits(i64::MAX), Tons(1)).is_none());
+        assert!(
+            leg_weight(
+                &seller,
+                &buyer,
+                &ship(1_232, i64::MAX),
+                Credits(i64::MAX),
+                Tons(1)
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -505,7 +571,11 @@ mod tests {
         let s = ship(100, 1_000_000_000);
         let pairs = [
             (
-                Supply { commodity: CommodityId(0), buy_price: Credits(10), stock: Tons(60) },
+                Supply {
+                    commodity: CommodityId(0),
+                    buy_price: Credits(10),
+                    stock: Tons(60),
+                },
                 Demand {
                     commodity: CommodityId(0),
                     sell_price: Credits(1_010),
@@ -514,7 +584,11 @@ mod tests {
                 },
             ),
             (
-                Supply { commodity: CommodityId(1), buy_price: Credits(10), stock: Tons(1_000) },
+                Supply {
+                    commodity: CommodityId(1),
+                    buy_price: Credits(10),
+                    stock: Tons(1_000),
+                },
                 Demand {
                     commodity: CommodityId(1),
                     sell_price: Credits(110),

@@ -121,14 +121,21 @@ pub fn derive_price(
     match kind {
         Kind::Buy => {
             if commodity.buy_price == 0.0 {
-                Err(format!("{} is not sold at this market (buyPrice 0)", commodity.name))
+                Err(format!(
+                    "{} is not sold at this market (buyPrice 0)",
+                    commodity.name
+                ))
             } else {
                 Ok(commodity.buy_price)
             }
         }
         // A fence pays differently, and which price applies depends on the
         // black-market flag that was just derived.
-        Kind::Sell => Ok(if black_market { commodity.fence_price } else { commodity.sell_price }),
+        Kind::Sell => Ok(if black_market {
+            commodity.fence_price
+        } else {
+            commodity.sell_price
+        }),
     }
 }
 
@@ -339,8 +346,15 @@ mod tests {
     /// Selling is never constrained by credits or by cargo space.
     #[test]
     fn selling_ignores_the_balance() {
-        let qty =
-            plan_quantity(Kind::Sell, false, Some(40.0), 25.0, Space::of(Some(0.0), 0.0), Some(0.0), 10.0);
+        let qty = plan_quantity(
+            Kind::Sell,
+            false,
+            Some(40.0),
+            25.0,
+            Space::of(Some(0.0), 0.0),
+            Some(0.0),
+            10.0,
+        );
         assert_eq!(qty, 25.0);
     }
 }

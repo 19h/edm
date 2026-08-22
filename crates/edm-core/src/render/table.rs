@@ -37,7 +37,14 @@ impl Column {
     /// A left-aligned, undroppable, unbounded column.
     #[must_use]
     pub const fn new(key: &'static str, header: &'static str) -> Self {
-        Self { key, header, align: Align::Left, priority: 0, min_width: None, max_width: None }
+        Self {
+            key,
+            header,
+            align: Align::Left,
+            priority: 0,
+            min_width: None,
+            max_width: None,
+        }
     }
 
     #[must_use]
@@ -232,7 +239,12 @@ pub fn fit_with(columns: &[Column], rows: &[Row<'_>], available: usize, metric: 
         widths = measure(columns, &active, rows, metric);
     }
 
-    Fit { active, widths, omitted, steps }
+    Fit {
+        active,
+        widths,
+        omitted,
+        steps,
+    }
 }
 
 /// A drawn table: the frame lines and the fit that produced them.
@@ -271,13 +283,22 @@ pub fn render_table(
 
     // Each surviving column contributes its text, its fitted width and its
     // alignment; `row_line` does the padding and draws the rails.
-    let layout = || fit.active.iter().enumerate().map(|(position, &index)| (position, index));
+    let layout = || {
+        fit.active
+            .iter()
+            .enumerate()
+            .map(|(position, &index)| (position, index))
+    };
 
     let mut lines = vec![
         dash_rule.clone(),
         row_line(
             layout().map(|(position, index)| {
-                (columns[index].header, widths[position], columns[index].align)
+                (
+                    columns[index].header,
+                    widths[position],
+                    columns[index].align,
+                )
             }),
             metric,
         ),
@@ -297,7 +318,10 @@ pub fn render_table(
                 if !previous_was_rule {
                     lines.push(dash_rule.clone());
                 }
-                lines.push(format!("| {} |", text::pad(band, band_width, Align::Left, metric)));
+                lines.push(format!(
+                    "| {} |",
+                    text::pad(band, band_width, Align::Left, metric)
+                ));
                 lines.push(dash_rule.clone());
                 previous_was_rule = true;
             }
@@ -319,10 +343,7 @@ pub fn render_table(
     Rendered { lines, fit }
 }
 
-fn row_line<'s>(
-    cells: impl Iterator<Item = (&'s str, usize, Align)>,
-    metric: Metric,
-) -> String {
+fn row_line<'s>(cells: impl Iterator<Item = (&'s str, usize, Align)>, metric: Metric) -> String {
     let mut line = String::from("| ");
     for (position, (text, width, align)) in cells.enumerate() {
         if position > 0 {

@@ -19,21 +19,23 @@ use edm_core::js::json::JsValue;
 use edm_core::js::{format_quantity, js_number};
 use edm_core::render::{Block, Row, columns, views};
 
-use crate::game_api::{self, Field};
 use crate::exchange::SendOptions;
+use crate::game_api::{self, Field};
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs};
 
-use super::{
-    App, CmdResult, decrypted, message, num_or_null, object, str_value, timer_duration,
-};
+use super::{App, CmdResult, decrypted, message, num_or_null, object, str_value, timer_duration};
 
 /// `runTrade` (ts:2327).
 pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     app: &App<'_, H, C, E, F>,
 ) -> CmdResult {
     let dispatch = config::trade_dispatch(&app.cli).map_err(message)?;
-    if dispatch.batch { batch_trade(app, dispatch.items).await } else { single(app).await }
+    if dispatch.batch {
+        batch_trade(app, dispatch.items).await
+    } else {
+        single(app).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +85,16 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     let exchange = app.send(&request, SendOptions::default()).await;
 
     if app.session.json {
-        app.emit_json(&request, exchange.as_ref(), vec![("plan", plan_json(&resolved.plan))]);
+        app.emit_json(
+            &request,
+            exchange.as_ref(),
+            vec![("plan", plan_json(&resolved.plan))],
+        );
         return Ok(());
     }
-    let Some(text) = decrypted(exchange.as_ref()) else { return Ok(()) };
+    let Some(text) = decrypted(exchange.as_ref()) else {
+        return Ok(());
+    };
 
     let document = JsValue::parse(text).ok();
     let Some(result) = document.as_ref().and_then(parse_market_snapshot) else {
@@ -115,7 +123,11 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         }]);
     }
 
-    if app.cli.switch_value(Flag::FullMarket, false).map_err(message)? {
+    if app
+        .cli
+        .switch_value(Flag::FullMarket, false)
+        .map_err(message)?
+    {
         app.out.emit(&views::commodity_table(&result.commodities));
     } else {
         // ts:1989
@@ -144,7 +156,10 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 
     let mut machine = {
         let opening = listing(&document)?;
-        Batch::new(loop_config(&settings, app.session.dry_run, app.session.json), &opening)?
+        Batch::new(
+            loop_config(&settings, app.session.dry_run, app.session.json),
+            &opening,
+        )?
     };
 
     if !app.session.json {
@@ -179,8 +194,15 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                     // Nothing is sent; the machine simulates the fill locally.
                     continue;
                 }
-                let exchange =
-                    app.send(&request, SendOptions { quiet: true, ignore_dry_run: false }).await;
+                let exchange = app
+                    .send(
+                        &request,
+                        SendOptions {
+                            quiet: true,
+                            ignore_dry_run: false,
+                        },
+                    )
+                    .await;
                 reply = Some(match exchange.as_ref() {
                     // ts:2235 — `!exchange` and a null `decrypted` are the two
                     // failures; a body that decoded into something that is not
@@ -188,7 +210,9 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                     // learned.
                     None => Reply::Failed { status: None },
                     Some(exchange) => match exchange.decrypted.as_deref() {
-                        None => Reply::Failed { status: Some(exchange.status) },
+                        None => Reply::Failed {
+                            status: Some(exchange.status),
+                        },
                         Some(text) => {
                             match JsValue::parse(text)
                                 .ok()
@@ -196,9 +220,13 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                             {
                                 Some(parsed) => {
                                     document = parsed;
-                                    Reply::Listing { status: exchange.status }
+                                    Reply::Listing {
+                                        status: exchange.status,
+                                    }
                                 }
-                                None => Reply::Opaque { status: exchange.status },
+                                None => Reply::Opaque {
+                                    status: exchange.status,
+                                },
                             }
                         }
                     },
@@ -224,7 +252,10 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         // ts:2276
         app.out.line(
             &object([
-                ("plan".to_owned(), batch_plan_json(&settings, machine.targets())),
+                (
+                    "plan".to_owned(),
+                    batch_plan_json(&settings, machine.targets()),
+                ),
                 ("outcome".to_owned(), str_value(&report.outcome)),
                 ("rounds".to_owned(), JsValue::Num(f64::from(report.rounds))),
                 (
@@ -233,7 +264,10 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                 ),
                 ("credits".to_owned(), num_or_null(report.credits)),
                 ("cargoUsed".to_owned(), JsValue::Num(final_used)),
-                ("inventory".to_owned(), JsValue::Arr(latest.inventory.to_vec())),
+                (
+                    "inventory".to_owned(),
+                    JsValue::Arr(latest.inventory.to_vec()),
+                ),
             ])
             .stringify(2),
         );
@@ -265,11 +299,7 @@ fn listing(document: &JsValue) -> Result<MarketSnapshot<'_>, String> {
 }
 
 /// The loop's copy of the settings, plus the two session flags it reads.
-fn loop_config(
-    settings: &config::BatchConfig,
-    dry_run: bool,
-    json: bool,
-) -> batch::BatchConfig {
+fn loop_config(settings: &config::BatchConfig, dry_run: bool, json: bool) -> batch::BatchConfig {
     batch::BatchConfig {
         market_id: settings.market_id.clone(),
         kind: settings.kind,
@@ -298,7 +328,11 @@ fn loop_config(
 /// `marketId` is a string and reaches the wire verbatim — `trade` never parses
 /// it, so `0004306502403` keeps its leading zeros \[R53\]. The booleans go as
 /// `1`/`0` **numbers**, not as strings.
-fn trade_fields(plan: &TradePlan, credentials: &game_api::Credentials, frontier_time: f64) -> Vec<Field> {
+fn trade_fields(
+    plan: &TradePlan,
+    credentials: &game_api::Credentials,
+    frontier_time: f64,
+) -> Vec<Field> {
     let mut fields = vec![
         Field::text("cmdrId", credentials.commander_id.clone()),
         Field::text("marketId", plan.market_id.clone()),
@@ -376,7 +410,10 @@ fn plan_json(plan: &TradePlan) -> JsValue {
 fn batch_plan_json(settings: &config::BatchConfig, targets: &[batch::Target]) -> JsValue {
     let mut entries = vec![
         ("marketId".to_owned(), str_value(&settings.market_id)),
-        ("transactionType".to_owned(), str_value(settings.kind.as_str())),
+        (
+            "transactionType".to_owned(),
+            str_value(settings.kind.as_str()),
+        ),
         (
             "items".to_owned(),
             JsValue::Arr(
@@ -401,14 +438,20 @@ fn batch_plan_json(settings: &config::BatchConfig, targets: &[batch::Target]) ->
     }
     entries.push(("stolen".to_owned(), JsValue::Bool(settings.stolen)));
     if let Some(black_market) = settings.explicit_black_market {
-        entries.push(("explicitBlackMarket".to_owned(), JsValue::Bool(black_market)));
+        entries.push((
+            "explicitBlackMarket".to_owned(),
+            JsValue::Bool(black_market),
+        ));
     }
     if let Some(price) = settings.explicit_price {
         entries.push(("explicitPrice".to_owned(), JsValue::Num(price)));
     }
     entries.push(("watch".to_owned(), JsValue::Bool(settings.watch)));
     entries.push(("intervalMs".to_owned(), JsValue::Num(settings.interval_ms)));
-    entries.push(("attemptLimit".to_owned(), JsValue::Num(settings.attempt_limit)));
+    entries.push((
+        "attemptLimit".to_owned(),
+        JsValue::Num(settings.attempt_limit),
+    ));
     if let Some(credits) = settings.credits {
         entries.push(("credits".to_owned(), JsValue::Num(credits)));
     }
@@ -423,7 +466,10 @@ fn record_json(record: &batch::TradeRecord) -> JsValue {
         ("commodityId".to_owned(), JsValue::Num(record.commodity_id)),
         ("qty".to_owned(), JsValue::Num(record.qty)),
         ("unitPrice".to_owned(), JsValue::Num(record.unit_price)),
-        ("status".to_owned(), num_or_null(record.status.map(f64::from))),
+        (
+            "status".to_owned(),
+            num_or_null(record.status.map(f64::from)),
+        ),
         ("cargoUsed".to_owned(), num_or_null(record.cargo_used)),
         ("credits".to_owned(), num_or_null(record.credits)),
     ])

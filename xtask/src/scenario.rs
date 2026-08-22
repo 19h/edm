@@ -239,9 +239,15 @@ fn from_toml(text: &str, file: &Path) -> Result<Scenario> {
     let doc = toml::parse(text)?;
     doc.reject_unknown(SCENARIO_KEYS, &["env", "route"])?;
 
-    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned();
+    let stem = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_owned();
     let name = doc.string("name", &stem)?;
-    let why = doc.required_string("why").context("every scenario must say what it is for")?;
+    let why = doc
+        .required_string("why")
+        .context("every scenario must say what it is for")?;
     let argv = doc.str_array("argv")?;
     let network = doc.boolean("network", true)?;
     let oracle = match doc.string("oracle", "bun")?.as_str() {
@@ -262,7 +268,11 @@ fn from_toml(text: &str, file: &Path) -> Result<Scenario> {
     };
 
     let run_twice = doc.boolean("run-twice", false)?;
-    let env = doc.table("env").map(toml::Table::string_pairs).transpose()?.unwrap_or_default();
+    let env = doc
+        .table("env")
+        .map(toml::Table::string_pairs)
+        .transpose()?
+        .unwrap_or_default();
 
     let mut routes = Vec::new();
     for table in doc.tables("route") {
@@ -389,12 +399,16 @@ where
         return Ok(None);
     }
     let raw = doc.int(key, 0)?;
-    Ok(Some(T::try_from(raw).with_context(|| format!("`{key}` is out of range"))?))
+    Ok(Some(
+        T::try_from(raw).with_context(|| format!("`{key}` is out of range"))?,
+    ))
 }
 
 /// The first bare word, which is the command whenever there is one.
 fn command_of(argv: &[String]) -> Option<&str> {
-    argv.iter().find(|token| !token.starts_with('-')).map(String::as_str)
+    argv.iter()
+        .find(|token| !token.starts_with('-'))
+        .map(String::as_str)
 }
 
 /// The most requests this argv can have outstanding at once.
@@ -425,13 +439,15 @@ fn in_flight(argv: &[String]) -> u32 {
 
 /// The paths whose replies can be outstanding together for this argv.
 fn pooled_paths(argv: &[String]) -> &'static [&'static str] {
-    if command_of(argv) == Some("route") { &ROUTE_POOLED_PATHS } else { &POOLED_PATHS }
+    if command_of(argv) == Some("route") {
+        &ROUTE_POOLED_PATHS
+    } else {
+        &POOLED_PATHS
+    }
 }
 
 fn validate(scenario: &Scenario) -> Result<()> {
-    if scenario.order == Order::Multiset
-        && scenario.because.chars().all(char::is_whitespace)
-    {
+    if scenario.order == Order::Multiset && scenario.because.chars().all(char::is_whitespace) {
         bail!(
             "`order = \"multiset\"` needs `because = \"…\"`: C21 says every \
              multiset comparison must carry its justification in the scenario file"
@@ -443,7 +459,13 @@ fn validate(scenario: &Scenario) -> Result<()> {
     if !scenario.network && !scenario.routes.is_empty() {
         bail!("`network = false` scenarios run without a server, so they may not script routes");
     }
-    if scenario.record_r86 && !scenario.routes.iter().flat_map(|r| &r.replies).any(|r| r.never) {
+    if scenario.record_r86
+        && !scenario
+            .routes
+            .iter()
+            .flat_map(|r| &r.replies)
+            .any(|r| r.never)
+    {
         bail!("the R86 measurement needs a route that never responds");
     }
 
@@ -500,7 +522,11 @@ fn validate(scenario: &Scenario) -> Result<()> {
     if scenario.in_flight > 1 && scenario.order == Order::Ordered {
         let pooled = pooled_paths(&scenario.argv);
         let mut seen: Vec<u64> = Vec::new();
-        for route in scenario.routes.iter().filter(|route| pooled.contains(&route.path.as_str())) {
+        for route in scenario
+            .routes
+            .iter()
+            .filter(|route| pooled.contains(&route.path.as_str()))
+        {
             let mut mine: Vec<u64> = Vec::new();
             for reply in route.replies.iter().filter(|reply| !reply.never) {
                 if reply.delay_ms == 0 {
@@ -532,8 +558,14 @@ mod tests {
 
     #[test]
     fn paths_route_to_the_three_profiles() {
-        assert_eq!(Profile::of_path("/2.0/elite/market/list"), Some(Profile::Frontier));
-        assert_eq!(Profile::of_path("/v2/system/name/Sol"), Some(Profile::Ardent));
+        assert_eq!(
+            Profile::of_path("/2.0/elite/market/list"),
+            Some(Profile::Frontier)
+        );
+        assert_eq!(
+            Profile::of_path("/v2/system/name/Sol"),
+            Some(Profile::Ardent)
+        );
         assert_eq!(Profile::of_path("/upload/"), Some(Profile::Eddn));
         assert_eq!(Profile::of_path("/favicon.ico"), None);
     }
@@ -558,7 +590,9 @@ mod tests {
             .to_string();
         assert!(market.contains("only for `route`"), "{market}");
 
-        let none = parse("why = \"x\"\nargv = []\noracle = \"none\"\n").unwrap_err().to_string();
+        let none = parse("why = \"x\"\nargv = []\noracle = \"none\"\n")
+            .unwrap_err()
+            .to_string();
         assert!(none.contains("<no command>"), "{none}");
     }
 
@@ -608,9 +642,18 @@ mod tests {
     #[test]
     fn in_flight_follows_the_original_clamp() {
         assert_eq!(in_flight(&argv(&["market", "Colonia"])), 5);
-        assert_eq!(in_flight(&argv(&["market", "Colonia", "--concurrency", "3"])), 3);
-        assert_eq!(in_flight(&argv(&["market", "Colonia", "--concurrency", "0"])), 1);
-        assert_eq!(in_flight(&argv(&["market", "Colonia", "--concurrency", "99"])), 16);
+        assert_eq!(
+            in_flight(&argv(&["market", "Colonia", "--concurrency", "3"])),
+            3
+        );
+        assert_eq!(
+            in_flight(&argv(&["market", "Colonia", "--concurrency", "0"])),
+            1
+        );
+        assert_eq!(
+            in_flight(&argv(&["market", "Colonia", "--concurrency", "99"])),
+            16
+        );
         assert_eq!(in_flight(&argv(&["market", "--market-id", "7"])), 1);
         assert_eq!(in_flight(&argv(&["markets", "Colonia"])), 1);
         assert_eq!(in_flight(&argv(&["trade", "--type", "buy"])), 1);

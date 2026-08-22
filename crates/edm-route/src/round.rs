@@ -32,7 +32,9 @@ pub fn solve(graph: &TradeGraph, geometry: &Geometry<'_>, limits: &Limits) -> Ve
         if from >= to {
             continue;
         }
-        let Some(back) = graph.find(to, from) else { continue };
+        let Some(back) = graph.find(to, from) else {
+            continue;
+        };
         let route = Route::cycle(
             geometry,
             &[from, to],
@@ -67,11 +69,17 @@ pub fn best_ratio(graph: &TradeGraph) -> Option<Best> {
         if from >= to {
             continue;
         }
-        let Some(back) = graph.find(to, from) else { continue };
+        let Some(back) = graph.find(to, from) else {
+            continue;
+        };
         let profit = graph.weight(out) + graph.weight(back);
         let millis = graph.millis(out) + graph.millis(back);
         let rate = Ratio::new(profit, millis);
-        let candidate = Best { nodes: [from, to], edges: [out, back], rate };
+        let candidate = Best {
+            nodes: [from, to],
+            edges: [out, back],
+            rate,
+        };
         let better = match &best {
             None => true,
             Some(current) => match rate.cmp(&current.rate) {
@@ -176,7 +184,13 @@ pub fn enumerate_cycles(
         visited[start as usize] = true;
         let mut path = vec![start];
         extend(
-            &Enumeration { neighbours: &neighbours, rank: &rank, start, max_stops, budget },
+            &Enumeration {
+                neighbours: &neighbours,
+                rank: &rank,
+                start,
+                max_stops,
+                budget,
+            },
             &mut path,
             &mut visited,
             &mut found,
@@ -223,14 +237,18 @@ pub fn listing(
         if !stops.contains(&nodes.len()) {
             continue;
         }
-        let Some(route) = route_of(graph, geometry, &nodes) else { continue };
+        let Some(route) = route_of(graph, geometry, &nodes) else {
+            continue;
+        };
         if !seen.insert(route.rank.stations.clone()) {
             continue;
         }
         let key = route.rank.clone();
         runners_up.offer(
             key,
-            route.with_guarantee(Guarantee::Heuristic { reason: HeuristicReason::RunnerUp }),
+            route.with_guarantee(Guarantee::Heuristic {
+                reason: HeuristicReason::RunnerUp,
+            }),
         );
     }
 
@@ -259,7 +277,9 @@ pub fn taint_unfinished(routes: &mut [Route], proved: bool) {
         return;
     }
     for route in routes {
-        route.guarantee = Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted };
+        route.guarantee = Guarantee::Heuristic {
+            reason: HeuristicReason::SearchBudgetExhausted,
+        };
     }
 }
 
@@ -322,34 +342,37 @@ mod tests {
             market(2, 5.0, &[(1, 100, 500)], &[(0, 900, 500)]),
         ];
         let geometry = geometry(&markets);
-        let graph =
-            TradeGraph::build(
-                &Pools::from_markets(&markets),
-                &geometry,
-                &ship(),
-                &limits(),
-                Watch::unlimited(),
-            );
+        let graph = TradeGraph::build(
+            &Pools::from_markets(&markets),
+            &geometry,
+            &ship(),
+            &limits(),
+            Watch::unlimited(),
+        );
         let routes = solve(&graph, &geometry, &limits());
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].kind, RouteKind::RoundTrip);
-        assert_ne!(routes[0].legs[0].choice.commodity, routes[0].legs[1].choice.commodity);
+        assert_ne!(
+            routes[0].legs[0].choice.commodity,
+            routes[0].legs[1].choice.commodity
+        );
         assert_eq!(routes[0].profit, crate::num::Credits(2 * 500 * 800));
     }
 
     #[test]
     fn a_one_way_pair_makes_no_round_trip() {
-        let markets =
-            [market(1, 0.0, &[(0, 100, 500)], &[]), market(2, 5.0, &[], &[(0, 900, 500)])];
+        let markets = [
+            market(1, 0.0, &[(0, 100, 500)], &[]),
+            market(2, 5.0, &[], &[(0, 900, 500)]),
+        ];
         let geometry = geometry(&markets);
-        let graph =
-            TradeGraph::build(
-                &Pools::from_markets(&markets),
-                &geometry,
-                &ship(),
-                &limits(),
-                Watch::unlimited(),
-            );
+        let graph = TradeGraph::build(
+            &Pools::from_markets(&markets),
+            &geometry,
+            &ship(),
+            &limits(),
+            Watch::unlimited(),
+        );
         assert!(solve(&graph, &geometry, &limits()).is_empty());
         assert_eq!(best_ratio(&graph), None);
     }
@@ -367,14 +390,13 @@ mod tests {
 
         let named = |markets: &[crate::model::Market]| {
             let geometry = geometry(markets);
-            let graph =
-                TradeGraph::build(
-                    &Pools::from_markets(markets),
-                    &geometry,
-                    &ship(),
-                    &limits(),
-                    Watch::unlimited(),
-                );
+            let graph = TradeGraph::build(
+                &Pools::from_markets(markets),
+                &geometry,
+                &ship(),
+                &limits(),
+                Watch::unlimited(),
+            );
             enumerate_cycles(&graph, &geometry, 4, 10_000)
                 .into_iter()
                 .map(|cycle| {
@@ -397,14 +419,13 @@ mod tests {
             market(2, 5.0, &[(1, 100, 500)], &[(0, 900, 500)]),
         ];
         let geometry = geometry(&markets);
-        let graph =
-            TradeGraph::build(
-                &Pools::from_markets(&markets),
-                &geometry,
-                &ship(),
-                &limits(),
-                Watch::unlimited(),
-            );
+        let graph = TradeGraph::build(
+            &Pools::from_markets(&markets),
+            &geometry,
+            &ship(),
+            &limits(),
+            Watch::unlimited(),
+        );
         let best = best_ratio(&graph).expect("a round trip");
         let (profit, millis, edges) = price_cycle(&graph, &best.nodes).expect("a priced cycle");
         assert_eq!(best.rate, Ratio::new(profit, millis));

@@ -137,7 +137,9 @@ pub(crate) struct Mock {
 
 impl std::fmt::Debug for Mock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Mock").field("addr", &self.addr).finish_non_exhaustive()
+        f.debug_struct("Mock")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
     }
 }
 
@@ -152,49 +154,55 @@ impl Mock {
         let (tx, rx) = std::sync::mpsc::channel();
         let server_state = Arc::clone(&state);
 
-        std::thread::Builder::new().name("edm-mock".to_owned()).spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .enable_time()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    let _ = tx.send(Err(error));
-                    return;
-                }
-            };
-            runtime.block_on(async move {
-                let listener = match TcpListener::bind(("127.0.0.1", 0)).await {
-                    Ok(listener) => listener,
+        std::thread::Builder::new()
+            .name("edm-mock".to_owned())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .enable_time()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
                     Err(error) => {
                         let _ = tx.send(Err(error));
                         return;
                     }
                 };
-                let addr = match listener.local_addr() {
-                    Ok(addr) => addr,
-                    Err(error) => {
-                        let _ = tx.send(Err(error));
+                runtime.block_on(async move {
+                    let listener = match TcpListener::bind(("127.0.0.1", 0)).await {
+                        Ok(listener) => listener,
+                        Err(error) => {
+                            let _ = tx.send(Err(error));
+                            return;
+                        }
+                    };
+                    let addr = match listener.local_addr() {
+                        Ok(addr) => addr,
+                        Err(error) => {
+                            let _ = tx.send(Err(error));
+                            return;
+                        }
+                    };
+                    if tx.send(Ok(addr)).is_err() {
                         return;
                     }
-                };
-                if tx.send(Ok(addr)).is_err() {
-                    return;
-                }
-                loop {
-                    let Ok((socket, _)) = listener.accept().await else { continue };
-                    let state = Arc::clone(&server_state);
-                    tokio::task::spawn(async move {
-                        // A dropped connection is the client exiting, which is
-                        // the normal end of every scenario.
-                        let _ = serve(socket, state).await;
-                    });
-                }
-            });
-        })?;
+                    loop {
+                        let Ok((socket, _)) = listener.accept().await else {
+                            continue;
+                        };
+                        let state = Arc::clone(&server_state);
+                        tokio::task::spawn(async move {
+                            // A dropped connection is the client exiting, which is
+                            // the normal end of every scenario.
+                            let _ = serve(socket, state).await;
+                        });
+                    }
+                });
+            })?;
 
-        let addr = rx.recv().context("the mock server thread died before binding")??;
+        let addr = rx
+            .recv()
+            .context("the mock server thread died before binding")??;
         Ok(Self { addr, state })
     }
 
@@ -205,8 +213,14 @@ impl Mock {
     /// Installs a scenario's script and clears the log.
     pub(crate) fn load(&self, scenario: &Scenario) {
         let mut state = self.lock();
-        state.routes =
-            scenario.routes.iter().map(|route| RouteState { route: route.clone(), served: 0 }).collect();
+        state.routes = scenario
+            .routes
+            .iter()
+            .map(|route| RouteState {
+                route: route.clone(),
+                served: 0,
+            })
+            .collect();
         state.log.clear();
         state.problems.clear();
         state.generation += 1;
@@ -243,7 +257,11 @@ impl Mock {
                 millis: record.arrival.as_millis(),
             })
             .collect();
-        Observed { wire: format_log(&state.log, ordered), arrivals, problems }
+        Observed {
+            wire: format_log(&state.log, ordered),
+            arrivals,
+            problems,
+        }
     }
 
     pub(crate) fn request_count(&self) -> usize {
@@ -299,7 +317,13 @@ pub(crate) fn format_timing(arrivals: &[Arrival]) -> String {
          # `expect-frontier-requests`.\n",
     );
     for (index, arrival) in arrivals.iter().enumerate() {
-        let _ = writeln!(out, "#{} {} +{} ms", index + 1, arrival.profile, arrival.millis);
+        let _ = writeln!(
+            out,
+            "#{} {} +{} ms",
+            index + 1,
+            arrival.profile,
+            arrival.millis
+        );
     }
     out
 }
@@ -315,15 +339,24 @@ pub(crate) fn min_frontier_gap(arrivals: &[Arrival]) -> Option<u128> {
         .filter(|arrival| arrival.profile == Profile::Frontier)
         .map(|arrival| arrival.millis)
         .collect();
-    instants.windows(2).map(|pair| pair[1].saturating_sub(pair[0])).min()
+    instants
+        .windows(2)
+        .map(|pair| pair[1].saturating_sub(pair[0]))
+        .min()
 }
 
 pub(crate) fn frontier_count(arrivals: &[Arrival]) -> usize {
-    arrivals.iter().filter(|arrival| arrival.profile == Profile::Frontier).count()
+    arrivals
+        .iter()
+        .filter(|arrival| arrival.profile == Profile::Frontier)
+        .count()
 }
 
 fn render_record(record: &Record) -> String {
-    let mut out = format!(" {} {} {}\n?{}\n", record.profile, record.method, record.path, record.query);
+    let mut out = format!(
+        " {} {} {}\n?{}\n",
+        record.profile, record.method, record.path, record.query
+    );
 
     let mut headers: Vec<(String, String)> = Vec::new();
     for (name, value) in &record.headers {
@@ -352,12 +385,18 @@ fn render_record(record: &Record) -> String {
 async fn serve(mut socket: TcpStream, state: Arc<Mutex<State>>) -> Result<()> {
     let mut buffer = Vec::new();
     loop {
-        let Some(request) = read_request(&mut socket, &mut buffer).await? else { return Ok(()) };
+        let Some(request) = read_request(&mut socket, &mut buffer).await? else {
+            return Ok(());
+        };
 
         let profile = Profile::of_path(&request.path);
         let (reply, note) = choose(&state, &request, profile);
         if let Some(note) = note {
-            state.lock().expect("mock state poisoned").problems.push(note);
+            state
+                .lock()
+                .expect("mock state poisoned")
+                .problems
+                .push(note);
         }
         if let Some(profile) = profile {
             let mut state = state.lock().expect("mock state poisoned");
@@ -407,7 +446,10 @@ fn choose(
     profile: Option<Profile>,
 ) -> (Option<Reply>, Option<String>) {
     let Some(profile) = profile else {
-        return (None, Some(format!("no profile owns the path {}", request.path)));
+        return (
+            None,
+            Some(format!("no profile owns the path {}", request.path)),
+        );
     };
     // The market id lives inside the encrypted query, so a game-internal API route
     // that wants to tell one poll from another has to be given the plaintext.
@@ -426,7 +468,10 @@ fn choose(
             continue;
         }
         if let Some(needle) = &entry.route.envelope
-            && !envelope.as_deref().unwrap_or_default().contains(needle.as_str())
+            && !envelope
+                .as_deref()
+                .unwrap_or_default()
+                .contains(needle.as_str())
         {
             continue;
         }
@@ -448,7 +493,10 @@ fn choose(
         format!(" (envelope {:?})", &plaintext[..plaintext.len().min(48)])
     });
     let note = if path_matched {
-        format!("{} {} exhausted its scripted replies{seen}", request.method, request.path)
+        format!(
+            "{} {} exhausted its scripted replies{seen}",
+            request.method, request.path
+        )
     } else {
         format!("nothing routes {} {}{seen}", request.method, request.path)
     };
@@ -477,7 +525,11 @@ async fn write_reply(socket: &mut TcpStream, reply: &Reply, head: bool) -> io::R
     for (name, value) in &reply.headers {
         out.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
     }
-    if !reply.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-length")) {
+    if !reply
+        .headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+    {
         out.extend_from_slice(format!("Content-Length: {}\r\n", reply.body.len()).as_bytes());
     }
     out.extend_from_slice(b"\r\n");
@@ -538,8 +590,13 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<Op
 
     let mut headers = Vec::new();
     for line in lines {
-        let Some((name, value)) = line.split_once(':') else { continue };
-        headers.push((name.trim_matches(' ').to_ascii_lowercase(), value.trim_matches(' ').to_owned()));
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        headers.push((
+            name.trim_matches(' ').to_ascii_lowercase(),
+            value.trim_matches(' ').to_owned(),
+        ));
     }
     if headers.iter().any(|(name, _)| name == "transfer-encoding") {
         bail!("edm-mock does not speak chunked requests; neither client should send one");
@@ -562,11 +619,19 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<Op
     let body = buffer[body_start..body_start + length].to_vec();
     buffer.drain(..body_start + length);
 
-    Ok(Some(Request { method, path, query, headers, body }))
+    Ok(Some(Request {
+        method,
+        path,
+        query,
+        headers,
+        body,
+    }))
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 #[cfg(test)]
@@ -579,7 +644,10 @@ mod tests {
             method: "GET".to_owned(),
             path: "/2.0/elite/market/list".to_owned(),
             query: "abc=".to_owned(),
-            headers: headers.iter().map(|(n, v)| ((*n).to_owned(), (*v).to_owned())).collect(),
+            headers: headers
+                .iter()
+                .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+                .collect(),
             body: body.to_vec(),
             arrival: Duration::from_millis(7),
         }
@@ -588,7 +656,10 @@ mod tests {
     fn arrivals(entries: &[(Profile, u128)]) -> Vec<Arrival> {
         entries
             .iter()
-            .map(|(profile, millis)| Arrival { profile: *profile, millis: *millis })
+            .map(|(profile, millis)| Arrival {
+                profile: *profile,
+                millis: *millis,
+            })
             .collect()
     }
 
@@ -626,7 +697,11 @@ mod tests {
     fn the_log_hides_injected_values_but_not_their_absence() {
         let text = render_record(&record(
             Profile::Frontier,
-            &[("host", "127.0.0.1:9"), ("connection", "keep-alive"), ("nonce", "0123456789ab")],
+            &[
+                ("host", "127.0.0.1:9"),
+                ("connection", "keep-alive"),
+                ("nonce", "0123456789ab"),
+            ],
             b"",
         ));
         assert!(text.contains("host: <injected>"), "{text}");
@@ -639,7 +714,11 @@ mod tests {
     fn the_frontier_user_agent_is_diffed_and_the_ardent_one_is_not() {
         let frontier = render_record(&record(Profile::Frontier, &[("user-agent", "EDGame")], b""));
         assert!(frontier.contains("user-agent: EDGame"));
-        let ardent = render_record(&record(Profile::Ardent, &[("user-agent", "edm/1.0.0")], b""));
+        let ardent = render_record(&record(
+            Profile::Ardent,
+            &[("user-agent", "edm/1.0.0")],
+            b"",
+        ));
         assert!(ardent.contains("user-agent: <injected>"));
     }
 
@@ -703,7 +782,11 @@ mod tests {
 
         let observed = mock.observe(true);
         assert!(observed.problems.is_empty(), "{:?}", observed.problems);
-        assert!(observed.wire.contains("#1 eddn POST /upload/"), "{}", observed.wire);
+        assert!(
+            observed.wire.contains("#1 eddn POST /upload/"),
+            "{}",
+            observed.wire
+        );
         assert!(observed.wire.ends_with(".3\nabc\n"), "{}", observed.wire);
         assert_eq!(observed.arrivals.len(), 1);
         assert_eq!(observed.arrivals[0].profile, Profile::Eddn);

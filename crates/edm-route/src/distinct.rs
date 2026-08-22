@@ -281,8 +281,10 @@ impl Search<'_> {
             return;
         }
         if self.expansions.is_multiple_of(EXPANSIONS_PER_CHECK) {
-            self.watch
-                .report(Event::Expanded { paths: self.expansions, budget: self.budget });
+            self.watch.report(Event::Expanded {
+                paths: self.expansions,
+                budget: self.budget,
+            });
         }
         self.expansions += 1;
 
@@ -309,7 +311,11 @@ impl Search<'_> {
             let incumbent = self.best.as_ref().map_or(Ratio::ZERO, |(_, rate)| *rate);
             let remaining = self.ceiling.saturating_sub(frame.path.len());
             if beyond_reach(
-                Partial { profit, millis, reach: frame.reach[edge.to as usize] },
+                Partial {
+                    profit,
+                    millis,
+                    reach: frame.reach[edge.to as usize],
+                },
                 Bracket {
                     incumbent,
                     upper: self.upper,
@@ -343,8 +349,11 @@ impl Search<'_> {
             "the completion bound must stay an upper bound on the realised time"
         );
         let rate = Ratio::new(profit, millis);
-        let nodes: Vec<u32> =
-            frame.path.iter().map(|&local| frame.global[local as usize]).collect();
+        let nodes: Vec<u32> = frame
+            .path
+            .iter()
+            .map(|&local| frame.global[local as usize])
+            .collect();
         // Only the incumbent is kept. Every closed path could be recorded for
         // the runner-up listing, but the budget admits twenty million of them
         // and the listing is enumerated separately and deterministically.
@@ -448,12 +457,7 @@ fn beyond_reach(partial: Partial, bracket: Bracket) -> bool {
 ///
 /// Finite because the ratio solver proved no cycle has positive reduced weight
 /// at that rate — which is exactly what makes this bound computable at all.
-fn reachability(
-    adjacency: &[Vec<LocalEdge>],
-    n: usize,
-    upper: Ratio,
-    origin: u32,
-) -> Vec<i128> {
+fn reachability(adjacency: &[Vec<LocalEdge>], n: usize, upper: Ratio, origin: u32) -> Vec<i128> {
     let mut best = vec![UNREACHABLE; n];
     best[origin as usize] = 0;
     for _ in 0..n {
@@ -487,8 +491,12 @@ pub fn solve(
     k_min: usize,
     watch: Watch<'_>,
 ) -> Vec<Route> {
-    let Some(best) = best_with_min_stops(graph, limits, k_min, watch) else { return Vec::new() };
-    let Some(head) = round::route_of(graph, geometry, &best.nodes) else { return Vec::new() };
+    let Some(best) = best_with_min_stops(graph, limits, k_min, watch) else {
+        return Vec::new();
+    };
+    let Some(head) = round::route_of(graph, geometry, &best.nodes) else {
+        return Vec::new();
+    };
     // Three claims, in descending strength, and the middle one is the reason
     // `bound_proved` exists: an upper bound is only worth quoting if something
     // proved it. Without that distinction an exhausted run would announce a gap
@@ -498,7 +506,9 @@ pub fn solve(
     } else if best.bound_proved {
         Guarantee::BoundedGap { upper: best.upper }
     } else {
-        Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+        Guarantee::Heuristic {
+            reason: HeuristicReason::SearchBudgetExhausted,
+        }
     };
 
     let ceiling = limits
@@ -521,7 +531,7 @@ pub fn solve(
 
 #[cfg(test)]
 mod tests {
-    use super::{Bracket, Partial, beyond_reach, best_with_min_stops};
+    use super::{Bracket, Partial, best_with_min_stops, beyond_reach};
     use crate::fixture::{geometry, limits, market, ship};
     use crate::graph::{Pools, TradeGraph};
     use crate::model::Market;
@@ -542,10 +552,17 @@ mod tests {
     #[test]
     fn an_unreachable_completion_is_always_pruned() {
         assert!(beyond_reach(
-            Partial { profit: Credits(1_000_000), millis: Millis(1), reach: super::UNREACHABLE },
+            Partial {
+                profit: Credits(1_000_000),
+                millis: Millis(1),
+                reach: super::UNREACHABLE
+            },
             Bracket {
                 incumbent: Ratio::ZERO,
-                upper: Ratio { credits: 1, millis: 1 },
+                upper: Ratio {
+                    credits: 1,
+                    millis: 1
+                },
                 max_millis: Millis(1),
             },
         ));
@@ -556,10 +573,17 @@ mod tests {
         // With the incumbent at zero the test reduces to "can this path earn
         // anything at all", and every profitable path can.
         assert!(!beyond_reach(
-            Partial { profit: Credits(10), millis: Millis(100), reach: 0 },
+            Partial {
+                profit: Credits(10),
+                millis: Millis(100),
+                reach: 0
+            },
             Bracket {
                 incumbent: Ratio::ZERO,
-                upper: Ratio { credits: 1, millis: 1 },
+                upper: Ratio {
+                    credits: 1,
+                    millis: 1
+                },
                 max_millis: Millis(1_000),
             },
         ));
@@ -570,10 +594,21 @@ mod tests {
         // The incumbent earns 10 credits per millisecond and the free optimum
         // is the same, so no completion can add anything: a path earning one
         // credit per millisecond cannot recover.
-        let rate = Ratio { credits: 10, millis: 1 };
+        let rate = Ratio {
+            credits: 10,
+            millis: 1,
+        };
         assert!(beyond_reach(
-            Partial { profit: Credits(100), millis: Millis(100), reach: 0 },
-            Bracket { incumbent: rate, upper: rate, max_millis: Millis(1_000) },
+            Partial {
+                profit: Credits(100),
+                millis: Millis(100),
+                reach: 0
+            },
+            Bracket {
+                incumbent: rate,
+                upper: rate,
+                max_millis: Millis(1_000)
+            },
         ));
     }
 
@@ -585,8 +620,7 @@ mod tests {
             market(3, 2.0, &[(2, 100, 500)], &[(1, 900, 500)]),
         ];
         let graph = build(&markets);
-        let found =
-            best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
+        let found = best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
         assert_eq!(found.expansions, 0);
         assert_eq!(found.nodes.len(), 3);
         assert_eq!(found.rate, found.upper);
@@ -597,8 +631,18 @@ mod tests {
     /// the only thing that meets a floor of three.
     fn floor_forcing() -> [Market; 3] {
         [
-            market(1, 0.0, &[(0, 100, 500), (3, 100, 500)], &[(2, 900, 500), (1, 900, 500)]),
-            market(2, 1.0, &[(1, 100, 500), (2, 100, 500)], &[(0, 900, 500), (3, 200, 500)]),
+            market(
+                1,
+                0.0,
+                &[(0, 100, 500), (3, 100, 500)],
+                &[(2, 900, 500), (1, 900, 500)],
+            ),
+            market(
+                2,
+                1.0,
+                &[(1, 100, 500), (2, 100, 500)],
+                &[(0, 900, 500), (3, 200, 500)],
+            ),
             market(3, 2.0, &[(2, 100, 500)], &[(1, 200, 500)]),
         ]
     }
@@ -609,8 +653,7 @@ mod tests {
         let graph = build(&markets);
         let free = crate::ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
         assert_eq!(free.nodes.len(), 2);
-        let found =
-            best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
+        let found = best_with_min_stops(&graph, &limits(), 3, Watch::unlimited()).expect("a loop");
         assert_eq!(found.nodes.len(), 3);
         assert!(found.proved);
         assert!(found.bound_proved);
@@ -631,12 +674,17 @@ mod tests {
         let found = best_with_min_stops(&graph, &limits(), 2, watch).expect("the warm start");
         assert!(!found.proved);
         assert!(!found.bound_proved);
-        assert_eq!(found.rate, found.upper, "the early return quotes itself as its own bound");
+        assert_eq!(
+            found.rate, found.upper,
+            "the early return quotes itself as its own bound"
+        );
 
         let routes = super::solve(&graph, &geometry(&markets), &limits(), 2, watch);
         assert_eq!(
             routes[0].guarantee,
-            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+            Guarantee::Heuristic {
+                reason: HeuristicReason::SearchBudgetExhausted
+            }
         );
     }
 }

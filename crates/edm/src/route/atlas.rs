@@ -67,7 +67,11 @@ impl Atlas {
     /// right for both.
     #[must_use]
     pub fn new(cache_root: &Path, enabled: bool, refresh: bool) -> Self {
-        Self { root: cache_root.join("ardent"), enabled, refresh }
+        Self {
+            root: cache_root.join("ardent"),
+            enabled,
+            refresh,
+        }
     }
 
     /// The file a URL is stored under.
@@ -83,7 +87,13 @@ impl Atlas {
     }
 
     /// A stored answer, if it is still within `lifetime_minutes`.
-    pub fn get<F: Fs>(&self, fs: &F, url: &str, now_ms: f64, lifetime_minutes: f64) -> Option<JsValue> {
+    pub fn get<F: Fs>(
+        &self,
+        fs: &F,
+        url: &str,
+        now_ms: f64,
+        lifetime_minutes: f64,
+    ) -> Option<JsValue> {
         if !self.enabled || self.refresh {
             return None;
         }
@@ -129,7 +139,9 @@ fn decode(text: &str) -> Option<Entry> {
     if object.get("version") != Some(&JsValue::Num(f64::from(FORMAT_VERSION))) {
         return None;
     }
-    let JsValue::Str(url) = object.get("url")? else { return None };
+    let JsValue::Str(url) = object.get("url")? else {
+        return None;
+    };
     let JsValue::Num(read_at_ms) = *object.get("readAt")? else {
         return None;
     };
@@ -138,7 +150,11 @@ fn decode(text: &str) -> Option<Entry> {
     if !read_at_ms.is_finite() {
         return None;
     }
-    Some(Entry { url: url.to_string(), read_at_ms, body: object.get("body")?.clone() })
+    Some(Entry {
+        url: url.to_string(),
+        read_at_ms,
+        body: object.get("body")?.clone(),
+    })
 }
 
 /// FNV-1a, 64-bit.
@@ -195,7 +211,10 @@ mod tests {
         let atlas = atlas();
         atlas.put(&fs, "https://x/nearby?maxDistance=60", &body("Sol"), 0.0);
 
-        assert_eq!(atlas.get(&fs, "https://x/nearby?maxDistance=200", MINUTE, 60.0), None);
+        assert_eq!(
+            atlas.get(&fs, "https://x/nearby?maxDistance=200", MINUTE, 60.0),
+            None
+        );
     }
 
     #[test]
@@ -204,7 +223,10 @@ mod tests {
         let atlas = atlas();
         atlas.put(&fs, "u", &body("Sol"), 0.0);
 
-        assert!(atlas.get(&fs, "u", 60.0 * MINUTE, 60.0).is_some(), "the bound is inclusive");
+        assert!(
+            atlas.get(&fs, "u", 60.0 * MINUTE, 60.0).is_some(),
+            "the bound is inclusive"
+        );
         assert!(atlas.get(&fs, "u", 60.0 * MINUTE + 1.0, 60.0).is_none());
     }
 
@@ -229,7 +251,10 @@ mod tests {
         refreshing.put(&fs, "u", &body("Sol"), 0.0);
 
         assert!(refreshing.get(&fs, "u", 0.0, 60.0).is_none());
-        assert!(atlas().get(&fs, "u", 0.0, 60.0).is_some(), "the next run finds it");
+        assert!(
+            atlas().get(&fs, "u", 0.0, 60.0).is_some(),
+            "the next run finds it"
+        );
     }
 
     #[test]
@@ -247,7 +272,10 @@ mod tests {
     fn a_hostile_name_cannot_escape_the_directory() {
         let path = atlas().path("https://x/system/name/../../etc/passwd/markets");
         assert!(path.starts_with("/cache/ardent"), "{}", path.display());
-        assert_eq!(path.components().filter(|c| c.as_os_str() == "..").count(), 0);
+        assert_eq!(
+            path.components().filter(|c| c.as_os_str() == "..").count(),
+            0
+        );
     }
 
     /// Pinned against the published FNV-1a 64 test vectors, because a cache

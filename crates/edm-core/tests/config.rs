@@ -48,10 +48,7 @@ struct Case<T: 'static> {
 }
 
 /// Runs one table against one builder.
-fn run<T: 'static>(
-    cases: &[Case<T>],
-    build: impl Fn(&Cli<'_>) -> Result<T, String>,
-) {
+fn run<T: 'static>(cases: &[Case<T>], build: impl Fn(&Cli<'_>) -> Result<T, String>) {
     for case in cases {
         let outcome = with_cli(case.argv, case.env, &build);
         match (&case.expect, outcome) {
@@ -111,8 +108,17 @@ fn credentials_are_validated_field_by_field_in_source_order() {
     // machineId is validated before machineToken, so a bad machine id wins even
     // when the token is also wrong.
     assert_eq!(
-        session(&["market", "--machine-id", "caf\u{e9}", "--machine-token", "short"], &[])
-            .unwrap_err(),
+        session(
+            &[
+                "market",
+                "--machine-id",
+                "caf\u{e9}",
+                "--machine-token",
+                "short"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "machineId must contain printable ASCII only"
     );
     // Within a token field, ASCII is tested before length: this value is 80
@@ -164,7 +170,11 @@ fn the_session_reads_credentials_before_its_switches() {
     // `--json` is poisoned, which would throw in `optionalSwitch` — but the
     // credentials are loaded first, so the credential failure is what surfaces.
     assert_eq!(
-        session(&["market", "--json", "constructor", "--cmdr-id", "\u{e9}"], &[]).unwrap_err(),
+        session(
+            &["market", "--json", "constructor", "--cmdr-id", "\u{e9}"],
+            &[]
+        )
+        .unwrap_err(),
         "cmdrId must contain printable ASCII only"
     );
 }
@@ -177,8 +187,7 @@ fn session_switches_and_method_override() {
     assert_eq!(good.credentials.commander_id, "F1234567");
     assert_eq!(good.credentials.machine_token.len(), 80);
 
-    let overridden =
-        session(&["market", "--method", "patch", "--dry-run", "--json"], &[]).unwrap();
+    let overridden = session(&["market", "--method", "patch", "--dry-run", "--json"], &[]).unwrap();
     assert_eq!(overridden.method_override.as_deref(), Some("PATCH"));
     assert!(overridden.dry_run);
     assert!(overridden.json);
@@ -193,8 +202,11 @@ fn session_switches_and_method_override() {
 // nextStamp
 // ---------------------------------------------------------------------------
 
-const DEFAULTS: StampDefaults =
-    StampDefaults { entropy: [0x0a, 0xbc, 0xde, 0xf0, 0x12, 0x34], now_ms: 1_700_000_000_500.0, uptime_seconds: 12.3456 };
+const DEFAULTS: StampDefaults = StampDefaults {
+    entropy: [0x0a, 0xbc, 0xde, 0xf0, 0x12, 0x34],
+    now_ms: 1_700_000_000_500.0,
+    uptime_seconds: 12.3456,
+};
 
 fn stamp(argv: &[&str], env: &[(&str, &str)]) -> Result<config::RequestStamp, String> {
     with_cli(argv, env, |cli| {
@@ -206,7 +218,10 @@ fn stamp(argv: &[&str], env: &[(&str, &str)]) -> Result<config::RequestStamp, St
 fn a_stamp_falls_back_to_its_ambient_defaults() {
     let value = stamp(&["market"], &[]).unwrap();
     assert_eq!(value.nonce.as_str(), "0abcdef01234");
-    assert_eq!(value.frontier_time, 1_700_000_000.0, "floor(Date.now() / 1000)");
+    assert_eq!(
+        value.frontier_time, 1_700_000_000.0,
+        "floor(Date.now() / 1000)"
+    );
     assert_eq!(value.request_time, 12_345, "floor(uptime() * 1000)");
 }
 
@@ -217,7 +232,11 @@ fn stamp_overrides_come_from_flags_or_the_environment() {
         &[("REQUEST_TIME", "7")],
     )
     .unwrap();
-    assert_eq!(value.nonce.as_str(), "abcdef012345", "the request nonce is lowercased [R57]");
+    assert_eq!(
+        value.nonce.as_str(),
+        "abcdef012345",
+        "the request nonce is lowercased [R57]"
+    );
     assert_eq!(value.frontier_time, 42.0);
     assert_eq!(value.request_time, 7);
 
@@ -229,9 +248,24 @@ fn stamp_overrides_come_from_flags_or_the_environment() {
 /// `>>> 0` wraps rather than saturating \[R15\].
 #[test]
 fn request_time_wraps_modulo_two_to_the_thirty_two() {
-    assert_eq!(stamp(&["market", "--request-time", "4294967296"], &[]).unwrap().request_time, 0);
-    assert_eq!(stamp(&["market", "--request-time", "4294967295"], &[]).unwrap().request_time, u32::MAX);
-    assert_eq!(stamp(&["market", "--request-time", "4294967297"], &[]).unwrap().request_time, 1);
+    assert_eq!(
+        stamp(&["market", "--request-time", "4294967296"], &[])
+            .unwrap()
+            .request_time,
+        0
+    );
+    assert_eq!(
+        stamp(&["market", "--request-time", "4294967295"], &[])
+            .unwrap()
+            .request_time,
+        u32::MAX
+    );
+    assert_eq!(
+        stamp(&["market", "--request-time", "4294967297"], &[])
+            .unwrap()
+            .request_time,
+        1
+    );
 }
 
 #[test]
@@ -239,7 +273,19 @@ fn stamp_fields_are_validated_in_object_literal_order() {
     // All three are wrong; the nonce is reported because it is the first
     // property of the returned literal, not because it was read first.
     assert_eq!(
-        stamp(&["market", "--nonce", "zz", "--f-time", "x", "--request-time", "y"], &[]).unwrap_err(),
+        stamp(
+            &[
+                "market",
+                "--nonce",
+                "zz",
+                "--f-time",
+                "x",
+                "--request-time",
+                "y"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "nonce must be exactly 12 hexadecimal characters"
     );
     assert_eq!(
@@ -267,7 +313,11 @@ const MARKET_TARGET_CASES: &[Case<MarketTarget>] = &[
         argv: &["market", "--market-id", "0004306502403"],
         env: &[],
         expect: Expect::Ok(|target| {
-            assert_eq!(*target, MarketTarget::Single(4_306_502_403.0), "leading zeros are parsed away");
+            assert_eq!(
+                *target,
+                MarketTarget::Single(4_306_502_403.0),
+                "leading zeros are parsed away"
+            );
         }),
     },
     Case {
@@ -278,7 +328,14 @@ const MARKET_TARGET_CASES: &[Case<MarketTarget>] = &[
     },
     Case {
         name: "R52 market prefers --system over --station",
-        argv: &["market", "--system", "Sol", "--station", "Abraham Lincoln", "Colonia"],
+        argv: &[
+            "market",
+            "--system",
+            "Sol",
+            "--station",
+            "Abraham Lincoln",
+            "Colonia",
+        ],
         env: &[],
         expect: Expect::Ok(|target| assert_eq!(*target, MarketTarget::Sweep("Sol".to_owned()))),
     },
@@ -295,7 +352,10 @@ const MARKET_TARGET_CASES: &[Case<MarketTarget>] = &[
         argv: &["market", "  Hyades", "Sector", "DB-X", "d1-112  "],
         env: &[],
         expect: Expect::Ok(|target| {
-            assert_eq!(*target, MarketTarget::Sweep("Hyades Sector DB-X d1-112".to_owned()));
+            assert_eq!(
+                *target,
+                MarketTarget::Sweep("Hyades Sector DB-X d1-112".to_owned())
+            );
         }),
     },
     Case {
@@ -416,17 +476,26 @@ fn sweep_settings_cases() {
 
 #[test]
 fn the_sweep_quiet_flag_is_the_sessions_json_flag() {
-    let quiet = with_cli(&["market"], &[], |cli| config::sweep_settings(cli, true).unwrap());
+    let quiet = with_cli(&["market"], &[], |cli| {
+        config::sweep_settings(cli, true).unwrap()
+    });
     assert!(quiet.quiet);
 }
 
 #[test]
 fn the_sweep_lookup_mode_asks_only_about_station() {
-    let station =
-        with_cli(&["market", "--station", "Jameson Memorial"], &[], config::sweep_lookup_mode);
+    let station = with_cli(
+        &["market", "--station", "Jameson Memorial"],
+        &[],
+        config::sweep_lookup_mode,
+    );
     assert_eq!(station, LookupMode::Station);
     // `--system` does *not* produce `system` here, unlike `markets`.
-    let system = with_cli(&["market", "--system", "Shinrarta Dezhra"], &[], config::sweep_lookup_mode);
+    let system = with_cli(
+        &["market", "--system", "Shinrarta Dezhra"],
+        &[],
+        config::sweep_lookup_mode,
+    );
     assert_eq!(system, LookupMode::Auto);
 }
 
@@ -434,15 +503,23 @@ fn the_sweep_lookup_mode_asks_only_about_station() {
 /// is on \[R47\].
 #[test]
 fn wants_eddn_short_circuits() {
-    assert!(with_cli(&["market", "--eddn"], &[], |cli| config::wants_eddn(cli).unwrap()));
-    assert!(with_cli(&["market", "--eddn-test"], &[], |cli| config::wants_eddn(cli).unwrap()));
-    assert!(!with_cli(&["market"], &[], |cli| config::wants_eddn(cli).unwrap()));
-    assert!(with_cli(&["market", "--eddn", "--eddn-test", "constructor"], &[], |cli| {
+    assert!(with_cli(&["market", "--eddn"], &[], |cli| {
         config::wants_eddn(cli).unwrap()
     }));
-    assert!(with_cli(&["market", "--eddn-test", "constructor"], &[], |cli| {
-        config::wants_eddn(cli).is_err()
+    assert!(with_cli(&["market", "--eddn-test"], &[], |cli| {
+        config::wants_eddn(cli).unwrap()
     }));
+    assert!(!with_cli(&["market"], &[], |cli| config::wants_eddn(cli).unwrap()));
+    assert!(with_cli(
+        &["market", "--eddn", "--eddn-test", "constructor"],
+        &[],
+        |cli| { config::wants_eddn(cli).unwrap() }
+    ));
+    assert!(with_cli(
+        &["market", "--eddn-test", "constructor"],
+        &[],
+        |cli| { config::wants_eddn(cli).is_err() }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +529,14 @@ fn wants_eddn_short_circuits() {
 const MARKETS_CASES: &[Case<MarketsConfig>] = &[
     Case {
         name: "R52 markets prefers --station over --system",
-        argv: &["markets", "--system", "Sol", "--station", "Abraham Lincoln", "Colonia"],
+        argv: &[
+            "markets",
+            "--system",
+            "Sol",
+            "--station",
+            "Abraham Lincoln",
+            "Colonia",
+        ],
         env: &[],
         expect: Expect::Ok(|config| {
             assert_eq!(
@@ -471,7 +555,10 @@ const MARKETS_CASES: &[Case<MarketsConfig>] = &[
         expect: Expect::Ok(|config| {
             assert_eq!(
                 *config,
-                MarketsConfig::Lookup { name: "Sol".to_owned(), mode: LookupMode::System }
+                MarketsConfig::Lookup {
+                    name: "Sol".to_owned(),
+                    mode: LookupMode::System
+                }
             );
         }),
     },
@@ -482,13 +569,22 @@ const MARKETS_CASES: &[Case<MarketsConfig>] = &[
         expect: Expect::Ok(|config| {
             assert_eq!(
                 *config,
-                MarketsConfig::Lookup { name: "Colonia".to_owned(), mode: LookupMode::Auto }
+                MarketsConfig::Lookup {
+                    name: "Colonia".to_owned(),
+                    mode: LookupMode::Auto
+                }
             );
         }),
     },
     Case {
         name: "--address wins outright and no name is resolved",
-        argv: &["markets", "--address", "5378909424384", "--station", "Anywhere"],
+        argv: &[
+            "markets",
+            "--address",
+            "5378909424384",
+            "--station",
+            "Anywhere",
+        ],
         env: &[],
         expect: Expect::Ok(|config| {
             assert_eq!(*config, MarketsConfig::Address(5_378_909_424_384.0));
@@ -519,24 +615,32 @@ fn markets_config_cases() {
 /// \[R51\] — including its validation, which the sweep never performs.
 #[test]
 fn the_cached_timestamp_is_only_read_by_markets() {
-    let honoured = with_cli(&["markets", "--cached-timestamp", "17", "--language", "fr"], &[], |cli| {
-        config::starsystem_query(cli, CachedTimestamp::Flag).unwrap()
-    });
+    let honoured = with_cli(
+        &["markets", "--cached-timestamp", "17", "--language", "fr"],
+        &[],
+        |cli| config::starsystem_query(cli, CachedTimestamp::Flag).unwrap(),
+    );
     assert_eq!(honoured.cached_timestamp, 17.0);
     assert_eq!(honoured.language, "fr");
 
-    let defaulted =
-        with_cli(&["markets"], &[], |cli| config::starsystem_query(cli, CachedTimestamp::Flag).unwrap());
+    let defaulted = with_cli(&["markets"], &[], |cli| {
+        config::starsystem_query(cli, CachedTimestamp::Flag).unwrap()
+    });
     assert_eq!(defaulted.cached_timestamp, 0.0);
     assert_eq!(defaulted.language, "en");
 
-    assert!(with_cli(&["markets", "--cached-timestamp", "x"], &[], |cli| {
-        config::starsystem_query(cli, CachedTimestamp::Flag).is_err()
-    }));
+    assert!(with_cli(
+        &["markets", "--cached-timestamp", "x"],
+        &[],
+        |cli| { config::starsystem_query(cli, CachedTimestamp::Flag).is_err() }
+    ));
     let swept = with_cli(&["market", "--cached-timestamp", "x"], &[], |cli| {
         config::starsystem_query(cli, CachedTimestamp::SweepZero).unwrap()
     });
-    assert_eq!(swept.cached_timestamp, 0.0, "the sweep hardcodes 0 and never parses the flag");
+    assert_eq!(
+        swept.cached_timestamp, 0.0,
+        "the sweep hardcodes 0 and never parses the flag"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -549,8 +653,9 @@ fn eddn_options_default_to_the_commander_and_the_constants() {
         commander_id: "F1234567".to_owned(),
         ..config::Credentials::default()
     };
-    let defaults =
-        with_cli(&["market"], &[], |cli| config::eddn_config(cli, &credentials).unwrap());
+    let defaults = with_cli(&["market"], &[], |cli| {
+        config::eddn_config(cli, &credentials).unwrap()
+    });
     assert_eq!(defaults.uploader_id, "F1234567");
     // C34: this program signs its own uploads. Attributing a shared dataset's
     // rows to a different piece of software defeats the point of the field.
@@ -559,7 +664,10 @@ fn eddn_options_default_to_the_commander_and_the_constants() {
     assert_eq!(defaults.game_version, "GameInternal-Live-market");
     assert_eq!(defaults.game_build, "");
     assert!(!defaults.test);
-    assert_eq!(defaults.horizons, None, "absent is not false: the key is omitted");
+    assert_eq!(
+        defaults.horizons, None,
+        "absent is not false: the key is omitted"
+    );
     assert_eq!(defaults.odyssey, None);
 
     let overridden = with_cli(
@@ -603,7 +711,10 @@ const DISPATCH_CASES: &[Case<TradeDispatch>] = &[
         env: &[],
         expect: Expect::Ok(|dispatch| {
             assert_eq!(dispatch.items, ["gold"]);
-            assert!(!dispatch.batch, "resolveTrade will then look up the *unsplit* `gold,`");
+            assert!(
+                !dispatch.batch,
+                "resolveTrade will then look up the *unsplit* `gold,`"
+            );
         }),
     },
     Case {
@@ -611,7 +722,11 @@ const DISPATCH_CASES: &[Case<TradeDispatch>] = &[
         argv: &["trade", "--item", "gold, silver"],
         env: &[],
         expect: Expect::Ok(|dispatch| {
-            assert_eq!(dispatch.items, ["gold", "silver"], "each token is js-trimmed");
+            assert_eq!(
+                dispatch.items,
+                ["gold", "silver"],
+                "each token is js-trimmed"
+            );
             assert!(dispatch.batch);
         }),
     },
@@ -759,8 +874,21 @@ fn field<'a>(resolved: &'a ResolvedTrade, label: &str) -> (&'a str, PlanSource) 
 
 #[test]
 fn a_resolved_buy_prices_itself_from_the_market() {
-    let plan = resolved(&["trade", "--market-id", "3223343616", "--type", "buy", "--item", "gold", "--qty", "10"], &[])
-        .unwrap();
+    let plan = resolved(
+        &[
+            "trade",
+            "--market-id",
+            "3223343616",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "10",
+        ],
+        &[],
+    )
+    .unwrap();
     assert_eq!(plan.plan.kind, Kind::Buy);
     assert_eq!(plan.plan.commodity_id, 128_049_204.0);
     assert_eq!(plan.plan.commodity_name, "Gold");
@@ -784,7 +912,10 @@ fn a_resolved_buy_prices_itself_from_the_market() {
         ]
     );
     assert_eq!(field(&plan, "marketId"), ("3223343616", PlanSource::Flag));
-    assert_eq!(field(&plan, "commodityId"), ("128049204 (Gold)", PlanSource::Market));
+    assert_eq!(
+        field(&plan, "commodityId"),
+        ("128049204 (Gold)", PlanSource::Market)
+    );
     assert_eq!(field(&plan, "unitPrice"), ("100", PlanSource::Market));
     assert_eq!(field(&plan, "qty"), ("10", PlanSource::Flag));
     assert_eq!(field(&plan, "finalQty"), ("20", PlanSource::Market));
@@ -805,23 +936,49 @@ fn the_market_id_provenance_ignores_the_environment() {
         &[("MARKET_ID", "3223343616")],
     )
     .unwrap();
-    assert_eq!(field(&plan, "marketId"), ("3223343616", PlanSource::Default));
+    assert_eq!(
+        field(&plan, "marketId"),
+        ("3223343616", PlanSource::Default)
+    );
 }
 
 #[test]
 fn a_numeric_item_is_flag_provenance_and_a_name_is_market() {
     let by_id = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "128049204", "--qty", "1"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "128049204",
+            "--qty",
+            "1",
+        ],
         &[],
     )
     .unwrap();
-    assert_eq!(field(&by_id, "commodityId"), ("128049204 (Gold)", PlanSource::Flag));
+    assert_eq!(
+        field(&by_id, "commodityId"),
+        ("128049204 (Gold)", PlanSource::Flag)
+    );
 }
 
 #[test]
 fn the_stock_clamp_notes_what_it_clamped_to() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "999"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "999",
+        ],
         &[],
     )
     .unwrap();
@@ -833,7 +990,19 @@ fn the_stock_clamp_notes_what_it_clamped_to() {
 #[test]
 fn the_free_space_clamp_measures_against_what_is_already_aboard() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "10", "--cargo", "20"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "10",
+            "--cargo",
+            "20",
+        ],
         &[],
     )
     .unwrap();
@@ -841,17 +1010,44 @@ fn the_free_space_clamp_measures_against_what_is_already_aboard() {
     assert_eq!(plan.notes[0], "qty 10 clamped to free cargo space 3");
 
     let full = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "10", "--cargo", "17"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "10",
+            "--cargo",
+            "17",
+        ],
         &[],
     );
-    assert_eq!(full.unwrap_err(), "Cargo is full (17 units); nothing can be bought");
+    assert_eq!(
+        full.unwrap_err(),
+        "Cargo is full (17 units); nothing can be bought"
+    );
 }
 
 /// Both clamps fire, and their notes appear in clamp order.
 #[test]
 fn the_two_clamps_stack() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "999", "--cargo", "20"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "999",
+            "--cargo",
+            "20",
+        ],
         &[],
     )
     .unwrap();
@@ -872,7 +1068,19 @@ fn the_two_clamps_stack() {
 fn a_bad_cargo_surfaces_after_the_stock_clamp() {
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "tea", "--qty", "1", "--cargo", "abc"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "tea",
+                "--qty",
+                "1",
+                "--cargo",
+                "abc"
+            ],
             &[],
         )
         .unwrap_err(),
@@ -881,7 +1089,19 @@ fn a_bad_cargo_surfaces_after_the_stock_clamp() {
     // With stock to clamp against, the same `--cargo` is reached and rejected.
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--cargo", "abc"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold",
+                "--qty",
+                "1",
+                "--cargo",
+                "abc"
+            ],
             &[],
         )
         .unwrap_err(),
@@ -890,7 +1110,20 @@ fn a_bad_cargo_surfaces_after_the_stock_clamp() {
     // And under `--no-cap` the whole branch is skipped, so `--cargo` is never
     // parsed at all.
     let ignored = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--cargo", "abc", "--no-cap"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "1",
+            "--cargo",
+            "abc",
+            "--no-cap",
+        ],
         &[],
     )
     .unwrap();
@@ -902,7 +1135,21 @@ fn a_bad_cargo_surfaces_after_the_stock_clamp() {
 fn a_bad_final_qty_surfaces_last() {
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--cargo", "17", "--final-qty", "abc"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold",
+                "--qty",
+                "1",
+                "--cargo",
+                "17",
+                "--final-qty",
+                "abc"
+            ],
             &[],
         )
         .unwrap_err(),
@@ -910,14 +1157,38 @@ fn a_bad_final_qty_surfaces_last() {
     );
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--final-qty", "abc"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold",
+                "--qty",
+                "1",
+                "--final-qty",
+                "abc"
+            ],
             &[],
         )
         .unwrap_err(),
         "--final-qty must be an unsigned decimal integer"
     );
     let explicit = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--final-qty", "500"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "1",
+            "--final-qty",
+            "500",
+        ],
         &[],
     )
     .unwrap();
@@ -928,7 +1199,17 @@ fn a_bad_final_qty_surfaces_last() {
 #[test]
 fn selling_clamps_to_the_hold_and_empties_the_stack() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "gold", "--qty", "100"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "gold",
+            "--qty",
+            "100",
+        ],
         &[],
     )
     .unwrap();
@@ -938,7 +1219,18 @@ fn selling_clamps_to_the_hold_and_empties_the_stack() {
     assert_eq!(plan.notes[0], "--qty 100 clamped to holdings 10");
 
     let stolen = resolved(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "gold", "--qty", "1", "--stolen"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "gold",
+            "--qty",
+            "1",
+            "--stolen",
+        ],
         &[],
     );
     assert_eq!(
@@ -952,7 +1244,19 @@ fn selling_clamps_to_the_hold_and_empties_the_stack() {
 #[test]
 fn a_sale_ignores_cargo_entirely() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "gold", "--qty", "5", "--cargo", "1"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "gold",
+            "--qty",
+            "5",
+            "--cargo",
+            "1",
+        ],
         &[],
     )
     .unwrap();
@@ -962,7 +1266,18 @@ fn a_sale_ignores_cargo_entirely() {
 #[test]
 fn illegal_goods_route_through_the_black_market() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "narcotics", "--qty", "1", "--no-cap"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "narcotics",
+            "--qty",
+            "1",
+            "--no-cap",
+        ],
         &[],
     )
     .unwrap();
@@ -971,7 +1286,19 @@ fn illegal_goods_route_through_the_black_market() {
     assert_eq!(field(&plan, "blackMarket"), ("1", PlanSource::Market));
 
     let forced = resolved(
-        &["trade", "--market-id", "1", "--type", "sell", "--item", "narcotics", "--qty", "1", "--no-cap", "--no-black-market"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "sell",
+            "--item",
+            "narcotics",
+            "--qty",
+            "1",
+            "--no-cap",
+            "--no-black-market",
+        ],
         &[],
     )
     .unwrap();
@@ -984,7 +1311,18 @@ fn illegal_goods_route_through_the_black_market() {
 fn a_commodity_the_market_does_not_sell_names_itself() {
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "water", "--qty", "1", "--no-cap"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "water",
+                "--qty",
+                "1",
+                "--no-cap"
+            ],
             &[],
         )
         .unwrap_err(),
@@ -995,7 +1333,19 @@ fn a_commodity_the_market_does_not_sell_names_itself() {
 #[test]
 fn an_explicit_price_beats_the_market_and_is_flag_provenance() {
     let plan = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1", "--unit-price", "7"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "gold",
+            "--qty",
+            "1",
+            "--unit-price",
+            "7",
+        ],
         &[],
     )
     .unwrap();
@@ -1018,37 +1368,104 @@ fn resolve_trade_read_order() {
     );
     // `--type` is lowercased before the test.
     assert!(
-        resolved(&["trade", "--market-id", "1", "--type", "BUY", "--item", "gold", "--qty", "1"], &[])
-            .is_ok()
+        resolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "BUY",
+                "--item",
+                "gold",
+                "--qty",
+                "1"
+            ],
+            &[]
+        )
+        .is_ok()
     );
     // Then the item, before `--qty`.
     assert_eq!(
-        resolved(&["trade", "--market-id", "1", "--type", "buy", "--qty", "0"], &[]).unwrap_err(),
+        resolved(
+            &["trade", "--market-id", "1", "--type", "buy", "--qty", "0"],
+            &[]
+        )
+        .unwrap_err(),
         "Missing required option --item"
     );
     // Then qty's presence, then its value.
     assert_eq!(
-        resolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "gold"], &[]).unwrap_err(),
+        resolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "Missing required option --qty"
     );
     assert_eq!(
-        resolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "0"], &[])
-            .unwrap_err(),
+        resolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold",
+                "--qty",
+                "0"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "--qty must be at least 1"
     );
     // Then `--unit-price`, before the commodity lookup — a bad price beats an
     // unknown commodity.
     assert_eq!(
         resolved(
-            &["trade", "--market-id", "1", "--type", "buy", "--item", "unobtainium", "--qty", "1", "--unit-price", "x"],
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "unobtainium",
+                "--qty",
+                "1",
+                "--unit-price",
+                "x"
+            ],
             &[],
         )
         .unwrap_err(),
         "--unit-price must be an unsigned decimal integer"
     );
     assert_eq!(
-        resolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "unobtainium", "--qty", "1"], &[])
-            .unwrap_err(),
+        resolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "unobtainium",
+                "--qty",
+                "1"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "No commodity matching \"unobtainium\" at this market"
     );
 }
@@ -1058,7 +1475,17 @@ fn resolve_trade_read_order() {
 #[test]
 fn find_commodity_quirks_reach_the_plan() {
     let ambiguous = resolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "a", "--qty", "1"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "a",
+            "--qty",
+            "1",
+        ],
         &[],
     );
     assert_eq!(
@@ -1067,8 +1494,21 @@ fn find_commodity_quirks_reach_the_plan() {
         "`a` is a substring of three of the four names, listed in key order [R5]"
     );
     assert_eq!(
-        resolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "999", "--qty", "1"], &[])
-            .unwrap_err(),
+        resolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "999",
+                "--qty",
+                "1"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "No commodity with id 999 at this market"
     );
 }
@@ -1078,30 +1518,76 @@ fn find_commodity_quirks_reach_the_plan() {
 #[test]
 fn an_unresolved_trade_needs_a_numeric_id_and_a_price() {
     assert_eq!(
-        unresolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "gold", "--qty", "1"], &[])
-            .unwrap_err(),
+        unresolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "gold",
+                "--qty",
+                "1"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "--item must be a numeric id when --no-resolve is used"
     );
     assert_eq!(
-        unresolved(&["trade", "--market-id", "1", "--type", "buy", "--item", "128049204", "--qty", "1"], &[])
-            .unwrap_err(),
+        unresolved(
+            &[
+                "trade",
+                "--market-id",
+                "1",
+                "--type",
+                "buy",
+                "--item",
+                "128049204",
+                "--qty",
+                "1"
+            ],
+            &[]
+        )
+        .unwrap_err(),
         "--unit-price is required when --no-resolve is used"
     );
 
     let plan = unresolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "128049204", "--qty", "9", "--unit-price", "1000"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "128049204",
+            "--qty",
+            "9",
+            "--unit-price",
+            "1000",
+        ],
         &[],
     )
     .unwrap();
     assert_eq!(plan.plan.commodity_name, "id 128049204");
-    assert_eq!(plan.plan.final_qty, 9.0, "no listing, so finalQty falls back to qty");
-    assert_eq!(field(&plan, "commodityId"), ("128049204 (id 128049204)", PlanSource::Flag));
+    assert_eq!(
+        plan.plan.final_qty, 9.0,
+        "no listing, so finalQty falls back to qty"
+    );
+    assert_eq!(
+        field(&plan, "commodityId"),
+        ("128049204 (id 128049204)", PlanSource::Flag)
+    );
     assert_eq!(field(&plan, "finalQty"), ("9", PlanSource::Default));
     assert_eq!(field(&plan, "blackMarket"), ("0", PlanSource::Market));
     assert_eq!(field(&plan, "total"), ("9,000 cr", PlanSource::Default));
     assert_eq!(
         plan.notes,
-        ["--no-resolve: finalQty falls back to qty, which is only right if you hold none of this commodity"]
+        [
+            "--no-resolve: finalQty falls back to qty, which is only right if you hold none of this commodity"
+        ]
     );
 }
 
@@ -1110,7 +1596,21 @@ fn an_unresolved_trade_needs_a_numeric_id_and_a_price() {
 #[test]
 fn an_unresolved_trade_never_clamps() {
     let plan = unresolved(
-        &["trade", "--market-id", "1", "--type", "buy", "--item", "1", "--qty", "9999999", "--unit-price", "1", "--cargo", "abc"],
+        &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--item",
+            "1",
+            "--qty",
+            "9999999",
+            "--unit-price",
+            "1",
+            "--cargo",
+            "abc",
+        ],
         &[],
     )
     .unwrap();
@@ -1149,7 +1649,9 @@ const BATCH_CASES: &[Case<BatchConfig>] = &[
     },
     Case {
         name: "ts:2065 --fill cannot combine with --no-cap",
-        argv: &["trade", "--type", "buy", "--fill", "--cargo", "100", "--no-cap"],
+        argv: &[
+            "trade", "--type", "buy", "--fill", "--cargo", "100", "--no-cap",
+        ],
         env: &[],
         expect: Expect::Err("--fill cannot be combined with --no-cap"),
     },
@@ -1161,7 +1663,9 @@ const BATCH_CASES: &[Case<BatchConfig>] = &[
     },
     Case {
         name: "ts:2067 --qty 0 is rejected even under --fill",
-        argv: &["trade", "--type", "buy", "--fill", "--cargo", "100", "--qty", "0"],
+        argv: &[
+            "trade", "--type", "buy", "--fill", "--cargo", "100", "--qty", "0",
+        ],
         env: &[],
         expect: Expect::Err("--qty must be at least 1"),
     },
@@ -1175,11 +1679,24 @@ const BATCH_CASES: &[Case<BatchConfig>] = &[
         name: "ts:2070 --watch needs a stopping condition",
         argv: &["trade", "--type", "buy", "--qty", "5", "--watch"],
         env: &[],
-        expect: Expect::Err("--watch needs --fill (or --attempts <n>) so it has a stopping condition"),
+        expect: Expect::Err(
+            "--watch needs --fill (or --attempts <n>) so it has a stopping condition",
+        ),
     },
     Case {
         name: "--watch with --attempts is allowed",
-        argv: &["trade", "--type", "buy", "--qty", "5", "--watch", "--attempts", "3", "--market-id", "1"],
+        argv: &[
+            "trade",
+            "--type",
+            "buy",
+            "--qty",
+            "5",
+            "--watch",
+            "--attempts",
+            "3",
+            "--market-id",
+            "1",
+        ],
         env: &[],
         expect: Expect::Ok(|settings| {
             assert!(settings.watch);
@@ -1218,16 +1735,39 @@ const BATCH_CASES: &[Case<BatchConfig>] = &[
     },
     Case {
         name: "R53 the batch market id is not parsed",
-        argv: &["trade", "--type", "buy", "--qty", "5", "--market-id", "0004306502403"],
+        argv: &[
+            "trade",
+            "--type",
+            "buy",
+            "--qty",
+            "5",
+            "--market-id",
+            "0004306502403",
+        ],
         env: &[],
         expect: Expect::Ok(|settings| assert_eq!(settings.market_id, "0004306502403")),
     },
     Case {
         name: "a fully specified batch",
         argv: &[
-            "trade", "--market-id", "1", "--type", "buy", "--fill", "--cargo", "784", "--stolen",
-            "--black-market", "--unit-price", "12", "--attempts", "9", "--interval", "1.5",
-            "--credits", "1000000",
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--fill",
+            "--cargo",
+            "784",
+            "--stolen",
+            "--black-market",
+            "--unit-price",
+            "12",
+            "--attempts",
+            "9",
+            "--interval",
+            "1.5",
+            "--credits",
+            "1000000",
         ],
         env: &[],
         expect: Expect::Ok(|settings| {
@@ -1258,7 +1798,17 @@ const BATCH_CASES: &[Case<BatchConfig>] = &[
     },
     Case {
         name: "R12 the interval rounds half toward +Infinity",
-        argv: &["trade", "--market-id", "1", "--type", "buy", "--qty", "5", "--interval", "0.1005"],
+        argv: &[
+            "trade",
+            "--market-id",
+            "1",
+            "--type",
+            "buy",
+            "--qty",
+            "5",
+            "--interval",
+            "0.1005",
+        ],
         env: &[],
         expect: Expect::Ok(|settings| assert_eq!(settings.interval_ms, 101.0)),
     },
@@ -1288,7 +1838,9 @@ fn every_batch_guard_precedes_the_market_id() {
     let guards: &[&[&str]] = &[
         &["trade", "--type", "sell", "--fill", "--cargo", "1"],
         &["trade", "--type", "buy", "--fill"],
-        &["trade", "--type", "buy", "--fill", "--cargo", "1", "--no-cap"],
+        &[
+            "trade", "--type", "buy", "--fill", "--cargo", "1", "--no-cap",
+        ],
         &["trade", "--type", "buy"],
         &["trade", "--type", "buy", "--qty", "0"],
         &["trade", "--type", "buy", "--qty", "1", "--no-resolve"],
@@ -1320,12 +1872,23 @@ fn route_needs_somewhere_to_search_around() {
     // Failing before anything is printed is the point: every other flag is
     // meaningless without a reference.
     let error = route(&["route", "--radius", "30"]).unwrap_err();
-    assert_eq!(error.message(), "route needs a system or station name to search around");
+    assert_eq!(
+        error.message(),
+        "route needs a system or station name to search around"
+    );
 
     assert_eq!(route(&["route", "Sol"]).unwrap().reference, "Sol");
-    assert_eq!(route(&["route", "--system", "Sol"]).unwrap().reference, "Sol");
+    assert_eq!(
+        route(&["route", "--system", "Sol"]).unwrap().reference,
+        "Sol"
+    );
     // A quoted multi-word name arrives as several positionals.
-    assert_eq!(route(&["route", "Hyades", "Sector", "NI-X"]).unwrap().reference, "Hyades Sector NI-X");
+    assert_eq!(
+        route(&["route", "Hyades", "Sector", "NI-X"])
+            .unwrap()
+            .reference,
+        "Hyades Sector NI-X"
+    );
 }
 
 #[test]
@@ -1352,28 +1915,57 @@ fn the_defaults_exclude_what_cannot_be_traded_at() {
     let config = route(&["route", "Sol"]).unwrap();
     assert_eq!(config.radius_ly, 30.0);
     assert_eq!(config.pad, config::Pad::Large);
-    assert!(!config.include_carriers, "carriers jump between planning and flying");
-    assert!(!config.include_settlements, "a settlement cannot berth a large ship at all");
+    assert!(
+        !config.include_carriers,
+        "carriers jump between planning and flying"
+    );
+    assert!(
+        !config.include_settlements,
+        "a settlement cannot berth a large ship at all"
+    );
     assert_eq!(config.max_star_distance_ls, Some(2_000.0));
     assert_eq!(config.shape, config::Shape::RoundTrip);
-    assert!(config.cache, "--no-cache comes from the parser's own negation");
+    assert!(
+        config.cache,
+        "--no-cache comes from the parser's own negation"
+    );
 }
 
 #[test]
 fn shapes_parse_including_the_bounded_loop() {
     use config::Shape;
-    assert_eq!(route(&["route", "Sol", "--shape", "one-way"]).unwrap().shape, Shape::OneWay);
-    assert_eq!(route(&["route", "Sol", "--shape", "roundtrip"]).unwrap().shape, Shape::RoundTrip);
-    assert_eq!(route(&["route", "Sol", "--shape", "loop"]).unwrap().shape, Shape::Loop);
-    assert_eq!(route(&["route", "Sol", "--shape", "loop:4"]).unwrap().shape, Shape::BoundedLoop(4));
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "one-way"])
+            .unwrap()
+            .shape,
+        Shape::OneWay
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "roundtrip"])
+            .unwrap()
+            .shape,
+        Shape::RoundTrip
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "loop"]).unwrap().shape,
+        Shape::Loop
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--shape", "loop:4"]).unwrap().shape,
+        Shape::BoundedLoop(4)
+    );
 
     // A one-stop loop is not a loop.
     assert_eq!(
-        route(&["route", "Sol", "--shape", "loop:1"]).unwrap_err().message(),
+        route(&["route", "Sol", "--shape", "loop:1"])
+            .unwrap_err()
+            .message(),
         "--shape loop:N needs at least 2 stops"
     );
     assert_eq!(
-        route(&["route", "Sol", "--shape", "spiral"]).unwrap_err().message(),
+        route(&["route", "Sol", "--shape", "spiral"])
+            .unwrap_err()
+            .message(),
         "--shape must be one-way, round-trip, loop or loop:N, not \"spiral\""
     );
 }
@@ -1381,13 +1973,23 @@ fn shapes_parse_including_the_bounded_loop() {
 #[test]
 fn pads_parse_by_letter_word_or_number() {
     use config::Pad;
-    for (raw, expected) in
-        [("L", Pad::Large), ("large", Pad::Large), ("3", Pad::Large), ("m", Pad::Medium), ("S", Pad::Small)]
-    {
-        assert_eq!(route(&["route", "Sol", "--pad", raw]).unwrap().pad, expected, "{raw}");
+    for (raw, expected) in [
+        ("L", Pad::Large),
+        ("large", Pad::Large),
+        ("3", Pad::Large),
+        ("m", Pad::Medium),
+        ("S", Pad::Small),
+    ] {
+        assert_eq!(
+            route(&["route", "Sol", "--pad", raw]).unwrap().pad,
+            expected,
+            "{raw}"
+        );
     }
     assert_eq!(
-        route(&["route", "Sol", "--pad", "XL"]).unwrap_err().message(),
+        route(&["route", "Sol", "--pad", "XL"])
+            .unwrap_err()
+            .message(),
         "--pad must be S, M or L, not \"xl\""
     );
 }
@@ -1405,8 +2007,10 @@ fn cache_is_negated_by_the_parser_not_by_a_second_flag() {
 /// grammar has been widened and the parity contract broken \[C26\].
 #[test]
 fn route_flags_do_not_leak_into_other_commands() {
-    let argv: Vec<String> =
-        ["market", "Colonia", "--radius", "30"].iter().map(|s| (*s).to_owned()).collect();
+    let argv: Vec<String> = ["market", "Colonia", "--radius", "30"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
     let error = parse(&argv).unwrap_err();
     assert_eq!(error.to_string(), "Unknown option --radius");
 }
@@ -1418,9 +2022,79 @@ fn route_flags_do_not_leak_into_other_commands() {
 #[test]
 fn route_reuses_the_concurrency_flag_and_its_clamp() {
     assert_eq!(route(&["route", "Sol"]).unwrap().workers, 5);
-    assert_eq!(route(&["route", "Sol", "--concurrency", "3"]).unwrap().workers, 3);
-    assert_eq!(route(&["route", "Sol", "--concurrency", "0"]).unwrap().workers, 1);
-    assert_eq!(route(&["route", "Sol", "--concurrency", "99"]).unwrap().workers, 16);
+    assert_eq!(
+        route(&["route", "Sol", "--concurrency", "3"])
+            .unwrap()
+            .workers,
+        3
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--concurrency", "0"])
+            .unwrap()
+            .workers,
+        1
+    );
+    assert_eq!(
+        route(&["route", "Sol", "--concurrency", "99"])
+            .unwrap()
+            .workers,
+        16
+    );
+}
+
+/// `--quick` used to demand `--item` even when `--category` had already named
+/// the cargo. A class is a commodity source; a missing `--item` is not a
+/// missing question.
+#[test]
+fn quick_accepts_category_as_a_commodity_source() {
+    let error = route(&["route", "Sol", "--quick", "1"]).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "--quick needs --item <commodity[,commodity...]> or --category <category[,category...]>"
+    );
+
+    let config = route(&["route", "Sol", "--quick", "2", "--category", "metals"]).unwrap();
+    assert_eq!(config.shape, config::Shape::OneWay);
+    let quick = config.quick.expect("quick settings");
+    assert!(quick.commodities.is_empty());
+    assert_eq!(quick.categories, ["Metals"]);
+    assert!(!quick.cannot_cycle());
+
+    let mixed = route(&[
+        "route",
+        "Sol",
+        "--quick",
+        "1",
+        "--item",
+        "gold",
+        "--category",
+        "minerals",
+    ])
+    .unwrap();
+    assert_eq!(
+        mixed.shape,
+        config::Shape::OneWay,
+        "--quick looks up hops; a class does not change that"
+    );
+    let quick = mixed.quick.expect("quick settings");
+    assert_eq!(quick.commodities, ["gold"]);
+    assert_eq!(quick.categories, ["Minerals"]);
+
+    let error = route(&["route", "Sol", "--quick", "1", "--category", "rocks"]).unwrap_err();
+    assert!(
+        error
+            .message()
+            .starts_with("--category \"rocks\" is not a commodity category"),
+        "{}",
+        error.message()
+    );
+    assert!(error.message().contains("Metals"), "{}", error.message());
+
+    let drugs = route(&["route", "Sol", "--quick", "1", "--category", "legal drugs"]).unwrap();
+    assert_eq!(
+        drugs.quick.expect("quick settings").categories,
+        ["Narcotics"]
+    );
 }
 
 /// `-v` is a flag under the extended table and a positional everywhere else.
@@ -1454,5 +2128,8 @@ fn a_stray_dash_token_is_an_unknown_option_not_part_of_a_name() {
     assert_eq!(error.message(), "Unknown option -vv");
 
     // And a name with spaces still works, which is why they are joined at all.
-    assert_eq!(route(&["route", "Alpha", "Centauri"]).unwrap().reference, "Alpha Centauri");
+    assert_eq!(
+        route(&["route", "Alpha", "Centauri"]).unwrap().reference,
+        "Alpha Centauri"
+    );
 }

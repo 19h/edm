@@ -96,10 +96,16 @@ impl Pools {
         for (node, market) in markets.iter().enumerate() {
             let node = node as u32;
             for &row in &market.supply {
-                suppliers.entry(row.commodity.0).or_default().push(SupplyRow { node, row });
+                suppliers
+                    .entry(row.commodity.0)
+                    .or_default()
+                    .push(SupplyRow { node, row });
             }
             for &row in &market.demand {
-                buyers.entry(row.commodity.0).or_default().push(DemandRow { node, row });
+                buyers
+                    .entry(row.commodity.0)
+                    .or_default()
+                    .push(DemandRow { node, row });
             }
         }
 
@@ -108,12 +114,22 @@ impl Pools {
             .filter_map(|(commodity, mut sell)| {
                 let mut buy = buyers.remove(&commodity)?;
                 sell.sort_by(|a, b| {
-                    a.row.buy_price.cmp(&b.row.buy_price).then(a.node.cmp(&b.node))
+                    a.row
+                        .buy_price
+                        .cmp(&b.row.buy_price)
+                        .then(a.node.cmp(&b.node))
                 });
                 buy.sort_by(|a, b| {
-                    b.row.sell_price.cmp(&a.row.sell_price).then(a.node.cmp(&b.node))
+                    b.row
+                        .sell_price
+                        .cmp(&a.row.sell_price)
+                        .then(a.node.cmp(&b.node))
                 });
-                Some(Pool { commodity: CommodityId(commodity), suppliers: sell, buyers: buy })
+                Some(Pool {
+                    commodity: CommodityId(commodity),
+                    suppliers: sell,
+                    buyers: buy,
+                })
             })
             .collect();
 
@@ -190,8 +206,10 @@ impl TradeGraph {
         watch: Watch<'_>,
     ) -> Self {
         let markets = geometry.markets;
-        let mut stats =
-            BuildStats { profit_floor_applied: limits.min_profit.0 > 0, ..BuildStats::default() };
+        let mut stats = BuildStats {
+            profit_floor_applied: limits.min_profit.0 > 0,
+            ..BuildStats::default()
+        };
         let mut best: HashMap<u64, usize> = HashMap::new();
         let mut records: Vec<EdgeRecord> = Vec::new();
         let mut millis_cache: HashMap<u64, Millis> = HashMap::new();
@@ -200,8 +218,11 @@ impl TradeGraph {
         // largest hold that spread can be bought at. Nothing in the pool can
         // beat it, so the pools are visited in descending bound order and the
         // first one that cannot clear the floor ends the loop.
-        let mut ordered: Vec<(&Pool, Credits)> =
-            pools.pools.iter().map(|pool| (pool, commodity_bound(pool, ship))).collect();
+        let mut ordered: Vec<(&Pool, Credits)> = pools
+            .pools
+            .iter()
+            .map(|pool| (pool, commodity_bound(pool, ship)))
+            .collect();
         ordered.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.commodity.0.cmp(&b.0.commodity.0)));
 
         for pool in &pools.pools {
@@ -220,7 +241,9 @@ impl TradeGraph {
                 stats.commodities_pruned = (ordered.len() - seen) as u32;
                 break;
             }
-            let Some(best_buyer) = pool.buyers.first() else { continue };
+            let Some(best_buyer) = pool.buyers.first() else {
+                continue;
+            };
             let best_sell = best_buyer.row.sell_price;
 
             for supplier in &pool.suppliers {
@@ -229,7 +252,8 @@ impl TradeGraph {
                     rows_since_report = 0;
                     say(seen, records.len());
                 }
-                let buyable = min_tons(ship.cargo, affordable(ship.credits, supplier.row.buy_price));
+                let buyable =
+                    min_tons(ship.cargo, affordable(ship.credits, supplier.row.buy_price));
                 // Bound 1. Both factors are non-increasing in the supply sort,
                 // so this is a `break`. `stock` is deliberately absent: it is
                 // not monotone in the sort, and including it here would prune
@@ -422,7 +446,10 @@ impl TradeGraph {
     #[must_use]
     pub fn find(&self, from: u32, to: u32) -> Option<usize> {
         let range = self.row(from);
-        self.edge_to[range.clone()].binary_search(&to).ok().map(|at| range.start + at)
+        self.edge_to[range.clone()]
+            .binary_search(&to)
+            .ok()
+            .map(|at| range.start + at)
     }
 
     /// The best profit leaving a node.
@@ -452,7 +479,8 @@ impl TradeGraph {
     /// Every edge, as `(from, to, index)`.
     pub fn edges(&self) -> impl Iterator<Item = (u32, u32, usize)> + '_ {
         (0..self.n as u32).flat_map(move |from| {
-            self.row(from).map(move |edge| (from, self.edge_to[edge], edge))
+            self.row(from)
+                .map(move |edge| (from, self.edge_to[edge], edge))
         })
     }
 
@@ -571,8 +599,10 @@ mod tests {
 
     #[test]
     fn a_pair_with_no_shared_commodity_produces_no_edge() {
-        let markets =
-            [market(1, 0.0, &[(0, 100, 500)], &[]), market(2, 5.0, &[], &[(1, 900, 500)])];
+        let markets = [
+            market(1, 0.0, &[(0, 100, 500)], &[]),
+            market(2, 5.0, &[], &[(1, 900, 500)]),
+        ];
         assert_eq!(build(&markets, &limits()).edge_count(), 0);
     }
 
@@ -600,9 +630,18 @@ mod tests {
             market(2, 1.0, &[(0, 101, 500)], &[]),
             market(3, 5.0, &[], &[(0, 900, 500)]),
         ];
-        let graph = build(&markets, &Limits { min_units: Tons(2), ..limits() });
+        let graph = build(
+            &markets,
+            &Limits {
+                min_units: Tons(2),
+                ..limits()
+            },
+        );
         assert!(graph.find(0, 2).is_none());
-        assert_eq!(graph.weight(graph.find(1, 2).expect("an edge")), Credits(500 * 799));
+        assert_eq!(
+            graph.weight(graph.find(1, 2).expect("an edge")),
+            Credits(500 * 799)
+        );
     }
 
     #[test]
@@ -636,7 +675,11 @@ mod tests {
             markets.push(market(i + 1, i as f64, &supply, &demand));
         }
         let graph = build(&markets, &limits());
-        assert!(graph.stats.pairs_visited * 4 < graph.stats.pairs_total, "{:?}", graph.stats);
+        assert!(
+            graph.stats.pairs_visited * 4 < graph.stats.pairs_total,
+            "{:?}",
+            graph.stats
+        );
         assert!(graph.stats.commodities_pruned >= 40, "{:?}", graph.stats);
     }
 

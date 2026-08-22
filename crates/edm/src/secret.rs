@@ -26,7 +26,10 @@ impl Secret {
 
     /// The bytes. Crate-private on purpose: every call site should be one
     /// `rg 'expose\(' ` away.
-    #[allow(dead_code, reason = "the envelope builder is the only caller and lands with game_api.rs")]
+    #[allow(
+        dead_code,
+        reason = "the envelope builder is the only caller and lands with game_api.rs"
+    )]
     pub(crate) fn expose(&self) -> &str {
         &self.0
     }
@@ -75,7 +78,15 @@ mod tests {
         // What the envelope table shows, and what the credential length check
         // measures — both `String.prototype.length`, not bytes.
         assert_eq!(Secret::new("abc".to_owned()).masked(), "3 chars (hidden)");
-        assert_eq!(Secret::new("é".to_owned()).len(), 1, "one UTF-16 unit, two UTF-8 bytes");
-        assert_eq!(Secret::new("🚀".to_owned()).len(), 2, "a surrogate pair is two units");
+        assert_eq!(
+            Secret::new("é".to_owned()).len(),
+            1,
+            "one UTF-16 unit, two UTF-8 bytes"
+        );
+        assert_eq!(
+            Secret::new("🚀".to_owned()).len(),
+            2,
+            "a surrogate pair is two units"
+        );
     }
 }

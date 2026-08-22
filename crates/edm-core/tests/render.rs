@@ -45,7 +45,8 @@ fn scenarios() -> Vec<Scenario> {
         .map(|scenario| {
             let name = scenario["name"].as_str().expect("name").to_owned();
             let set = scenario["columns"].as_str().expect("columns");
-            let columns = columns::by_name(set).unwrap_or_else(|| panic!("unknown column set {set}"));
+            let columns =
+                columns::by_name(set).unwrap_or_else(|| panic!("unknown column set {set}"));
             let rows = scenario["rows"]
                 .as_array()
                 .expect("rows")
@@ -62,7 +63,12 @@ fn scenarios() -> Vec<Scenario> {
                     ),
                 })
                 .collect();
-            Scenario { name, columns, title: scenario["title"].as_str().expect("title").to_owned(), rows }
+            Scenario {
+                name,
+                columns,
+                title: scenario["title"].as_str().expect("title").to_owned(),
+                rows,
+            }
         })
         .collect()
 }
@@ -82,13 +88,19 @@ fn emit(scenario: &Scenario, width: usize) -> String {
 fn scenario_snapshots() {
     for scenario in scenarios() {
         for width in WIDTHS {
-            insta::assert_snapshot!(format!("{}_w{width}", scenario.name), emit(&scenario, width));
+            insta::assert_snapshot!(
+                format!("{}_w{width}", scenario.name),
+                emit(&scenario, width)
+            );
         }
     }
 }
 
 fn scenario(name: &str) -> Scenario {
-    scenarios().into_iter().find(|s| s.name == name).expect("known scenario")
+    scenarios()
+        .into_iter()
+        .find(|s| s.name == name)
+        .expect("known scenario")
 }
 
 // ---------------------------------------------------------------------------
@@ -105,10 +117,15 @@ fn fit_commodity_48() {
     // Demand, CPRI.
     assert_eq!(
         fit.omitted,
-        ["ID", "Fence", "Mean", "Stk", "Dmd", "Stock", "Demand", "CPRI"]
+        [
+            "ID", "Fence", "Mean", "Stk", "Dmd", "Stock", "Demand", "CPRI"
+        ]
     );
     assert_eq!(
-        fit.active.iter().map(|&i| scenario.columns[i].header).collect::<Vec<_>>(),
+        fit.active
+            .iter()
+            .map(|&i| scenario.columns[i].header)
+            .collect::<Vec<_>>(),
         ["Commodity", "Buy", "Sell"]
     );
     // Buy and Sell hold `12,345,678` and declare no floor, so they cannot give
@@ -138,9 +155,15 @@ fn priority_ties_drop_leftmost() {
     // Four 8-unit columns are a 45-unit frame; each drop takes 11 off it.
     assert_eq!(render::fit(SET, &rows, 40).omitted, ["First"]);
     assert_eq!(render::fit(SET, &rows, 30).omitted, ["First", "Second"]);
-    assert_eq!(render::fit(SET, &rows, 20).omitted, ["First", "Second", "Light"]);
+    assert_eq!(
+        render::fit(SET, &rows, 20).omitted,
+        ["First", "Second", "Light"]
+    );
     // Nothing droppable is left, so the frame simply overflows.
-    assert_eq!(render::fit(SET, &rows, 5).omitted, ["First", "Second", "Light"]);
+    assert_eq!(
+        render::fit(SET, &rows, 5).omitted,
+        ["First", "Second", "Light"]
+    );
 }
 
 #[test]
@@ -148,14 +171,19 @@ fn a_column_without_a_floor_never_shrinks() {
     // `slack = width - (minWidth ?? width)` is zero without a floor, so the
     // only way this table can fit is by dropping — and `wide` is not
     // droppable, so it keeps its full width and the frame overflows.
-    const SET: &[Column] =
-        &[Column::new("wide", "Wide"), Column::new("gone", "Gone").priority(1)];
+    const SET: &[Column] = &[
+        Column::new("wide", "Wide"),
+        Column::new("gone", "Gone").priority(1),
+    ];
     let rows = [Row::data(["0123456789012345678901234", "x"])];
 
     let fit = render::fit(SET, &rows, 20);
     assert_eq!(fit.omitted, ["Gone"]);
     assert_eq!(fit.widths, [25]);
-    assert!(render::frame_width(&fit.widths) > 20, "the frame is allowed to overflow");
+    assert!(
+        render::frame_width(&fit.widths) > 20,
+        "the frame is allowed to overflow"
+    );
 }
 
 #[test]
@@ -213,7 +241,10 @@ fn bands_do_not_widen_columns() {
     ];
     let without = [Row::data(["x", "y"])];
 
-    assert_eq!(render::fit(SET, &with_band, 200).widths, render::fit(SET, &without, 200).widths);
+    assert_eq!(
+        render::fit(SET, &with_band, 200).widths,
+        render::fit(SET, &without, 200).widths
+    );
 }
 
 #[test]
@@ -223,7 +254,11 @@ fn band_width_is_the_frame_less_four() {
     let rendered = render::render_table(SET, &rows, 200, Metric::Utf16);
     let frame = render::frame_width(&rendered.fit.widths);
 
-    let band = rendered.lines.iter().find(|line| line.contains('x')).expect("band line");
+    let band = rendered
+        .lines
+        .iter()
+        .find(|line| line.contains('x'))
+        .expect("band line");
     // `bandWidth = frameWidth - 4`, and the `"| "` and `" |"` that bracket it
     // put the line back at exactly the frame width.
     assert_eq!(text::utf16_len(band), frame);
@@ -238,7 +273,11 @@ fn rules_and_bands_collapse() {
         48,
         Metric::Utf16,
     );
-    let dashes = rendered.lines.iter().filter(|line| line.starts_with("+--")).count();
+    let dashes = rendered
+        .lines
+        .iter()
+        .filter(|line| line.starts_with("+--"))
+        .count();
     // One opening rule, one after each of the two leading bands, one before
     // "after rules" (from the collapsed run of three), one before and one
     // after the trailing band. The leading pair of rules emits nothing at all
@@ -266,7 +305,10 @@ fn no_closing_rule_when_the_last_row_is_not_data() {
 
 #[test]
 fn heading_pads_with_equals() {
-    assert_eq!(render::heading("SWEEP", 20, Metric::Utf16), "== SWEEP ===========");
+    assert_eq!(
+        render::heading("SWEEP", 20, Metric::Utf16),
+        "== SWEEP ==========="
+    );
 }
 
 #[test]
@@ -322,10 +364,10 @@ fn the_wrap_limit_excludes_the_indent_and_has_a_floor_of_twenty() {
     // The limit is measured without the indent, so a 20-unit line becomes a
     // 22-unit one once indented — the wrap does not actually respect the width
     // it was given, it undershoots by one and can then overshoot by three.
-    assert_eq!(render::wrap_note(text, 23, Metric::Utf16), [
-        "   aaaa bbbb cccc dddd",
-        "   eeee"
-    ]);
+    assert_eq!(
+        render::wrap_note(text, 23, Metric::Utf16),
+        ["   aaaa bbbb cccc dddd", "   eeee"]
+    );
     // `Math.max(20, width - 3)`: every width of 23 or less wraps identically.
     assert_eq!(
         render::wrap_note(text, 4, Metric::Utf16),
@@ -334,7 +376,10 @@ fn the_wrap_limit_excludes_the_indent_and_has_a_floor_of_twenty() {
     // The whole 24-unit text fits on one line only once the limit reaches 24,
     // which takes a width of 27.
     assert_eq!(render::wrap_note(text, 26, Metric::Utf16).len(), 2);
-    assert_eq!(render::wrap_note(text, 27, Metric::Utf16), ["   aaaa bbbb cccc dddd eeee"]);
+    assert_eq!(
+        render::wrap_note(text, 27, Metric::Utf16),
+        ["   aaaa bbbb cccc dddd eeee"]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -365,9 +410,18 @@ fn width_is_floored_at_48_and_defaults_to_100() {
 #[test]
 fn an_absurd_columns_override_is_clamped() {
     // C11: the TypeScript would attempt `"=".repeat(1e20)` at module init.
-    assert_eq!(render::terminal_width(Some("99999999999999999999"), None), render::MAX_WIDTH);
-    assert_eq!(render::terminal_width(Some(&"9".repeat(400)), None), render::MAX_WIDTH);
-    assert_eq!(render::terminal_width(Some("10000"), None), render::MAX_WIDTH);
+    assert_eq!(
+        render::terminal_width(Some("99999999999999999999"), None),
+        render::MAX_WIDTH
+    );
+    assert_eq!(
+        render::terminal_width(Some(&"9".repeat(400)), None),
+        render::MAX_WIDTH
+    );
+    assert_eq!(
+        render::terminal_width(Some("10000"), None),
+        render::MAX_WIDTH
+    );
     assert_eq!(render::terminal_width(Some("9999"), None), 9999);
 }
 
@@ -392,15 +446,25 @@ fn the_hidden_columns_note_is_ungrouped_and_comma_joined() {
     // R36: `${TERMINAL_WIDTH}` interpolates the raw number, so a four-digit
     // terminal is `1000 cols`, never `1,000 cols`.
     let cell = "x".repeat(400);
-    let rows = vec![Row::data(std::iter::repeat_n(cell, columns::COMMODITY_COLUMNS.len()))];
+    let rows = vec![Row::data(std::iter::repeat_n(
+        cell,
+        columns::COMMODITY_COLUMNS.len(),
+    ))];
     let mut out = String::new();
     render::write_blocks(
         &mut out,
-        &[Block::Table { title: "T".to_owned(), columns: columns::COMMODITY_COLUMNS, rows }],
+        &[Block::Table {
+            title: "T".to_owned(),
+            columns: columns::COMMODITY_COLUMNS,
+            rows,
+        }],
         1000,
         Metric::Utf16,
     );
-    assert!(out.contains("columns hidden to fit 1000 cols: ID, Fence, Mean, Stk"), "{out}");
+    assert!(
+        out.contains("columns hidden to fit 1000 cols: ID, Fence, Mean, Stk"),
+        "{out}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +481,10 @@ fn the_display_metric_measures_a_cjk_name_as_two_cells_per_character() {
     let rows = [Row::data(["東京駅"])];
 
     assert_eq!(render::fit_with(SET, &rows, 200, Metric::Utf16).widths, [4]);
-    assert_eq!(render::fit_with(SET, &rows, 200, Metric::Display).widths, [6]);
+    assert_eq!(
+        render::fit_with(SET, &rows, 200, Metric::Display).widths,
+        [6]
+    );
 }
 
 #[test]
@@ -579,9 +646,18 @@ proptest! {
 fn a_route_rate_is_never_printed_without_its_claim() {
     for available in 20..=200 {
         let fit = render::fit(columns::ROUTE_COLUMNS, &[], available);
-        let kept: Vec<&str> =
-            fit.active.iter().map(|index| columns::ROUTE_COLUMNS[*index].key).collect();
-        assert!(kept.contains(&"rate"), "rate dropped at {available}: {kept:?}");
-        assert!(kept.contains(&"claim"), "claim dropped at {available}: {kept:?}");
+        let kept: Vec<&str> = fit
+            .active
+            .iter()
+            .map(|index| columns::ROUTE_COLUMNS[*index].key)
+            .collect();
+        assert!(
+            kept.contains(&"rate"),
+            "rate dropped at {available}: {kept:?}"
+        );
+        assert!(
+            kept.contains(&"claim"),
+            "claim dropped at {available}: {kept:?}"
+        );
     }
 }

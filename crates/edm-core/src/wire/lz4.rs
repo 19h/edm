@@ -64,10 +64,16 @@ impl fmt::Display for Lz4Error {
             Self::SizeMismatch { expected, produced } => {
                 // Both interpolands are non-negative integers below the C4 cap,
                 // so `usize` renders them exactly as `Number::toString` would.
-                write!(f, "LZ4 size mismatch: expected {expected}, produced {produced}")
+                write!(
+                    f,
+                    "LZ4 size mismatch: expected {expected}, produced {produced}"
+                )
             }
             Self::Allocation { requested } => {
-                write!(f, "Cannot allocate {requested} bytes for the decompressed response")
+                write!(
+                    f,
+                    "Cannot allocate {requested} bytes for the decompressed response"
+                )
             }
         }
     }
@@ -90,10 +96,16 @@ pub(super) fn decompress(input: &[u8], expected: usize) -> Result<Vec<u8>, Lz4Er
     // before a byte is read, which is what makes every bound check below a
     // comparison against `expected`.
     if expected > MAX_DECOMPRESSED {
-        return Err(Lz4Error::Allocation { requested: expected });
+        return Err(Lz4Error::Allocation {
+            requested: expected,
+        });
     }
     let mut output = Vec::new();
-    output.try_reserve_exact(expected).map_err(|_| Lz4Error::Allocation { requested: expected })?;
+    output
+        .try_reserve_exact(expected)
+        .map_err(|_| Lz4Error::Allocation {
+            requested: expected,
+        })?;
     output.resize(expected, 0);
 
     decompress_into(input, &mut output)?;
@@ -172,7 +184,10 @@ fn decompress_into(input: &[u8], output: &mut [u8]) -> Result<(), Lz4Error> {
     }
 
     if destination != output.len() {
-        return Err(Lz4Error::SizeMismatch { expected: output.len(), produced: destination });
+        return Err(Lz4Error::SizeMismatch {
+            expected: output.len(),
+            produced: destination,
+        });
     }
     Ok(())
 }
@@ -217,7 +232,12 @@ mod tests {
         // abort the process, so this is a registered divergence with its own
         // message rather than one of the six transcribed strings.
         let err = decompress(&[], MAX_DECOMPRESSED + 1).expect_err("over the cap");
-        assert_eq!(err, Lz4Error::Allocation { requested: MAX_DECOMPRESSED + 1 });
+        assert_eq!(
+            err,
+            Lz4Error::Allocation {
+                requested: MAX_DECOMPRESSED + 1
+            }
+        );
         assert_eq!(
             err.to_string(),
             "Cannot allocate 268435457 bytes for the decompressed response"

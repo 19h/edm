@@ -189,6 +189,8 @@ pub struct RawCommodity {
 /// Why a row was not ingested, or was ingested under protest.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IngestCounts {
+    /// Rows whose commodity name was not among an exact quick-lookup list.
+    pub wrong_commodity: u32,
     /// Rows whose `categoryname` was not among those asked for.
     pub wrong_category: u32,
     /// Rows the market itself marks illegal at that market. See
@@ -230,6 +232,15 @@ impl Market {
         let mut demand = Vec::new();
 
         for row in rows {
+            if !floors.commodities.is_empty()
+                && !floors
+                    .commodities
+                    .iter()
+                    .any(|wanted| edm_core::ardent::normalise_commodity_name(&row.name) == *wanted)
+            {
+                counts.wrong_commodity += 1;
+                continue;
+            }
             let id = commodities.intern(&row.name);
 
             // A market that calls a commodity illegal will not trade it over
@@ -243,7 +254,10 @@ impl Market {
             }
 
             if !floors.categories.is_empty()
-                && !floors.categories.iter().any(|wanted| wanted.eq_ignore_ascii_case(&row.category))
+                && !floors
+                    .categories
+                    .iter()
+                    .any(|wanted| wanted.eq_ignore_ascii_case(&row.category))
             {
                 counts.wrong_category += 1;
                 continue;
@@ -274,8 +288,14 @@ impl Market {
                     });
                     // The base is an admissible optimistic bound; `leg_weight`
                     // replaces it with the cargo-adjusted price for ranking.
-                    let sell_price = bulk.map_or(Credits(row.sell_price), |quote| quote.base_sell_price);
-                    demand.push(Demand { commodity: id, sell_price, qty, bulk });
+                    let sell_price =
+                        bulk.map_or(Credits(row.sell_price), |quote| quote.base_sell_price);
+                    demand.push(Demand {
+                        commodity: id,
+                        sell_price,
+                        qty,
+                        bulk,
+                    });
                 }
                 None => counts.no_demand += 1,
             }
@@ -347,6 +367,10 @@ pub struct RowFloors {
     /// will haul is noise in every inner loop, and dropping it once is cheaper
     /// than skipping it in three.
     pub categories: Vec<String>,
+    /// Exact canonical commodity ids that may be ranked. Empty means every
+    /// commodity. Quick lookup fills this from its Ardent query so a live
+    /// market's unrelated rows cannot become an answer to a named lookup.
+    pub commodities: Vec<String>,
     /// Whether to rank a commodity at a market that calls it illegal.
     ///
     /// Off by default, because such a trade cannot be completed at the counter:
@@ -362,6 +386,7 @@ impl Default for RowFloors {
             min_stock: Tons(1),
             min_demand: Tons(1),
             categories: Vec::new(),
+            commodities: Vec::new(),
             allow_illegal: false,
         }
     }
@@ -385,7 +410,10 @@ pub struct ShipConfig {
 
 impl Default for ShipConfig {
     fn default() -> Self {
-        Self { cargo: Tons(1232), credits: Credits(1_000_000_000) }
+        Self {
+            cargo: Tons(1232),
+            credits: Credits(1_000_000_000),
+        }
     }
 }
 
@@ -471,7 +499,11 @@ mod tests {
             station: "Galileo".to_owned(),
             system: "Sol".to_owned(),
             system_address: 10_477_373_803,
-            coords: Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+            coords: Coordinates {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             arrival_ls: 505.0,
         }
     }
@@ -547,12 +579,36 @@ mod tests {
     fn the_published_demand_floor_does_not_touch_an_unpublished_row() {
         let mut commodities = Commodities::new();
         let mut counts = IngestCounts::default();
-        let rows = [row("gold", 0, 59_759, 0, 0, 2), row("silver", 0, 4_000, 0, 5, 1)];
-        let floors = RowFloors { min_stock: Tons(1), min_demand: Tons(100), ..RowFloors::default() };
-        let market =
-            Market::from_rows(identity(), &rows, &mut commodities, &floors, &mut counts);
+        let rows = [
+            row("gold", 0, 59_759, 0, 0, 2),
+            row("silver", 0, 4_000, 0, 5, 1),
+        ];
+        let floors = RowFloors {
+            min_stock: Tons(1),
+            min_demand: Tons(100),
+            ..RowFloors::default()
+        };
+        let market = Market::from_rows(identity(), &rows, &mut commodities, &floors, &mut counts);
         assert_eq!(market.demand.len(), 1);
         assert_eq!(market.demand[0].qty, DemandQty::Unpublished);
+    }
+
+    #[test]
+    fn a_quick_lookup_only_ingests_its_requested_commodities() {
+        let mut commodities = Commodities::new();
+        let mut counts = IngestCounts::default();
+        let rows = [
+            row("Gold", 9000, 8900, 50, 0, 0),
+            row("Silver", 4500, 4400, 50, 0, 0),
+        ];
+        let floors = RowFloors {
+            commodities: vec!["gold".to_owned()],
+            ..RowFloors::default()
+        };
+        let market = Market::from_rows(identity(), &rows, &mut commodities, &floors, &mut counts);
+        assert_eq!(market.supply.len(), 1);
+        assert_eq!(commodities.name(market.supply[0].commodity), Some("Gold"));
+        assert_eq!(counts.wrong_commodity, 1);
     }
 }
 
@@ -596,7 +652,11 @@ mod legality_tests {
                 station: "Isherwood Works".to_owned(),
                 system: "FF Andromedae".to_owned(),
                 system_address: 1,
-                coords: edm_core::domain::id64::Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+                coords: edm_core::domain::id64::Coordinates {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 arrival_ls: 0.0,
             },
             rows,
@@ -609,11 +669,19 @@ mod legality_tests {
 
     #[test]
     fn a_market_that_calls_a_commodity_illegal_is_not_a_place_to_sell_it() {
-        let (market, counts) =
-            ingest(&[slaves_at_a_market_that_forbids_them()], &RowFloors::default());
+        let (market, counts) = ingest(
+            &[slaves_at_a_market_that_forbids_them()],
+            &RowFloors::default(),
+        );
 
-        assert!(market.demand.is_empty(), "68,433 tons of demand that cannot be sold into");
-        assert_eq!(counts.illegal_here, 1, "and it is counted, not silently gone");
+        assert!(
+            market.demand.is_empty(),
+            "68,433 tons of demand that cannot be sold into"
+        );
+        assert_eq!(
+            counts.illegal_here, 1,
+            "and it is counted, not silently gone"
+        );
     }
 
     /// The same commodity at a market that does not forbid it — Slaves are
@@ -621,7 +689,10 @@ mod legality_tests {
     /// `legality` empty. Six stations within 37 Ly of that one take them.
     #[test]
     fn the_same_commodity_is_tradable_where_it_is_legal() {
-        let legal = RawCommodity { illegal: false, ..slaves_at_a_market_that_forbids_them() };
+        let legal = RawCommodity {
+            illegal: false,
+            ..slaves_at_a_market_that_forbids_them()
+        };
         let (market, counts) = ingest(&[legal], &RowFloors::default());
 
         assert_eq!(market.demand.len(), 1, "legal here, so it ranks");
@@ -632,7 +703,10 @@ mod legality_tests {
     /// destination has a black market.
     #[test]
     fn include_illegal_opts_back_in() {
-        let floors = RowFloors { allow_illegal: true, ..RowFloors::default() };
+        let floors = RowFloors {
+            allow_illegal: true,
+            ..RowFloors::default()
+        };
         let (market, _) = ingest(&[slaves_at_a_market_that_forbids_them()], &floors);
 
         assert_eq!(market.demand.len(), 1);

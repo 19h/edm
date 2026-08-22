@@ -105,7 +105,9 @@ pub const COMMODITY_COLUMNS: &[Column] = &[
 
 /// `INVENTORY_COLUMNS` (`game-internal-api.ts:681`) — the commander's hold.
 pub const INVENTORY_COLUMNS: &[Column] = &[
-    Column::new("commodity", "Commodity").min_width(10).max_width(30),
+    Column::new("commodity", "Commodity")
+        .min_width(10)
+        .max_width(30),
     Column::new("qty", "Qty").right(),
     Column::new("value", "Value").right(),
     Column::new("stolen", "S"),
@@ -138,7 +140,9 @@ pub const PLAN_COLUMNS: &[Column] = &[
 /// `TRADE_LOG_COLUMNS` (`game-internal-api.ts:2024`) — one row per executed trade.
 pub const TRADE_LOG_COLUMNS: &[Column] = &[
     Column::new("round", "#").right(),
-    Column::new("commodity", "Commodity").min_width(10).max_width(28),
+    Column::new("commodity", "Commodity")
+        .min_width(10)
+        .max_width(28),
     Column::new("qty", "Qty").right(),
     Column::new("unitPrice", "Unit").right(),
     Column::new("total", "Total").right(),
@@ -195,6 +199,49 @@ pub const VENDOR_COLUMNS: &[Column] = &[
     Column::new("mods", "Mods").priority(6),
 ];
 
+/// Price-index candidates selected by `edm route --quick` before their live
+/// market listings are read. The price is deliberately labelled generically:
+/// on a `sells` row it is Ardent's `buyPrice`, while on a `buys` row it is its
+/// `sellPrice`.
+pub const QUICK_LOOKUP_COLUMNS: &[Column] = &[
+    Column::new("commodity", "Commodity")
+        .min_width(10)
+        .max_width(24),
+    Column::new("side", "Market").priority(2),
+    Column::new("price", "Price").right(),
+    Column::new("volume", "Tons").right(),
+    Column::new("marketId", "Market ID").right().priority(3),
+    Column::new("station", "Station")
+        .min_width(12)
+        .max_width(30),
+    Column::new("system", "System").max_width(28).priority(1),
+];
+
+/// The answer `edm route --quick` was asked for: per commodity, the best place
+/// to buy it and the best place to sell it among the hops this run nominated,
+/// at prices read live during this run.
+///
+/// `Index` is the Ardent price that nominated the market, kept beside the live
+/// one because the whole claim of this mode is that a crowd-sourced index picks
+/// the candidates and only a live read decides. It is droppable — the live
+/// price is the answer and the comparison is commentary — and so are `Ly` and
+/// `System`, in that order. `Commodity`, `Market`, `Price` and `Station` are
+/// the four a reader cannot act without.
+pub const QUICK_LIVE_COLUMNS: &[Column] = &[
+    Column::new("commodity", "Commodity")
+        .min_width(10)
+        .max_width(24),
+    Column::new("side", "Market"),
+    Column::new("price", "Price").right(),
+    Column::new("volume", "Tons").right().priority(2),
+    Column::new("index", "Index").right().priority(5),
+    Column::new("station", "Station")
+        .min_width(12)
+        .max_width(30),
+    Column::new("system", "System").max_width(28).priority(1),
+    Column::new("distance", "Ly").right().priority(4),
+];
+
 /// Every column set, by the TypeScript's own name for it.
 ///
 /// Exists so that a test or a fixture can address a column set by name without
@@ -213,10 +260,14 @@ pub const ALL: &[(&str, &[Column])] = &[
     ("MARKET_POINT", MARKET_POINT_COLUMNS),
     ("VENDOR_MARKET", VENDOR_MARKET_COLUMNS),
     ("VENDOR", VENDOR_COLUMNS),
+    ("QUICK_LOOKUP", QUICK_LOOKUP_COLUMNS),
+    ("QUICK_LIVE", QUICK_LIVE_COLUMNS),
 ];
 
 /// Looks a column set up by the name it has in `game-internal-api.ts`.
 #[must_use]
 pub fn by_name(name: &str) -> Option<&'static [Column]> {
-    ALL.iter().find(|(candidate, _)| *candidate == name).map(|(_, columns)| *columns)
+    ALL.iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, columns)| *columns)
 }

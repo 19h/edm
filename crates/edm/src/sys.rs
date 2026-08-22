@@ -20,7 +20,13 @@ use std::io::IsTerminal;
 /// poll a market.
 pub fn harden() {
     use rustix::process::{Resource, Rlimit};
-    let _ = rustix::process::setrlimit(Resource::Core, Rlimit { current: Some(0), maximum: Some(0) });
+    let _ = rustix::process::setrlimit(
+        Resource::Core,
+        Rlimit {
+            current: Some(0),
+            maximum: Some(0),
+        },
+    );
 
     #[cfg(target_os = "linux")]
     {
@@ -65,7 +71,11 @@ mod tests {
     #[test]
     fn request_time_is_a_multiple_of_1000() {
         let stamp = (uptime_seconds() * 1000.0).floor();
-        assert_eq!(stamp % 1000.0, 0.0, "uptime is expected to be whole seconds");
+        assert_eq!(
+            stamp % 1000.0,
+            0.0,
+            "uptime is expected to be whole seconds"
+        );
     }
 
     #[test]

@@ -142,15 +142,26 @@ pub fn markets_with_candidates<S: std::hash::BuildHasher>(
 /// would parse every payload twice.
 #[must_use]
 pub fn priced(listings: &[Listing]) -> usize {
-    listings.iter().filter(|listing| listing.snapshot().is_some()).count()
+    listings
+        .iter()
+        .filter(|listing| listing.snapshot().is_some())
+        .count()
 }
 
 /// One commodity row, or `None` if it does not cross the boundary intact.
-fn raw_commodity(row: &Commodity<'_>, crossing: &mut Crossing) -> Option<RawCommodity> {
+pub(crate) fn raw_commodity(row: &Commodity<'_>, crossing: &mut Crossing) -> Option<RawCommodity> {
     // All six together: a row with an exact price and a fractional stock is
     // still a row this program cannot reason about exactly, and taking half of
     // it would put a price in the graph with a quantity that does not match.
-    let [Some(buy_price), Some(sell_price), Some(mean_price), Some(stock), Some(stock_bracket), Some(demand), Some(demand_bracket)] = [
+    let [
+        Some(buy_price),
+        Some(sell_price),
+        Some(mean_price),
+        Some(stock),
+        Some(stock_bracket),
+        Some(demand),
+        Some(demand_bracket),
+    ] = [
         exact(row.buy_price),
         exact(row.sell_price),
         exact(row.mean_price),
@@ -158,7 +169,8 @@ fn raw_commodity(row: &Commodity<'_>, crossing: &mut Crossing) -> Option<RawComm
         exact(row.stock_bracket),
         exact(row.demand),
         exact(row.demand_bracket),
-    ] else {
+    ]
+    else {
         crossing.non_integral += 1;
         return None;
     };
@@ -203,6 +215,10 @@ pub fn floors(config: &edm_core::cli::config::RouteConfig) -> RowFloors {
         min_stock: Tons(exact(config.min_supply).unwrap_or(1)),
         min_demand: Tons(exact(config.min_demand).unwrap_or(1)),
         categories: config.categories.clone(),
+        commodities: config
+            .quick
+            .as_ref()
+            .map_or_else(Vec::new, |quick| quick.commodities.clone()),
         allow_illegal: config.include_illegal,
     }
 }
@@ -248,12 +264,21 @@ mod tests {
         };
         assert!(raw_commodity(&good, &mut crossing).is_some());
 
-        let fractional_stock = Commodity { stock: 100.5, ..good };
+        let fractional_stock = Commodity {
+            stock: 100.5,
+            ..good
+        };
         assert!(raw_commodity(&fractional_stock, &mut crossing).is_none());
 
-        let fractional_price = Commodity { buy_price: 9_000.5, ..good };
+        let fractional_price = Commodity {
+            buy_price: 9_000.5,
+            ..good
+        };
         assert!(raw_commodity(&fractional_price, &mut crossing).is_none());
-        assert_eq!(crossing.non_integral, 2, "each rejected row is reported exactly once");
+        assert_eq!(
+            crossing.non_integral, 2,
+            "each rejected row is reported exactly once"
+        );
     }
 
     fn listing(market_id: f64) -> Listing {
@@ -279,7 +304,11 @@ mod tests {
             station_type: Some("Orbis".to_owned()),
             max_landing_pad_size: Some(3.0),
             distance_to_arrival: Some(500.0),
-            coordinates: Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+            coordinates: Coordinates {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
         }
     }
 
@@ -299,17 +328,14 @@ mod tests {
     #[test]
     fn invalid_or_missing_identity_is_skipped_and_counted_not_collapsed_to_zero() {
         let bad = placed_station(f64::NAN);
-        let (built, _, crossing) =
-            markets(vec![listing(42.0)], &[bad], &RowFloors::default());
+        let (built, _, crossing) = markets(vec![listing(42.0)], &[bad], &RowFloors::default());
         assert!(built.is_empty());
         assert_eq!(crossing.invalid_identity, 1);
 
-        let (built, _, crossing) =
-            markets(vec![listing(42.0)], &[], &RowFloors::default());
+        let (built, _, crossing) = markets(vec![listing(42.0)], &[], &RowFloors::default());
         assert!(built.is_empty());
         assert_eq!(crossing.invalid_identity, 1);
     }
-
 
     #[test]
     fn official_candidate_price_pairs_with_verified_quantity_and_mean() {
@@ -322,10 +348,12 @@ mod tests {
         );
         assert_eq!(crossing.invalid_identity, 0);
         let demand = &built[0].demand[0];
-        assert_eq!(demand.sell_price.0, 120, "base is the optimistic graph bound");
+        assert_eq!(
+            demand.sell_price.0, 120,
+            "base is the optimistic graph bound"
+        );
         let bulk = demand.bulk.expect("paired quote");
         assert_eq!(bulk.base_sell_price.0, 120);
         assert_eq!(bulk.mean_price.0, 95);
     }
-
 }

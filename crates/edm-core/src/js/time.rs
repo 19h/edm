@@ -115,8 +115,14 @@ mod tests {
     #[test]
     fn expanded_years_and_range() {
         assert_eq!(iso8601_from_ms(0.0).unwrap(), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso8601_from_ms(8.64e15).unwrap(), "+275760-09-13T00:00:00.000Z");
-        assert_eq!(iso8601_from_ms(-8.64e15).unwrap(), "-271821-04-20T00:00:00.000Z");
+        assert_eq!(
+            iso8601_from_ms(8.64e15).unwrap(),
+            "+275760-09-13T00:00:00.000Z"
+        );
+        assert_eq!(
+            iso8601_from_ms(-8.64e15).unwrap(),
+            "-271821-04-20T00:00:00.000Z"
+        );
         assert!(iso8601_from_ms(8.64e15 + 1.0).is_none());
         assert!(iso8601_from_ms(f64::NAN).is_none());
     }
@@ -125,7 +131,10 @@ mod tests {
     /// clock rather than wrapping it. R21.
     #[test]
     fn uptime_clock_widens_past_two_digits() {
-        assert_eq!(milliseconds_display(360_000_000.0), "360,000,000 ms (uptime 100:00:00)");
+        assert_eq!(
+            milliseconds_display(360_000_000.0),
+            "360,000,000 ms (uptime 100:00:00)"
+        );
         assert_eq!(milliseconds_display(0.0), "0 ms (uptime 00:00:00)");
     }
 

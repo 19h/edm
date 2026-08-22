@@ -121,7 +121,10 @@ pub fn legs(route: &Route, markets: &[Market], commodities: &Commodities) -> Vec
 
     // The origin is in the title rather than a column: the legs are in flying
     // order, so every other station appears exactly once as a destination.
-    let start = route.legs.first().map_or_else(|| "?".to_owned(), |leg| name(markets, leg.from));
+    let start = route
+        .legs
+        .first()
+        .map_or_else(|| "?".to_owned(), |leg| name(markets, leg.from));
     vec![Block::Table {
         title: format!("LEGS  from {start}"),
         columns: columns::LEG_COLUMNS,
@@ -149,7 +152,9 @@ pub fn progress(event: Event) -> String {
             n(total),
             n(edges)
         ),
-        Event::Round { round, stops: 0, .. } => {
+        Event::Round {
+            round, stops: 0, ..
+        } => {
             format!("  loop search round {}: no route yet", n(round as usize))
         }
         Event::Round { round, rate, stops } => format!(
@@ -168,7 +173,6 @@ pub fn progress(event: Event) -> String {
         }
     }
 }
-
 
 /// The stations in flying order, **with their systems**.
 ///
@@ -247,7 +251,7 @@ fn cargo(route: &Route, commodities: &Commodities) -> String {
 ///
 /// Only ASCII case is examined, which is all these identifiers contain, and a
 /// name that is already spaced is returned unchanged.
-fn readable(name: &str) -> String {
+pub fn readable(name: &str) -> String {
     let chars: Vec<char> = name.chars().collect();
     let mut out = String::with_capacity(name.len() + 4);
     for (index, current) in chars.iter().enumerate() {
@@ -289,7 +293,10 @@ fn money(credits: i64) -> String {
 /// Credits per hour, floored — the rounding law says every quantisation moves
 /// the reported rate down, so the number is never an overstatement.
 fn per_hour(rate: Ratio) -> String {
-    format!("{}/h", js::format_integer(rate.credits_per_hour_floor() as f64))
+    format!(
+        "{}/h",
+        js::format_integer(rate.credits_per_hour_floor() as f64)
+    )
 }
 
 fn duration(millis: i64) -> String {
@@ -314,7 +321,10 @@ fn claim(guarantee: Guarantee) -> String {
         // tells a reader nothing they can act on, and the number says how much
         // room the search could not rule out.
         Guarantee::BoundedGap { upper } => {
-            format!("<= {}/h possible", js::format_integer(upper.credits_per_hour_floor() as f64))
+            format!(
+                "<= {}/h possible",
+                js::format_integer(upper.credits_per_hour_floor() as f64)
+            )
         }
         Guarantee::Heuristic { .. } => "best found".to_owned(),
     }
@@ -383,9 +393,7 @@ fn explain(caveat: Caveat) -> &'static str {
         Caveat::AccessUnmodelled => {
             "permits, allegiance and landing-pad availability are not modelled"
         }
-        Caveat::TimeModelAssumed => {
-            "times come from a calibrated model, not from your ship"
-        }
+        Caveat::TimeModelAssumed => "times come from a calibrated model, not from your ship",
         Caveat::EdgesBelowFloorDropped => {
             "legs below --min-profit were excluded; the result is optimal for what remained"
         }
@@ -399,7 +407,9 @@ mod tests {
     #[test]
     fn a_shape_with_no_route_says_so_rather_than_drawing_an_empty_frame() {
         let blocks = ranking(RouteKind::RoundTrip, &[], &[], &Commodities::new());
-        assert!(matches!(blocks.last(), Some(Block::Note(text)) if text.contains("no profitable round trip")));
+        assert!(
+            matches!(blocks.last(), Some(Block::Note(text)) if text.contains("no profitable round trip"))
+        );
     }
 
     /// The claim column may never read softer or harder than the guarantee.
@@ -408,15 +418,26 @@ mod tests {
         let claims = [
             claim(Guarantee::ProvedOptimal),
             claim(Guarantee::OptimalForStartingCredits),
-            claim(Guarantee::BoundedGap { upper: Ratio::new(crate::num::Credits(1), crate::num::Millis(1)) }),
-            claim(Guarantee::Heuristic { reason: crate::report::HeuristicReason::NodesCapped }),
+            claim(Guarantee::BoundedGap {
+                upper: Ratio::new(crate::num::Credits(1), crate::num::Millis(1)),
+            }),
+            claim(Guarantee::Heuristic {
+                reason: crate::report::HeuristicReason::NodesCapped,
+            }),
         ];
         let mut sorted = claims.to_vec();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), claims.len(), "two guarantees print the same words");
+        assert_eq!(
+            sorted.len(),
+            claims.len(),
+            "two guarantees print the same words"
+        );
         assert!(claims[0].contains("proved"));
-        assert!(!claims[3].contains("proved"), "a heuristic must not read as a proof");
+        assert!(
+            !claims[3].contains("proved"),
+            "a heuristic must not read as a proof"
+        );
     }
 
     /// A caveat may not contradict the coverage block, which says in the same
@@ -461,14 +482,20 @@ mod tests {
 
         // The closing stop is not repeated: a cycle returns to its origin by
         // definition, and printing it spent the width twice on one name.
-        assert_eq!(stops(&route, &markets), "Station 1 (System 1) > Station 2 (System 2)");
+        assert_eq!(
+            stops(&route, &markets),
+            "Station 1 (System 1) > Station 2 (System 2)"
+        );
         // Two legs, two commodities, in flying order — and necessarily
         // different, because a station's buy price exceeds its sell price.
         let carried = cargo(&route, &commodities);
         assert!(carried.contains(" > "), "{carried}");
         let names: Vec<&str> = carried.split(" > ").collect();
         assert_eq!(names.len(), 2, "{carried}");
-        assert_ne!(names[0], names[1], "a round trip cannot carry the same thing both ways");
+        assert_ne!(
+            names[0], names[1],
+            "a round trip cannot carry the same thing both ways"
+        );
     }
 
     /// The API's identifier is not the name a commander knows.
@@ -489,14 +516,40 @@ mod tests {
     #[test]
     fn a_progress_line_says_what_was_done_and_never_what_is_coming() {
         let lines = [
-            progress(Event::Building { done: 47, total: 99, edges: 8_123_456 }),
-            progress(Event::Round { round: 3, rate: Ratio { credits: 1, millis: 1 }, stops: 4 }),
-            progress(Event::Round { round: 1, rate: Ratio::ZERO, stops: 0 }),
-            progress(Event::Expanded { paths: 4_096, budget: 20_000_000 }),
+            progress(Event::Building {
+                done: 47,
+                total: 99,
+                edges: 8_123_456,
+            }),
+            progress(Event::Round {
+                round: 3,
+                rate: Ratio {
+                    credits: 1,
+                    millis: 1,
+                },
+                stops: 4,
+            }),
+            progress(Event::Round {
+                round: 1,
+                rate: Ratio::ZERO,
+                stops: 0,
+            }),
+            progress(Event::Expanded {
+                paths: 4_096,
+                budget: 20_000_000,
+            }),
             progress(Event::Abandoned),
         ];
-        assert!(lines[0].contains("47 / 99 commodities, 8,123,456 legs"), "{}", lines[0]);
-        assert!(lines[1].contains("round 3") && lines[1].contains("3,600,000/h"), "{}", lines[1]);
+        assert!(
+            lines[0].contains("47 / 99 commodities, 8,123,456 legs"),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("round 3") && lines[1].contains("3,600,000/h"),
+            "{}",
+            lines[1]
+        );
         // A round with no witness has no rate to quote, and must not print one.
         assert!(!lines[2].contains("/h"), "{}", lines[2]);
         assert!(lines[3].contains("4,096 of 20,000,000"), "{}", lines[3]);
@@ -504,7 +557,10 @@ mod tests {
         // Claim column only has room for "best found".
         assert!(lines[4].contains("unproved"), "{}", lines[4]);
         for line in &lines {
-            assert!(!line.contains("estimated") && !line.contains("remaining"), "{line}");
+            assert!(
+                !line.contains("estimated") && !line.contains("remaining"),
+                "{line}"
+            );
         }
     }
 
@@ -587,9 +643,10 @@ pub fn trade_commands(
 /// `--market-id 128,666,762`, which is not a market id. Anything that goes into
 /// a command line here is plain decimal for the same reason.
 fn id(markets: &[Market], index: u32) -> String {
-    markets
-        .get(index as usize)
-        .map_or_else(|| "?".to_owned(), |market| js::js_number(market.market_id as f64))
+    markets.get(index as usize).map_or_else(
+        || "?".to_owned(),
+        |market| js::js_number(market.market_id as f64),
+    )
 }
 
 /// A quantity as a command line wants it: plain decimal, no grouping.
@@ -638,19 +695,27 @@ mod command_tests {
             market
         }];
         let route = crate::fixture::proved_round_trip();
-        let text = trade_commands(&[route], &markets, &crate::fixture::round_trip_commodities(), Some(1232))
-            .iter()
-            .filter_map(|block| match block {
-                Block::Raw(text) => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = trade_commands(
+            &[route],
+            &markets,
+            &crate::fixture::round_trip_commodities(),
+            Some(1232),
+        )
+        .iter()
+        .filter_map(|block| match block {
+            Block::Raw(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
         assert!(text.contains("--market-id 4306502403"), "{text}");
         for line in text.lines().filter(|line| line.contains("edm trade")) {
             let command = &line[line.find("edm trade").expect("a command")..];
-            assert!(!command.contains(','), "grouped number in a command: {command}");
+            assert!(
+                !command.contains(','),
+                "grouped number in a command: {command}"
+            );
         }
     }
 
@@ -668,8 +733,12 @@ mod command_tests {
         let route = crate::fixture::proved_round_trip();
         let units = route.legs[0].choice.units.0;
         let markets = crate::fixture::round_trip_markets();
-        let blocks =
-            trade_commands(&[route], &markets, &crate::fixture::round_trip_commodities(), None);
+        let blocks = trade_commands(
+            &[route],
+            &markets,
+            &crate::fixture::round_trip_commodities(),
+            None,
+        );
         let text = blocks
             .iter()
             .filter_map(|block| match block {
@@ -678,7 +747,10 @@ mod command_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains(&format!("--type buy --item gold --qty {units}")), "{text}");
+        assert!(
+            text.contains(&format!("--type buy --item gold --qty {units}")),
+            "{text}"
+        );
         assert!(!text.contains("--fill"), "{text}");
     }
 
@@ -703,14 +775,13 @@ mod open_route_tests {
     fn a_single_hop_says_where_it_goes() {
         let markets = crate::fixture::round_trip_markets();
         let geometry = crate::fixture::geometry(&markets);
-        let hop = crate::report::Route::single_hop(
-            &geometry,
-            0,
-            1,
-            crate::fixture::choice(0, 1_000),
-        );
+        let hop =
+            crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
         assert!(!hop.kind.is_cycle());
-        assert_eq!(stops(&hop, &markets), "Station 1 (System 1) > Station 2 (System 2)");
+        assert_eq!(
+            stops(&hop, &markets),
+            "Station 1 (System 1) > Station 2 (System 2)"
+        );
     }
 
     /// And a cycle still does not repeat the stop it returns to.
@@ -742,14 +813,14 @@ mod open_route_tests {
     fn a_single_hop_shows_the_rate_it_is_ranked_by() {
         let markets = crate::fixture::round_trip_markets();
         let geometry = crate::fixture::geometry(&markets);
-        let hop = crate::report::Route::single_hop(
-            &geometry,
-            0,
-            1,
-            crate::fixture::choice(0, 1_000),
+        let hop =
+            crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
+        let blocks = ranking(
+            RouteKind::SingleHop,
+            std::slice::from_ref(&hop),
+            &markets,
+            &crate::fixture::round_trip_commodities(),
         );
-        let blocks = ranking(RouteKind::SingleHop, std::slice::from_ref(&hop), &markets,
-            &crate::fixture::round_trip_commodities());
         let text = blocks
             .iter()
             .filter_map(|block| match block {
@@ -767,7 +838,10 @@ mod open_route_tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(!text.contains('—'), "no dash where the ranking key belongs: {text}");
+        assert!(
+            !text.contains('—'),
+            "no dash where the ranking key belongs: {text}"
+        );
         assert!(text.contains("/h"), "{text}");
     }
 }

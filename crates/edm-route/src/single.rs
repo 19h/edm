@@ -68,7 +68,8 @@ pub fn solve(
                     if spread.0 <= 0 {
                         Credits::ZERO
                     } else {
-                        spread * min_tons(ship.cargo, affordable(ship.credits, cheapest.row.buy_price))
+                        spread
+                            * min_tons(ship.cargo, affordable(ship.credits, cheapest.row.buy_price))
                     }
                 }
                 _ => Credits::ZERO,
@@ -88,7 +89,9 @@ pub fn solve(
             break;
         }
         let pool = &pools.pools[index];
-        let Some(best_buyer) = pool.buyers.first() else { continue };
+        let Some(best_buyer) = pool.buyers.first() else {
+            continue;
+        };
         let best_sell = best_buyer.row.sell_price;
 
         for supplier in &pool.suppliers {
@@ -124,9 +127,13 @@ pub fn solve(
                     continue;
                 }
 
-                let Some(choice) =
-                    leg_weight(&supplier.row, &buyer.row, ship, ship.credits, limits.min_units)
-                else {
+                let Some(choice) = leg_weight(
+                    &supplier.row,
+                    &buyer.row,
+                    ship,
+                    ship.credits,
+                    limits.min_units,
+                ) else {
                     continue;
                 };
                 if choice.profit <= limits.min_profit {
@@ -166,8 +173,12 @@ mod tests {
             market(2, 5.0, &[], &[(0, 200, 1_000)]),
             market(3, 500.0, &[], &[(0, 200, 1_000)]),
         ];
-        let routes =
-            solve(&Pools::from_markets(&markets), &geometry(&markets), &ship(), &limits());
+        let routes = solve(
+            &Pools::from_markets(&markets),
+            &geometry(&markets),
+            &ship(),
+            &limits(),
+        );
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].legs[0].to, 1);
         assert_eq!(routes[0].profit, routes[1].profit);
@@ -175,10 +186,16 @@ mod tests {
 
     #[test]
     fn a_single_hop_reports_no_steady_rate() {
-        let markets =
-            [market(1, 0.0, &[(0, 100, 1_000)], &[]), market(2, 5.0, &[], &[(0, 200, 1_000)])];
-        let routes =
-            solve(&Pools::from_markets(&markets), &geometry(&markets), &ship(), &limits());
+        let markets = [
+            market(1, 0.0, &[(0, 100, 1_000)], &[]),
+            market(2, 5.0, &[], &[(0, 200, 1_000)]),
+        ];
+        let routes = solve(
+            &Pools::from_markets(&markets),
+            &geometry(&markets),
+            &ship(),
+            &limits(),
+        );
         assert!(routes[0].rate().steady.is_none());
     }
 }

@@ -25,7 +25,9 @@ pub(super) fn apply(buf: &mut [u8], nonce: &[u8; 12]) -> Result<(), CounterExhau
     // C7: the TypeScript's two length checks (ts:106-107) are unreachable
     // because both operands are typed here, so they have no counterpart.
     let mut cipher = chacha20::ChaCha20::new(KEY.into(), nonce.into());
-    cipher.try_apply_keystream(buf).map_err(|_| CounterExhausted)
+    cipher
+        .try_apply_keystream(buf)
+        .map_err(|_| CounterExhausted)
 }
 
 #[cfg(test)]

@@ -3,22 +3,22 @@ source: crates/edm-core/tests/views.rs
 expression: "emit(blocks, width)"
 ---
 == ROUTE PLAN ======================================================================================
-+-------------------------+------------------------------------------------+
-| Field                   | Value                                          |
-+=========================+================================================+
-| reference               | Sol                                            |
-| radius                  | 20 Ly (complete, 1 Ardent query)               |
-| systems                 | 412 in radius, 118 to verify                   |
-| stations known          | 1,230 (Ardent)                                 |
-|   - Odyssey settlements | -771   (--settlements to keep)                 |
-|   - fleet carriers      | -194   (--include-carriers to keep)            |
-|   - outposts (pad L)    | -86   (--pad M to keep)                        |
-|   - beyond 2,000 Ls     | -22   (--max-star-distance to keep)            |
-| markets to poll         | 135                                            |
-| cached and still fresh  | 22                                             |
-| game-internal API requests           | 253  = 118 official batch + 135 market         |
-| estimated transfer      | 42-78 MB  (prior: 500 KB/system, 20 KB/market) |
-| pacing                  | 4 req/s                                        |
-| estimated wall clock    | 64s                                            |
-| ceiling                 | 253 of 2,000   (--max-requests to raise)       |
-+-------------------------+------------------------------------------------+
++----------------------------+------------------------------------------------+
+| Field                      | Value                                          |
++============================+================================================+
+| reference                  | Sol                                            |
+| radius                     | 20 Ly (complete, 1 Ardent query)               |
+| systems                    | 412 in radius, 118 to verify                   |
+| stations known             | 1,230 (Ardent)                                 |
+|   - Odyssey settlements    | -771   (--settlements to keep)                 |
+|   - fleet carriers         | -194   (--include-carriers to keep)            |
+|   - outposts (pad L)       | -86   (--pad M to keep)                        |
+|   - beyond 2,000 Ls        | -22   (--max-star-distance to keep)            |
+| markets to poll            | 135                                            |
+| cached and still fresh     | 22                                             |
+| game-internal API requests | 253  = 118 official batch + 135 market         |
+| estimated transfer         | 42-78 MB  (prior: 500 KB/system, 20 KB/market) |
+| pacing                     | 4 req/s                                        |
+| estimated wall clock       | 64s                                            |
+| ceiling                    | 253 of 2,000   (--max-requests to raise)       |
++----------------------------+------------------------------------------------+

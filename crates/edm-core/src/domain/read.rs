@@ -92,7 +92,11 @@ impl Read for JsObject {
 /// (ts:2734) has only two. R16.
 #[must_use]
 pub fn or_else(value: f64, fallback: impl FnOnce() -> f64) -> f64 {
-    if crate::js::truthy(value) { value } else { fallback() }
+    if crate::js::truthy(value) {
+        value
+    } else {
+        fallback()
+    }
 }
 
 /// JavaScript's `a || b` over strings, where only `""` is falsy.

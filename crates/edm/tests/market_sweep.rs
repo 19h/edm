@@ -55,7 +55,10 @@ fn a_system_sweep_end_to_end() {
     let run = drive(&flags, &sweep(mixed()));
     // Two markets produced nothing usable.
     run.assert_exit(1);
-    assert!(run.stdout.contains("[requeue 1/1] Ohm City (3229009409): HTTP 500"));
+    assert!(
+        run.stdout
+            .contains("[requeue 1/1] Ohm City (3229009409): HTTP 500")
+    );
     insta::assert_snapshot!("mixed_stdout", run.stdout);
     insta::assert_snapshot!("mixed_stderr", run.stderr);
 
@@ -78,7 +81,14 @@ fn a_system_sweep_end_to_end() {
     // `--carriers` and `--all-markets` each restore one market, and the
     // corresponding "skipped" row disappears.
     let run = drive(
-        &["market", "Colonia", "--concurrency", "1", "--carriers", "--all-markets"],
+        &[
+            "market",
+            "Colonia",
+            "--concurrency",
+            "1",
+            "--carriers",
+            "--all-markets",
+        ],
         &sweep((0..7).map(|_| sealed(&listing(10))).collect()),
     );
     run.assert_exit(0);
@@ -98,16 +108,33 @@ fn a_system_sweep_end_to_end() {
         &sweep((0..5).map(|_| sealed(&listing(10))).collect()),
     );
     run.assert_exit(0);
-    assert_eq!(run.stdout.matches("== MARKET  Jaques Station (3229009408) ").count(), 1);
-    assert_eq!(run.stdout.matches("== COMMODITIES  3 entries in 2 categories ").count(), 5);
+    assert_eq!(
+        run.stdout
+            .matches("== MARKET  Jaques Station (3229009408) ")
+            .count(),
+        1
+    );
+    assert_eq!(
+        run.stdout
+            .matches("== COMMODITIES  3 entries in 2 categories ")
+            .count(),
+        5
+    );
 
     // -- R87 ----------------------------------------------------------------
     // Under `--dry-run` a sweep leaves `failure` null, so nothing is requeued,
     // every row reads `no data`, and the run still exits 1.
-    let run = drive(&["market", "Colonia", "--concurrency", "1", "--dry-run"], &sweep(vec![]));
+    let run = drive(
+        &["market", "Colonia", "--concurrency", "1", "--dry-run"],
+        &sweep(vec![]),
+    );
     run.assert_exit(1);
     assert!(!run.stdout.contains("[requeue"));
-    assert_eq!(run.stdout.matches("HTTP -  no data").count(), 5, "one row per surviving market");
+    assert_eq!(
+        run.stdout.matches("HTTP -  no data").count(),
+        5,
+        "one row per surviving market"
+    );
     // R74: the starsystem read carries `ignoreDryRun`, so it happened anyway.
     assert_eq!(
         run.calls,
@@ -133,7 +160,9 @@ fn a_system_sweep_end_to_end() {
         .route("/2.0/elite/starsystem", vec![reply(503, &[], "")]);
     let run = drive(&["market", "Colonia"], &unreadable);
     run.assert_exit(1);
-    assert!(run.stderr.ends_with(
-        "Could not read the star system; try `markets` first to see what is there\n"
-    ));
+    assert!(
+        run.stderr.ends_with(
+            "Could not read the star system; try `markets` first to see what is there\n"
+        )
+    );
 }

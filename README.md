@@ -33,6 +33,72 @@ The route planner can use local Journal, Status, and Cargo files to pick up your
 current system, free cargo space, balance, and jump range. Command-line values
 always take priority.
 
+## Look up named commodities without surveying a region
+
+A regional survey is the right answer to "what is the best trade near me?" and
+the wrong first question for "where do I buy and sell gold right now?". Asking
+it that way costs a live market read for every station in the radius, most of
+which never trade the commodity at all.
+
+`--quick N` with `--item` and/or `--category` inverts the order. Ardent already
+maintains a price-ranked index per commodity, so `edm` scores every seller–buyer
+pair in that index by estimated credits per hour — `(sell − buy) × cargo /
+travel time`, the same first-lap rate the live ranker uses — keeps the N best
+hops of each named commodity (or of every commodity in a named category),
+applies the usual station rules, and then reads **only those market ids** live
+from the game APIs. Taking the N cheapest sellers independently of the N
+dearest buyers would spend the prefix on galactic-average stations after a
+handful of real outliers, and would drop a nearer slightly-worse buyer that
+wins on rate. Near Wasat that is the difference between several thousand
+authenticated requests and six.
+
+```bash
+edm route Wasat --quick 3 --item gold --radius 50 --cargo 1232
+edm route Sol --quick 5 --item "gold, silver, low temperature diamonds"
+edm route Colonia --quick 2 --item painite --qty 200 --eddn --yes
+edm route Wasat --quick 5 --category metals --radius 50 --cargo 1232
+```
+
+The headline output is a **BEST LIVE PRICES** table: per commodity, where to buy
+it cheapest and where to sell it highest among the markets this run actually
+read, with Ardent's index price beside the live one so you can see what moved.
+The usual ranked routes, trade commands, and coverage report follow it.
+
+What it keeps from the ordinary route search: every access filter, the spend
+gate and its `--dry-run`/`--max-requests`/`--yes` controls, the price cache, the
+pacer, live-only ranking, and the optional EDDN relay. Ardent's prices select
+the candidates and are then discarded — nothing is ranked or relayed that was
+not read live during the run.
+
+What it does not claim: coverage. The result is a bounded price prefix, and the
+plan and the JSON `coverage.quickLookup` block both say so rather than reporting
+a complete regional survey. Ardent caps each side at 1,000 rows before local
+filters run, so a station the filters would have removed can still consume a row
+of that page.
+
+Every `--item` is checked against Ardent's commodity catalogue before a query is
+spent on it. Ardent keys on Frontier's internal symbol, which is not always the
+in-game display name — `Low Temperature Diamonds` is `lowtemperaturediamond`,
+`Agri-Medicines` is `agriculturalmedicines` — and it answers an id it does not
+index with an empty page rather than an error. Without the check a misspelt or
+merely display-named commodity is a successful run that reports nothing:
+
+```
+$ edm route Sol --quick 3 --item "Agri-Medicines"
+--item "Agri-Medicines" is not a commodity Ardent indexes (it was asked for as
+"agrimedicines"). Did you mean "agriculturalmedicines"?
+```
+
+A plural that the symbol does not carry is resolved and said out loud rather
+than refused, so `--item "low temperature diamonds"` works and tells you which
+id it asked about.
+
+Two more details. `--qty` sets the minimum seller stock and published buyer
+demand, defaulting to a tenth of the hold. And `--quick` defaults `--shape` to
+`one-way`: it is a lookup of where to buy and sell, not a cycle search. A gold
+hop can outpay a metals round trip even when gold is in that class. Pass
+`--shape round-trip` when you want a return cargo.
+
 ## How a route search works
 
 The complete route-search path is:

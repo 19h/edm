@@ -161,7 +161,10 @@ impl BatchReport {
     /// `totalValue` (ts:2289).
     #[must_use]
     pub fn total_value(&self) -> f64 {
-        self.trades.iter().map(|record| record.qty * record.unit_price).sum()
+        self.trades
+            .iter()
+            .map(|record| record.qty * record.unit_price)
+            .sum()
     }
 }
 
@@ -207,12 +210,19 @@ enum State {
     RoundStart,
     /// The hold is measured and the round-opening fill check runs (ts:2125).
     RoundBegin,
-    Items { index: usize },
+    Items {
+        index: usize,
+    },
     /// A `Trade` is outstanding; the next call carries its `Reply`.
-    AwaitReply { index: usize },
+    AwaitReply {
+        index: usize,
+    },
     /// The reply is recorded and its line emitted; the failure bookkeeping
     /// (ts:2235) still has to run.
-    AfterTrade { index: usize, failed: bool },
+    AfterTrade {
+        index: usize,
+        failed: bool,
+    },
     /// ts:2248.
     RetryNote,
     /// The four round-end tests, in the TypeScript's order (ts:2249-2264).
@@ -256,7 +266,10 @@ impl Batch {
         let mut targets = Vec::with_capacity(config.items.len());
         for token in &config.items {
             let found = find_commodity(&first.commodities, token)?;
-            targets.push(Target { id: found.id, name: found.name.to_owned() });
+            targets.push(Target {
+                id: found.id,
+                name: found.name.to_owned(),
+            });
         }
 
         // ts:2100 — `findIndex(...) !== index` names the *second* occurrence,
@@ -286,7 +299,10 @@ impl Batch {
             skipped: Vec::new(),
             pending: None,
             opening_used: hold_used(first.inventory),
-            report: BatchReport { credits, ..BatchReport::default() },
+            report: BatchReport {
+                credits,
+                ..BatchReport::default()
+            },
         })
     }
 
@@ -311,7 +327,9 @@ impl Batch {
                 State::WaitNote => self.wait_note(),
                 State::Sleeping => {
                     self.state = State::RoundStart;
-                    Some(Step::Sleep { millis: self.config.interval_ms })
+                    Some(Step::Sleep {
+                        millis: self.config.interval_ms,
+                    })
                 }
                 State::Done => Some(Step::Done(self.outcome())),
             };
@@ -377,8 +395,11 @@ impl Batch {
         };
         let current = *current;
 
-        let black_market =
-            trade::derive_black_market(Some(&current), self.config.stolen, self.config.explicit_black_market);
+        let black_market = trade::derive_black_market(
+            Some(&current),
+            self.config.stolen,
+            self.config.explicit_black_market,
+        );
         let unit_price = match self.config.explicit_price {
             Some(price) => price,
             // ts:2150 — a commodity this market does not sell names itself and
@@ -404,8 +425,12 @@ impl Batch {
         if qty == 0.0 {
             // ts:2165 — `available === 0` wins over an unaffordable price,
             // which wins over a full hold [R91].
-            let reason =
-                trade::zero_quantity_reason(self.config.kind, available, self.report.credits, unit_price);
+            let reason = trade::zero_quantity_reason(
+                self.config.kind,
+                available,
+                self.report.credits,
+                unit_price,
+            );
             return Some(self.skip(format!("{}: {reason}", current.name)));
         }
 
@@ -426,8 +451,16 @@ impl Batch {
     }
 
     /// The reply to the outstanding trade (ts:2191 dry, ts:2206 live).
-    fn settle(&mut self, latest: &MarketSnapshot<'_>, index: usize, reply: Option<Reply>) -> Option<Step> {
-        let plan = self.pending.take().expect("a Trade step is always answered before the next one");
+    fn settle(
+        &mut self,
+        latest: &MarketSnapshot<'_>,
+        index: usize,
+        reply: Option<Reply>,
+    ) -> Option<Step> {
+        let plan = self
+            .pending
+            .take()
+            .expect("a Trade step is always answered before the next one");
 
         if self.config.dry_run {
             return self.simulate(&plan, index);
@@ -455,13 +488,18 @@ impl Batch {
             credits: self.report.credits,
         });
         self.trades_this_round += 1;
-        self.state = State::AfterTrade { index, failed: reply.is_failure() };
+        self.state = State::AfterTrade {
+            index,
+            failed: reply.is_failure(),
+        };
 
         if self.config.json {
             return None;
         }
         // ts:2229.
-        let status = reply.status().map_or_else(|| "?".to_owned(), |status| status.to_string());
+        let status = reply
+            .status()
+            .map_or_else(|| "?".to_owned(), |status| status.to_string());
         let credits = match self.report.credits {
             None => String::new(),
             Some(credits) => format!("  credits {}", format_integer(credits)),
@@ -580,7 +618,15 @@ impl Batch {
         let reasons = if self.skipped.is_empty() {
             String::new()
         } else {
-            format!("  ({})", self.skipped.iter().take(3).cloned().collect::<Vec<_>>().join("; "))
+            format!(
+                "  ({})",
+                self.skipped
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
         };
         // `${intervalMs / 1_000}s` is `Number::toString`, so a 1500 ms interval
         // is `1.5s` and a 100 ms one is `0.1s` — never `1.5000` [R92].
@@ -605,7 +651,10 @@ impl Batch {
     }
 
     fn outcome(&self) -> Outcome {
-        Outcome { reason: self.report.outcome.clone(), rounds: self.report.rounds }
+        Outcome {
+            reason: self.report.outcome.clone(),
+            rounds: self.report.rounds,
+        }
     }
 
     // -- the two tables ------------------------------------------------------
@@ -626,11 +675,18 @@ impl Batch {
             ),
             field(
                 "order",
-                self.targets.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(" -> "),
+                self.targets
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" -> "),
             ),
         ];
         if let Some(cargo) = self.config.cargo {
-            rows.push(field("cargo", format!("{} units", format_cargo(self.opening_used, Some(cargo)))));
+            rows.push(field(
+                "cargo",
+                format!("{} units", format_cargo(self.opening_used, Some(cargo))),
+            ));
         }
         if let Some(qty) = self.config.per_item_qty {
             rows.push(field("per item max", format_integer(qty)));
@@ -641,11 +697,17 @@ impl Batch {
                 // ts:2113 — a zero (or NaN) attempt limit is falsy, and then
                 // only a full hold stops the run.
                 let limit = if js::truthy(self.config.attempt_limit) {
-                    format!(", up to {} rounds", js::js_number(self.config.attempt_limit))
+                    format!(
+                        ", up to {} rounds",
+                        js::js_number(self.config.attempt_limit)
+                    )
                 } else {
                     " until filled".to_owned()
                 };
-                format!("every {}s{limit}", js::js_number(self.config.interval_ms / 1000.0))
+                format!(
+                    "every {}s{limit}",
+                    js::js_number(self.config.interval_ms / 1000.0)
+                )
             } else {
                 "single pass".to_owned()
             },
@@ -684,10 +746,13 @@ impl Batch {
                     format_integer(record.qty),
                     format_integer(record.unit_price),
                     format_integer(record.qty * record.unit_price),
-                    record.status.map_or_else(|| "-".to_owned(), |status| status.to_string()),
                     record
-                        .cargo_used
-                        .map_or_else(|| "-".to_owned(), |used| format_cargo(used, self.config.cargo)),
+                        .status
+                        .map_or_else(|| "-".to_owned(), |status| status.to_string()),
+                    record.cargo_used.map_or_else(
+                        || "-".to_owned(),
+                        |used| format_cargo(used, self.config.cargo),
+                    ),
                 ])
             })
             .collect();
@@ -708,7 +773,9 @@ impl Batch {
     /// balance.
     #[must_use]
     pub fn credits_note(&self) -> Option<String> {
-        self.report.credits.map(|credits| format!("credits now {}", format_integer(credits)))
+        self.report
+            .credits
+            .map(|credits| format!("credits now {}", format_integer(credits)))
     }
 }
 

@@ -32,7 +32,11 @@ pub struct Bucket {
 
 impl Default for Bucket {
     fn default() -> Self {
-        Self { rate: 4.0, burst: 8.0, min_rate: 0.5 }
+        Self {
+            rate: 4.0,
+            burst: 8.0,
+            min_rate: 0.5,
+        }
     }
 }
 
@@ -159,8 +163,9 @@ pub fn retry_after_ms(header: &str, now_ms: f64) -> Option<f64> {
 /// is rigid, which is what makes forty lines sufficient.
 #[must_use]
 pub fn imf_fixdate_ms(text: &str) -> Option<f64> {
-    const MONTHS: [&str; 12] =
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
 
     const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -314,7 +319,12 @@ mod breaker_tests {
     /// holds and no failure rate, however total, ever trips it.
     #[test]
     fn a_min_samples_above_the_window_still_trips() {
-        let breaker = Breaker { window: 4, threshold: 0.5, min_samples: 20, ..Breaker::default() };
+        let breaker = Breaker {
+            window: 4,
+            threshold: 0.5,
+            min_samples: 20,
+            ..Breaker::default()
+        };
         let mut window = BreakerWindow::default();
 
         let mut tripped = None;
@@ -335,7 +345,10 @@ mod breaker_tests {
         let breaker = Breaker::default();
         let mut window = BreakerWindow::default();
         for _ in 0..(Breaker::default().min_samples - 1) {
-            assert_eq!(breaker.observe(&mut window, false, false), BreakerState::Closed);
+            assert_eq!(
+                breaker.observe(&mut window, false, false),
+                BreakerState::Closed
+            );
         }
         assert!(matches!(
             breaker.observe(&mut window, false, false),
@@ -360,7 +373,11 @@ pub struct Budget {
 
 impl Default for Budget {
     fn default() -> Self {
-        Self { per_job_ms: 120_000.0, hard_attempts: 8, run_deadline_ms: 3_600_000.0 }
+        Self {
+            per_job_ms: 120_000.0,
+            hard_attempts: 8,
+            run_deadline_ms: 3_600_000.0,
+        }
     }
 }
 
@@ -414,7 +431,11 @@ mod tests {
 
     #[test]
     fn reservations_stagger_rather_than_stampede() {
-        let bucket = Bucket { rate: 4.0, burst: 2.0, min_rate: 0.5 };
+        let bucket = Bucket {
+            rate: 4.0,
+            burst: 2.0,
+            min_rate: 0.5,
+        };
         let mut state = BucketState::new(bucket, 0.0);
 
         // The burst is spent first, at once.
@@ -441,7 +462,11 @@ mod tests {
 
     #[test]
     fn throttling_halves_and_recovery_creeps() {
-        let bucket = Bucket { rate: 4.0, burst: 8.0, min_rate: 0.5 };
+        let bucket = Bucket {
+            rate: 4.0,
+            burst: 8.0,
+            min_rate: 0.5,
+        };
         let mut state = BucketState::new(bucket, 0.0);
 
         bucket.on_throttled(&mut state, 0.0, None);
@@ -477,11 +502,24 @@ mod tests {
         let epoch = 784_111_777_000.0;
         assert_eq!(imf_fixdate_ms("Sun, 06 Nov 1994 08:49:37 GMT"), Some(epoch));
         // A date in the past is a hold-off of zero, never a negative one.
-        assert_eq!(retry_after_ms("Sun, 06 Nov 1994 08:49:37 GMT", epoch + 5_000.0), Some(0.0));
-        assert_eq!(retry_after_ms("Sun, 06 Nov 1994 08:49:37 GMT", epoch - 3_000.0), Some(3_000.0));
+        assert_eq!(
+            retry_after_ms("Sun, 06 Nov 1994 08:49:37 GMT", epoch + 5_000.0),
+            Some(0.0)
+        );
+        assert_eq!(
+            retry_after_ms("Sun, 06 Nov 1994 08:49:37 GMT", epoch - 3_000.0),
+            Some(3_000.0)
+        );
 
         // Anything else is not a hold-off, and must not be read as one.
-        for junk in ["", "soon", "-5", "2.5", "Sun 06 Nov 1994 08:49:37 GMT", "Xxx, 06 Nov 1994 08:49:37 GMT"] {
+        for junk in [
+            "",
+            "soon",
+            "-5",
+            "2.5",
+            "Sun 06 Nov 1994 08:49:37 GMT",
+            "Xxx, 06 Nov 1994 08:49:37 GMT",
+        ] {
             assert_eq!(retry_after_ms(junk, 0.0), None, "{junk}");
         }
     }
@@ -511,7 +549,10 @@ mod tests {
         // Seven throttles in a row is not yet enough, and the failure rate has
         // too few samples to speak.
         for _ in 0..7 {
-            assert_eq!(breaker.observe(&mut window, false, true), BreakerState::Closed);
+            assert_eq!(
+                breaker.observe(&mut window, false, true),
+                BreakerState::Closed
+            );
         }
         assert_eq!(
             breaker.observe(&mut window, false, true),
@@ -526,7 +567,10 @@ mod tests {
         // Every one of the first few fails, which is a rate of 1.0 — but on too
         // little evidence to abort a run over.
         for _ in 0..(breaker.min_samples - 1) {
-            assert_eq!(breaker.observe(&mut window, false, false), BreakerState::Closed);
+            assert_eq!(
+                breaker.observe(&mut window, false, false),
+                BreakerState::Closed
+            );
         }
         assert_eq!(
             breaker.observe(&mut window, false, false),
@@ -538,9 +582,16 @@ mod tests {
     /// clock, not on an attempt count that never runs out.
     #[test]
     fn a_job_retires_on_time_rather_than_on_attempts() {
-        let budget = Budget { per_job_ms: 10_000.0, hard_attempts: 100, run_deadline_ms: 1e9 };
+        let budget = Budget {
+            per_job_ms: 10_000.0,
+            hard_attempts: 100,
+            run_deadline_ms: 1e9,
+        };
 
-        assert_eq!(budget.verdict(true, 1, 0.0, 5_000.0, 0.0), RetryVerdict::Retry);
+        assert_eq!(
+            budget.verdict(true, 1, 0.0, 5_000.0, 0.0),
+            RetryVerdict::Retry
+        );
         assert_eq!(
             budget.verdict(true, 2, 0.0, 10_000.0, 0.0),
             RetryVerdict::GiveUp(GiveUpReason::BudgetExhausted)
@@ -552,7 +603,10 @@ mod tests {
         );
         // And the run's own deadline outranks the job's: this job has barely
         // started, but the sweep as a whole is out of time.
-        let short_run = Budget { run_deadline_ms: 5_000.0, ..budget };
+        let short_run = Budget {
+            run_deadline_ms: 5_000.0,
+            ..budget
+        };
         assert_eq!(
             short_run.verdict(true, 1, 9_000.0, 9_100.0, 0.0),
             RetryVerdict::GiveUp(GiveUpReason::RunDeadline)

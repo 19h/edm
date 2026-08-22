@@ -16,7 +16,10 @@
 //! per binary is what makes the capture deterministic; the scenarios inside it
 //! are separated by named `insta` snapshots instead.
 
-#![allow(dead_code, reason = "one support module shared by five test binaries")]
+#![allow(
+    dead_code,
+    reason = "one support module shared by several test binaries"
+)]
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -64,7 +67,10 @@ pub(crate) struct FakeHttp {
 impl FakeHttp {
     #[must_use]
     pub(crate) fn route(mut self, needle: &'static str, replies: Vec<Reply>) -> Self {
-        self.routes.get_mut().push(Route { needle, replies: replies.into() });
+        self.routes.get_mut().push(Route {
+            needle,
+            replies: replies.into(),
+        });
         self
     }
 }
@@ -73,8 +79,13 @@ impl HttpTransport for FakeHttp {
     async fn send(&self, request: HttpRequest<'_>) -> Result<HttpResponse, TransportError> {
         // The query is a kilobyte of ciphertext whose nonce changes per
         // request, so it is useless in a trace.
-        let target = request.url.split_once('?').map_or(request.url, |(head, _)| head);
-        self.calls.borrow_mut().push(format!("{} {target}", request.method));
+        let target = request
+            .url
+            .split_once('?')
+            .map_or(request.url, |(head, _)| head);
+        self.calls
+            .borrow_mut()
+            .push(format!("{} {target}", request.method));
 
         let mut routes = self.routes.borrow_mut();
         for route in routes.iter_mut() {
@@ -84,7 +95,9 @@ impl HttpTransport for FakeHttp {
                 return reply;
             }
         }
-        Err(TransportError::Other(format!("no scripted reply for {target}")))
+        Err(TransportError::Other(format!(
+            "no scripted reply for {target}"
+        )))
     }
 }
 
@@ -101,7 +114,9 @@ pub(crate) fn reply(status: u16, headers: &[(&str, &str)], body: &str) -> Reply 
             .unwrap_or("")
             .to_owned(),
         headers: HeaderView::from_pairs(
-            headers.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+            headers
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
         ),
         body: body.to_owned(),
     })
@@ -217,7 +232,10 @@ pub(crate) fn drive_with_env_and_files(
     let ports = Ports {
         // A fixed instant, so `fTime`, `requestTime` and every EDDN timestamp
         // are the same on every run.
-        clock: FixedClock { now_ms: 1_700_000_000_000.0, uptime_seconds: 12_345.0 },
+        clock: FixedClock {
+            now_ms: 1_700_000_000_000.0,
+            uptime_seconds: 12_345.0,
+        },
         entropy: CountingEntropy::default(),
         fs: RecordingFs(RefCell::new(files)),
     };

@@ -109,16 +109,32 @@ impl Wanted {
     /// Every shape. What the tests and the oracles compare.
     #[must_use]
     pub const fn all() -> Self {
-        Self { single: true, round_trip: true, loops: true }
+        Self {
+            single: true,
+            round_trip: true,
+            loops: true,
+        }
     }
 
     /// Just one — what a command with a `--shape` should ask for.
     #[must_use]
     pub const fn only(kind: RouteKind) -> Self {
         match kind {
-            RouteKind::SingleHop => Self { single: true, round_trip: false, loops: false },
-            RouteKind::RoundTrip => Self { single: false, round_trip: true, loops: false },
-            RouteKind::Loop { .. } => Self { single: false, round_trip: false, loops: true },
+            RouteKind::SingleHop => Self {
+                single: true,
+                round_trip: false,
+                loops: false,
+            },
+            RouteKind::RoundTrip => Self {
+                single: false,
+                round_trip: true,
+                loops: false,
+            },
+            RouteKind::Loop { .. } => Self {
+                single: false,
+                round_trip: false,
+                loops: true,
+            },
         }
     }
 }
@@ -152,8 +168,11 @@ pub fn solve(
     let pools = Pools::from_markets(markets);
     let graph = TradeGraph::build(&pools, &geometry, ship, limits, watch);
 
-    let mut single =
-        if wanted.single { single::solve(&pools, &geometry, ship, limits) } else { Vec::new() };
+    let mut single = if wanted.single {
+        single::solve(&pools, &geometry, ship, limits)
+    } else {
+        Vec::new()
+    };
     // The round trip is also the loop search's warm start — an achievable
     // rational lower bound that Dinkelbach begins from — so it is computed
     // whenever either is wanted, and is cheap either way (exact enumeration
@@ -188,7 +207,11 @@ pub fn solve(
     }
 
     let stats = graph.stats;
-    let threading = thread::Threading { markets, ship, limits };
+    let threading = thread::Threading {
+        markets,
+        ship,
+        limits,
+    };
     Solution {
         single: threading.rethread(single),
         round_trip: threading.rethread(round_trip),
@@ -230,7 +253,6 @@ mod exactness {
             .collect();
         assert_eq!(named, vec!["edm-core.workspace = true"]);
     }
-
 }
 
 #[cfg(test)]
@@ -258,8 +280,18 @@ mod budget {
     }
 
     fn solved(limits: &Limits, watch: Watch<'_>) -> crate::Solution {
-        let ship = ShipConfig { cargo: Tons(500), credits: Credits(1_000_000_000) };
-        crate::solve(&instance(), TimeModel::default(), &ship, limits, crate::Wanted::all(), watch)
+        let ship = ShipConfig {
+            cargo: Tons(500),
+            credits: Credits(1_000_000_000),
+        };
+        crate::solve(
+            &instance(),
+            TimeModel::default(),
+            &ship,
+            limits,
+            crate::Wanted::all(),
+            watch,
+        )
     }
 
     #[test]
@@ -279,12 +311,24 @@ mod budget {
         let watch = Watch::unlimited().until(&spent);
         for (limits, answers) in [
             (limits(), true),
-            (Limits { max_stops: Some(3), ..limits() }, true),
+            (
+                Limits {
+                    max_stops: Some(3),
+                    ..limits()
+                },
+                true,
+            ),
             // A floor of three stops is a different question, and the warm
             // start is a two-cycle: it does not answer that question, so an
             // abandoned `min_distinct` search reports nothing rather than
             // reporting a route that breaks the constraint it was given.
-            (Limits { min_distinct: Some(3), ..limits() }, false),
+            (
+                Limits {
+                    min_distinct: Some(3),
+                    ..limits()
+                },
+                false,
+            ),
         ] {
             let solution = solved(&limits, watch);
             let claims: Vec<Guarantee> =

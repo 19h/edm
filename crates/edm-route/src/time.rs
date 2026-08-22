@@ -166,19 +166,24 @@ impl<'a> Geometry<'a> {
     /// Separation of two markets' systems, in light years.
     #[must_use]
     pub fn leg_ly(&self, from: u32, to: u32) -> f64 {
-        distance_ly(self.markets[from as usize].coords, self.markets[to as usize].coords)
+        distance_ly(
+            self.markets[from as usize].coords,
+            self.markets[to as usize].coords,
+        )
     }
 
     /// Wall-clock for the laden leg `from` to `to`.
     #[must_use]
     pub fn leg_millis(&self, from: u32, to: u32) -> Millis {
-        self.time.leg_millis(self.leg_ly(from, to), self.markets[to as usize].arrival_ls)
+        self.time
+            .leg_millis(self.leg_ly(from, to), self.markets[to as usize].arrival_ls)
     }
 
     /// Wall-clock to reach and load at `at` before the first leg.
     #[must_use]
     pub fn startup_millis(&self, at: u32) -> Millis {
-        self.time.startup_millis(self.markets[at as usize].arrival_ls)
+        self.time
+            .startup_millis(self.markets[at as usize].arrival_ls)
     }
 }
 

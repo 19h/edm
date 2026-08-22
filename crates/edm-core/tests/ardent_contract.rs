@@ -14,7 +14,10 @@ use edm_core::consts::ARDENT_BASE_URL;
 use edm_core::js::json::JsValue;
 
 fn fixture() -> String {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ardent_contract.tsv");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ardent_contract.tsv"
+    );
     std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("{e} — run `bun xtask/oracle/bless-ardent.ts`"))
 }
@@ -49,7 +52,8 @@ fn render_matches(value: &JsValue) -> String {
                     || "null".to_owned(),
                     |t| JsValue::Str(t.into_boxed_str()).stringify_compact()
                 ),
-                m.pad.map_or_else(|| "null".to_owned(), edm_core::js::js_number),
+                m.pad
+                    .map_or_else(|| "null".to_owned(), edm_core::js::js_number),
             )
         })
         .collect();
@@ -102,6 +106,13 @@ fn the_ported_client_matches_the_module_it_replaced() {
         checked += 1;
     }
 
-    assert!(checked > 50, "the fixture looks truncated: only {checked} rows");
-    assert!(mismatches.is_empty(), "{checked} rows checked:\n{}", mismatches.join("\n"));
+    assert!(
+        checked > 50,
+        "the fixture looks truncated: only {checked} rows"
+    );
+    assert!(
+        mismatches.is_empty(),
+        "{checked} rows checked:\n{}",
+        mismatches.join("\n")
+    );
 }

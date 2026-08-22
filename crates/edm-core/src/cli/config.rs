@@ -81,7 +81,7 @@ fn validate_exact_length(name: &str, value: &str, expected: usize) -> Result<(),
     if received != expected {
         // ts:66
         return Err(
-            format!("{name} must be exactly {expected} characters; received {received}").into()
+            format!("{name} must be exactly {expected} characters; received {received}").into(),
         );
     }
     Ok(())
@@ -138,7 +138,9 @@ pub fn open_session(cli: &Cli<'_>) -> Result<SessionConfig, CliError> {
     Ok(SessionConfig {
         credentials: load_credentials(cli)?,
         // Full-Unicode uppercasing, as `String.prototype.toUpperCase` performs.
-        method_override: cli.optional_value(Flag::Method, None).map(str::to_uppercase),
+        method_override: cli
+            .optional_value(Flag::Method, None)
+            .map(str::to_uppercase),
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         full_url: cli.switch_value(Flag::FullUrl, false)?,
         json: cli.switch_value(Flag::Json, false)?,
@@ -206,7 +208,11 @@ pub fn next_stamp(cli: &Cli<'_>, defaults: StampDefaults) -> Result<RequestStamp
         None => (defaults.uptime_seconds * 1_000.0).floor(),
     };
 
-    Ok(RequestStamp { nonce, frontier_time, request_time: js::to_uint32(request_time) })
+    Ok(RequestStamp {
+        nonce,
+        frontier_time,
+        request_time: js::to_uint32(request_time),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +258,11 @@ pub fn market_target(cli: &Cli<'_>) -> Result<MarketTarget, CliError> {
 
     let Some(from_environment) = cli.optional_value(Flag::MarketId, Some("MARKET_ID")) else {
         // ts:1699
-        return Err("market needs a system name, or --market-id <id> (or MARKET_ID in the environment)".to_owned().into());
+        return Err(
+            "market needs a system name, or --market-id <id> (or MARKET_ID in the environment)"
+                .to_owned()
+                .into(),
+        );
     };
     js::parse_unsigned_integer("MARKET_ID", from_environment)
         .map(MarketTarget::Single)
@@ -263,7 +273,11 @@ pub fn market_target(cli: &Cli<'_>) -> Result<MarketTarget, CliError> {
 fn positional_name(cli: &Cli<'_>) -> Option<String> {
     let joined = cli.args().positionals.join(" ");
     let trimmed = text::js_trim(&joined);
-    if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 /// Which Ardent lookup a name gets, from `resolveLocation`'s second argument.
@@ -280,7 +294,11 @@ pub enum LookupMode {
 /// so a `--system` name resolves as `auto` here while `markets` would resolve
 /// the same name as `system`.
 pub fn sweep_lookup_mode(cli: &Cli<'_>) -> LookupMode {
-    if cli.optional_value(Flag::Station, None).is_some() { LookupMode::Station } else { LookupMode::Auto }
+    if cli.optional_value(Flag::Station, None).is_some() {
+        LookupMode::Station
+    } else {
+        LookupMode::Auto
+    }
 }
 
 /// `SweepSettings` (ts:1417).
@@ -306,14 +324,20 @@ pub struct SweepSettings {
 /// `quiet` is `session.json`, passed in rather than re-read so that this
 /// function cannot disagree with the session about it.
 pub fn sweep_settings(cli: &Cli<'_>, json: bool) -> Result<SweepSettings, CliError> {
-    let concurrency = cli.optional_number(Flag::Concurrency)?.unwrap_or(f64::from(DEFAULT_CONCURRENCY));
+    let concurrency = cli
+        .optional_number(Flag::Concurrency)?
+        .unwrap_or(f64::from(DEFAULT_CONCURRENCY));
     let workers = js::js_max(1.0, js::js_min(f64::from(MAX_CONCURRENCY), concurrency));
-    let timeout = cli.optional_decimal(Flag::Timeout)?.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
+    let timeout = cli
+        .optional_decimal(Flag::Timeout)?
+        .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
     Ok(SweepSettings {
         // Clamped into 1..=MAX_CONCURRENCY above, so the cast is exact.
         workers: workers as u32,
         timeout_ms: js::js_round(timeout * 1_000.0),
-        requeues: cli.optional_number(Flag::Requeue)?.unwrap_or(DEFAULT_REQUEUES),
+        requeues: cli
+            .optional_number(Flag::Requeue)?
+            .unwrap_or(DEFAULT_REQUEUES),
         quiet: json,
         detail: cli.switch_value(Flag::Detail, false)?,
     })
@@ -346,14 +370,21 @@ pub fn markets_config(cli: &Cli<'_>) -> Result<MarketsConfig, CliError> {
     let station_name = cli.optional_value(Flag::Station, None);
     let system_name = cli.optional_value(Flag::System, None);
     let positional = positional_name(cli);
-    let name = station_name.or(system_name).map(str::to_owned).or(positional);
+    let name = station_name
+        .or(system_name)
+        .map(str::to_owned)
+        .or(positional);
 
     if let Some(address) = explicit_address {
         return Ok(MarketsConfig::Address(address));
     }
     let Some(name) = name else {
         // ts:3011
-        return Err("markets needs a system or station name (or --address <id64>)".to_owned().into());
+        return Err(
+            "markets needs a system or station name (or --address <id64>)"
+                .to_owned()
+                .into(),
+        );
     };
     let mode = if station_name.is_some() {
         LookupMode::Station
@@ -392,12 +423,18 @@ pub fn starsystem_query(
     cli: &Cli<'_>,
     cached: CachedTimestamp,
 ) -> Result<StarsystemQuery, CliError> {
-    let language = cli.optional_value(Flag::Language, None).unwrap_or("en").to_owned();
+    let language = cli
+        .optional_value(Flag::Language, None)
+        .unwrap_or("en")
+        .to_owned();
     let cached_timestamp = match cached {
         CachedTimestamp::Flag => cli.optional_number(Flag::CachedTimestamp)?.unwrap_or(0.0),
         CachedTimestamp::SweepZero => 0.0,
     };
-    Ok(StarsystemQuery { language, cached_timestamp })
+    Ok(StarsystemQuery {
+        language,
+        cached_timestamp,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -439,7 +476,10 @@ pub fn eddn_config(cli: &Cli<'_>, credentials: &Credentials) -> Result<EddnConfi
         game_version: cli
             .optional_value(Flag::GameVersion, None)
             .map_or(defaults.game_version, str::to_owned),
-        game_build: cli.optional_value(Flag::GameBuild, None).unwrap_or("").to_owned(),
+        game_build: cli
+            .optional_value(Flag::GameBuild, None)
+            .unwrap_or("")
+            .to_owned(),
         horizons: cli.optional_switch(Flag::Horizons)?,
         odyssey: cli.optional_switch(Flag::Odyssey)?,
     })
@@ -503,7 +543,10 @@ pub struct TradeInputs {
 pub fn trade_inputs(cli: &Cli<'_>) -> Result<TradeInputs, CliError> {
     let resolve = cli.switch_value(Flag::Resolve, true)?;
     let market_id = if resolve {
-        Some(cli.require_value(Flag::MarketId, Some("MARKET_ID"))?.to_owned())
+        Some(
+            cli.require_value(Flag::MarketId, Some("MARKET_ID"))?
+                .to_owned(),
+        )
     } else {
         None
     };
@@ -576,7 +619,9 @@ pub fn resolve_trade(
     cli: &Cli<'_>,
     snapshot: Option<&MarketSnapshot<'_>>,
 ) -> Result<ResolvedTrade, CliError> {
-    let market_id = cli.require_value(Flag::MarketId, Some("MARKET_ID"))?.to_owned();
+    let market_id = cli
+        .require_value(Flag::MarketId, Some("MARKET_ID"))?
+        .to_owned();
     let raw_type = cli.require_value(Flag::Type, None)?.to_lowercase();
     // ts:1814
     let kind = Kind::parse(&raw_type).map_err(CliError::from)?;
@@ -604,19 +649,25 @@ pub fn resolve_trade(
     };
     if commodity.is_none() && !is_digits(item) {
         // ts:1828
-        return Err("--item must be a numeric id when --no-resolve is used".to_owned().into());
+        return Err("--item must be a numeric id when --no-resolve is used"
+            .to_owned()
+            .into());
     }
     if commodity.is_none() && explicit_price.is_none() {
         // ts:1829
-        return Err("--unit-price is required when --no-resolve is used".to_owned().into());
+        return Err("--unit-price is required when --no-resolve is used"
+            .to_owned()
+            .into());
     }
 
     let mut fields: Vec<PlanField> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
 
     let commodity_id = commodity.map_or_else(|| js::to_number(item), |c| c.id);
-    let commodity_name =
-        commodity.map_or_else(|| format!("id {}", js::js_number(commodity_id)), |c| c.name.to_owned());
+    let commodity_name = commodity.map_or_else(
+        || format!("id {}", js::js_number(commodity_id)),
+        |c| c.name.to_owned(),
+    );
     let black_market = trade::derive_black_market(commodity, stolen, explicit_black_market);
 
     let mut price_source = PlanSource::Flag;
@@ -629,7 +680,9 @@ pub fn resolve_trade(
         // ts:1847. Unreachable behind the ts:1829 guard, which already demands
         // a price whenever there is no commodity; transcribed anyway.
         (None, None) => {
-            return Err("Could not determine a unit price; pass --unit-price".to_owned().into());
+            return Err("Could not determine a unit price; pass --unit-price"
+                .to_owned()
+                .into());
         }
     };
 
@@ -715,7 +768,11 @@ pub fn resolve_trade(
     };
 
     let mut record = |label: &'static str, value: String, source: PlanSource| {
-        fields.push(PlanField { label, value, source });
+        fields.push(PlanField {
+            label,
+            value,
+            source,
+        });
     };
     record(
         "marketId",
@@ -729,16 +786,28 @@ pub fn resolve_trade(
             PlanSource::Default
         },
     );
-    record("transactionType", kind.as_str().to_owned(), PlanSource::Flag);
+    record(
+        "transactionType",
+        kind.as_str().to_owned(),
+        PlanSource::Flag,
+    );
     record(
         "commodityId",
         format!("{} ({commodity_name})", js::js_number(commodity_id)),
-        if is_digits(item) { PlanSource::Flag } else { PlanSource::Market },
+        if is_digits(item) {
+            PlanSource::Flag
+        } else {
+            PlanSource::Market
+        },
     );
     record(
         "blackMarket",
         if black_market { "1" } else { "0" }.to_owned(),
-        if explicit_black_market.is_none() { PlanSource::Market } else { PlanSource::Flag },
+        if explicit_black_market.is_none() {
+            PlanSource::Market
+        } else {
+            PlanSource::Flag
+        },
     );
     record(
         "stolen",
@@ -762,7 +831,11 @@ pub fn resolve_trade(
             PlanSource::Default
         },
     );
-    record("total", format!("{} cr", js::format_integer(unit_price * qty)), PlanSource::Default);
+    record(
+        "total",
+        format!("{} cr", js::format_integer(unit_price * qty)),
+        PlanSource::Default,
+    );
 
     if let Some(commodity) = commodity {
         let inventory = snapshot.map_or(&[][..], |s| s.inventory);
@@ -848,7 +921,11 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
     }
     if fill && cargo.is_none() {
         // ts:2064
-        return Err("--fill needs --cargo <capacity> to know when the hold is full".to_owned().into());
+        return Err(
+            "--fill needs --cargo <capacity> to know when the hold is full"
+                .to_owned()
+                .into(),
+        );
     }
     if fill && !cli.switch_value(Flag::Cap, true)? {
         // ts:2065
@@ -856,7 +933,9 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
     }
     if !fill && per_item_qty.is_none() {
         // ts:2066
-        return Err("Missing required option --qty (or pass --fill)".to_owned().into());
+        return Err("Missing required option --qty (or pass --fill)"
+            .to_owned()
+            .into());
     }
     // Tested even under `--fill`, which is how `--fill --qty 0` is rejected.
     if per_item_qty == Some(0.0) {
@@ -867,11 +946,17 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
     // batch run refuses `--no-resolve`, including a plain two-item one.
     if !cli.switch_value(Flag::Resolve, true)? {
         // ts:2068
-        return Err("--no-resolve cannot be used with --fill or multiple items".to_owned().into());
+        return Err("--no-resolve cannot be used with --fill or multiple items"
+            .to_owned()
+            .into());
     }
     if watch && !fill && attempt_limit == 0.0 {
         // ts:2070
-        return Err("--watch needs --fill (or --attempts <n>) so it has a stopping condition".to_owned().into());
+        return Err(
+            "--watch needs --fill (or --attempts <n>) so it has a stopping condition"
+                .to_owned()
+                .into(),
+        );
     }
     #[expect(
         clippy::manual_range_contains,
@@ -880,11 +965,15 @@ pub fn batch_config(cli: &Cli<'_>, items: Vec<String>) -> Result<BatchConfig, Cl
     )]
     if interval < 0.1 || interval > 3_600.0 {
         // ts:2072
-        return Err("--interval must be between 0.1 and 3600 seconds".to_owned().into());
+        return Err("--interval must be between 0.1 and 3600 seconds"
+            .to_owned()
+            .into());
     }
 
     Ok(BatchConfig {
-        market_id: cli.require_value(Flag::MarketId, Some("MARKET_ID"))?.to_owned(),
+        market_id: cli
+            .require_value(Flag::MarketId, Some("MARKET_ID"))?
+            .to_owned(),
         kind,
         items,
         fill,
@@ -925,6 +1014,22 @@ pub enum Shape {
 }
 
 impl Shape {
+    /// Whether this shape is a repeatable cycle rather than a single laden hop.
+    #[must_use]
+    pub const fn is_cycle(self) -> bool {
+        !matches!(self, Self::OneWay)
+    }
+
+    /// The name to print when explaining what such a search is looking for.
+    #[must_use]
+    pub const fn noun(self) -> &'static str {
+        match self {
+            Self::OneWay => "single hop",
+            Self::RoundTrip => "round trip",
+            Self::Loop | Self::BoundedLoop(_) => "loop",
+        }
+    }
+
     /// `--shape one-way|round-trip|loop|loop:N`.
     pub fn parse(raw: &str) -> Result<Self, CliError> {
         let raw = crate::js::text::js_trim(raw);
@@ -969,6 +1074,82 @@ impl Pad {
     }
 }
 
+/// Ardent-price-first route lookup settings.
+///
+/// Normal route discovery starts with every market in a region, then buys a
+/// listing for each survivor. Quick lookup reverses that order for a named
+/// commodity list: Ardent's cheap price index supplies a small, per-side
+/// candidate set, and Frontier still supplies the live listings that are
+/// ultimately ranked and (optionally) relayed. The list comes from `--item`,
+/// from `--category` expanded against Ardent's catalogue, or from both.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuickLookup {
+    /// Candidate Ardent commodity ids, in the order the user gave them.
+    ///
+    /// Candidates, not ids: normalising a display name gets the shape of an id
+    /// and not always the id — Ardent keys on Frontier's symbol. The command
+    /// layer resolves these against Ardent's catalogue before it queries.
+    /// Empty when `--quick` was driven only by `--category`.
+    pub commodities: Vec<String>,
+    /// The same items exactly as typed, so an unresolvable one can be quoted
+    /// back in the words the user used. Same length and order as
+    /// [`commodities`](Self::commodities).
+    pub raw: Vec<String>,
+    /// Canonical category names from `--category`, in the order given.
+    ///
+    /// Expanded against Ardent's catalogue at lookup time. Empty when `--quick`
+    /// was driven only by `--item`.
+    pub categories: Vec<String>,
+    /// Highest first-lap-rate hops retained for every commodity. `n` in
+    /// `--quick n` is that hop count, not a per-side price prefix.
+    pub markets_per_side: usize,
+    /// `--qty`, when the user overrode the cargo-derived default.
+    pub quantity: Option<f64>,
+}
+
+impl QuickLookup {
+    /// Whether this commodity set rules a repeatable cycle out in advance.
+    ///
+    /// Every market's buy price exceeds its sell price, so one commodity can
+    /// never pay in both directions of a cycle: a round trip or loop must carry
+    /// different cargo on the way back. With a single `--item` there is no cycle
+    /// to find, whatever the live prices turn out to be. A `--category` names a
+    /// class, not a single cargo, so it does not rule a cycle out at parse
+    /// time even when `--item` is also empty.
+    #[must_use]
+    pub fn cannot_cycle(&self) -> bool {
+        self.categories.is_empty() && self.commodities.len() < 2
+    }
+
+    /// The published quantity threshold applied to both Ardent sides.
+    ///
+    /// A buyer with an unreported exact demand but a positive demand bracket
+    /// remains eligible, matching normal live route ingest. Market quantities
+    /// otherwise are integral. A tenth of a 784 t hold is 78.4 t, so
+    /// `ceil` is the only value that actually means "at least ten percent";
+    /// rounding down would admit a 78 t offer. This happens at execution time
+    /// because local commander state can fill `cargo` after CLI parsing.
+    ///
+    /// The caller passes the hold the *ranking* will assume, not `--cargo`
+    /// verbatim: a floor of one tonne against a ranking that reasons about a
+    /// full hold spends the candidate budget on markets it cannot use.
+    #[must_use]
+    pub fn minimum_quantity(&self, cargo: Option<f64>) -> f64 {
+        self.quantity.unwrap_or_else(|| {
+            js::js_max(
+                cargo
+                    .filter(|value| value.is_finite())
+                    .map_or(1.0, |value| (value * 0.1).ceil()),
+                1.0,
+            )
+        })
+    }
+}
+
+/// Ardent's `/nearby` commodity endpoint returns at most this many rows per
+/// side. Refuse a larger ask rather than presenting a capped page as "top N".
+pub const QUICK_LOOKUP_MAX_MARKETS_PER_SIDE: usize = 1_000;
+
 /// Everything `route` was asked for.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouteConfig {
@@ -988,6 +1169,9 @@ pub struct RouteConfig {
     pub credits: Option<f64>,
     pub jump_range_ly: f64,
     pub shape: Shape,
+    /// `Some` when `--quick <markets-per-side>` selected Ardent-price-first
+    /// discovery. `--top` remains the number of final routes to print.
+    pub quick: Option<QuickLookup>,
     pub top: usize,
     pub min_profit: f64,
     pub min_supply: f64,
@@ -1093,6 +1277,104 @@ pub const DEFAULT_EDDN_RPS: f64 = 2.0;
 pub const DEFAULT_DEADLINE_SECONDS: f64 = 3_600.0;
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
+/// Read the opt-in quick lookup mode.
+///
+/// `--quick` deliberately names the count, while the pre-existing `--item`
+/// names one or more commodities, `--category` names one or more classes that
+/// expand to commodities, and `--qty` names an optional common volume. Those
+/// spellings already mean exactly those things on `trade` and on a regional
+/// route survey, so callers do not have to learn a parallel vocabulary.
+fn quick_lookup(cli: &Cli<'_>) -> Result<Option<QuickLookup>, CliError> {
+    let Some(markets) = cli.optional_number(Flag::Quick)? else {
+        return Ok(None);
+    };
+    if markets < 1.0 || markets > QUICK_LOOKUP_MAX_MARKETS_PER_SIDE as f64 {
+        return Err(format!(
+            "--quick must be between 1 and {QUICK_LOOKUP_MAX_MARKETS_PER_SIDE} markets per commodity side"
+        )
+        .into());
+    }
+
+    let item_raw = cli.optional_value(Flag::Item, None);
+    let category_raw = cli.optional_value(Flag::Category, None);
+    if item_raw.is_none() && category_raw.is_none() {
+        return Err(quick_needs_a_commodity_source());
+    }
+
+    let mut commodities = Vec::new();
+    let mut typed = Vec::new();
+    if let Some(raw) = item_raw {
+        for item in split_items(raw)? {
+            let canonical = crate::ardent::normalise_commodity_name(&item);
+            if canonical.is_empty() {
+                return Err(format!("--item has no usable commodity name in \"{item}\"").into());
+            }
+            if !commodities.contains(&canonical) {
+                commodities.push(canonical);
+                typed.push(item);
+            }
+        }
+        // `split_items` already makes the empty-list case impossible. Keep this
+        // guard beside the normalisation because punctuation-only items become
+        // empty only after that second step.
+        if commodities.is_empty() {
+            return Err("--quick needs at least one commodity in --item"
+                .to_owned()
+                .into());
+        }
+    }
+
+    let mut categories = Vec::new();
+    if let Some(raw) = category_raw {
+        let names: Vec<String> = raw
+            .split(',')
+            .map(|token| text::js_trim(token).to_owned())
+            .filter(|token| !token.is_empty())
+            .collect();
+        if names.is_empty() {
+            return Err("--category needs at least one category".to_owned().into());
+        }
+        for name in names {
+            let Some(canonical) = crate::ardent::resolve_category(&name) else {
+                return Err(format!(
+                    "--category \"{name}\" is not a commodity category (known: {})",
+                    crate::ardent::known_categories().join(", "),
+                )
+                .into());
+            };
+            if !categories.iter().any(|held| held == canonical) {
+                categories.push(canonical.to_owned());
+            }
+        }
+    }
+
+    if commodities.is_empty() && categories.is_empty() {
+        return Err(quick_needs_a_commodity_source());
+    }
+
+    let quantity = cli.optional_number(Flag::Qty)?;
+    if quantity.is_some_and(|quantity| quantity < 1.0) {
+        return Err("--qty must be at least 1 in quick lookup mode"
+            .to_owned()
+            .into());
+    }
+
+    Ok(Some(QuickLookup {
+        commodities,
+        raw: typed,
+        categories,
+        markets_per_side: markets as usize,
+        quantity,
+    }))
+}
+
+fn quick_needs_a_commodity_source() -> CliError {
+    CliError::from(
+        "--quick needs --item <commodity[,commodity...]> or --category <category[,category...]>"
+            .to_owned(),
+    )
+}
+
 /// Builds the configuration for `route`.
 ///
 /// The reference is read first and is required, because every other flag is
@@ -1117,7 +1399,12 @@ pub fn route_config_with_reference(
     // "Sol -v" and reported that Ardent had never heard of it. No Elite system
     // name begins with a hyphen, so refusing them costs nothing and the message
     // names the token rather than blaming the name.
-    if let Some(stray) = cli.args().positionals.iter().find(|token| token.starts_with('-')) {
+    if let Some(stray) = cli
+        .args()
+        .positionals
+        .iter()
+        .find(|token| token.starts_with('-'))
+    {
         return Err(format!("Unknown option {stray}").into());
     }
     let positional = cli.args().positionals.join(" ");
@@ -1133,15 +1420,40 @@ pub fn route_config_with_reference(
         }
     };
 
-    let radius_ly = cli.optional_decimal(Flag::Radius)?.unwrap_or(DEFAULT_RADIUS_LY);
-    let shape = match cli.optional_value(Flag::Shape, None) {
-        Some(raw) => Shape::parse(raw)?,
-        None => Shape::RoundTrip,
+    let radius_ly = cli
+        .optional_decimal(Flag::Radius)?
+        .unwrap_or(DEFAULT_RADIUS_LY);
+    // Read in place so an invalid `--shape` is still reported before a later
+    // flag's error, but resolve the default below: `--quick` is a lookup, and
+    // a missing `--shape` there means one-way even when several commodities
+    // could cycle.
+    let requested_shape = match cli.optional_value(Flag::Shape, None) {
+        Some(raw) => Some(Shape::parse(raw)?),
+        None => None,
     };
     let pad = match cli.optional_value(Flag::Pad, None) {
         Some(raw) => Pad::parse(raw)?,
         None => Pad::Large,
     };
+    // Read cargo before quick settings, but do not derive the quick quantity
+    // from it yet: local commander state can still fill this field below the
+    // command layer.
+    let cargo = cli.optional_number(Flag::Cargo)?;
+    let top = cli.optional_number(Flag::Top)?.unwrap_or(DEFAULT_TOP) as usize;
+    let quick = quick_lookup(cli)?;
+    let shape = requested_shape.unwrap_or_else(|| {
+        if quick.is_some() {
+            // `--quick` answers "where do I buy and sell these now?". That is a
+            // hop. Defaulting a metals lookup to a round trip hid a 77 Mcr gold
+            // one-way behind a 30 Mcr cycle, which reads as "metals pay less
+            // than gold" when gold is a metal. Pass `--shape round-trip` for a
+            // return cargo. A lone `--item` still cannot cycle; that is caught
+            // later if the user names one anyway.
+            Shape::OneWay
+        } else {
+            Shape::RoundTrip
+        }
+    });
 
     Ok(RouteConfig {
         reference,
@@ -1163,29 +1475,40 @@ pub fn route_config_with_reference(
         // saving, it is correctness.
         include_settlements: cli.switch_value(Flag::Settlements, false)?,
         max_star_distance_ls: Some(
-            cli.optional_decimal(Flag::MaxStarDistance)?.unwrap_or(DEFAULT_MAX_STAR_DISTANCE_LS),
+            cli.optional_decimal(Flag::MaxStarDistance)?
+                .unwrap_or(DEFAULT_MAX_STAR_DISTANCE_LS),
         ),
-        cargo: cli.optional_number(Flag::Cargo)?,
+        cargo,
         credits: cli.optional_number(Flag::Credits)?,
-        jump_range_ly: cli.optional_decimal(Flag::Jump)?.unwrap_or(DEFAULT_JUMP_RANGE_LY),
+        jump_range_ly: cli
+            .optional_decimal(Flag::Jump)?
+            .unwrap_or(DEFAULT_JUMP_RANGE_LY),
         shape,
-        top: cli.optional_number(Flag::Top)?.unwrap_or(DEFAULT_TOP) as usize,
-        min_profit: cli.optional_number(Flag::MinProfit)?.unwrap_or(DEFAULT_MIN_PROFIT),
+        quick,
+        top,
+        min_profit: cli
+            .optional_number(Flag::MinProfit)?
+            .unwrap_or(DEFAULT_MIN_PROFIT),
         min_supply: cli.optional_number(Flag::MinSupply)?.unwrap_or(1.0),
         min_demand: cli.optional_number(Flag::MinDemand)?.unwrap_or(1.0),
         workers: {
-            let declared =
-                cli.optional_number(Flag::Concurrency)?.unwrap_or(f64::from(DEFAULT_CONCURRENCY));
+            let declared = cli
+                .optional_number(Flag::Concurrency)?
+                .unwrap_or(f64::from(DEFAULT_CONCURRENCY));
             // Clamped into 1..=MAX_CONCURRENCY, so the cast is exact.
             js::js_max(1.0, js::js_min(f64::from(MAX_CONCURRENCY), declared)) as u32
         },
         rate_per_second: cli.optional_decimal(Flag::Rps)?.unwrap_or(DEFAULT_RPS),
-        deadline_seconds: cli.optional_decimal(Flag::Deadline)?.unwrap_or(DEFAULT_DEADLINE_SECONDS),
+        deadline_seconds: cli
+            .optional_decimal(Flag::Deadline)?
+            .unwrap_or(DEFAULT_DEADLINE_SECONDS),
         max_requests: cli
             .optional_number(Flag::MaxRequests)?
             .unwrap_or(crate::spend::DEFAULT_MAX_REQUESTS),
         confirmed: cli.switch_value(Flag::Yes, false)?,
-        max_age_minutes: cli.optional_decimal(Flag::MaxAge)?.unwrap_or(DEFAULT_MAX_AGE_MINUTES),
+        max_age_minutes: cli
+            .optional_decimal(Flag::MaxAge)?
+            .unwrap_or(DEFAULT_MAX_AGE_MINUTES),
         cache: cli.switch_value(Flag::Cache, true)?,
         refresh: cli.switch_value(Flag::Refresh, false)?,
         cache_dir: cli.optional_value(Flag::CacheDir, None).map(str::to_owned),

@@ -188,10 +188,18 @@ pub fn thousands(t: f64) -> String {
     if t == 0.0 {
         // `Intl.NumberFormat` uses the negative pattern for -0, so unlike
         // `String(-0)` this keeps the sign.
-        return if t.is_sign_negative() { "-0".to_owned() } else { "0".to_owned() };
+        return if t.is_sign_negative() {
+            "-0".to_owned()
+        } else {
+            "0".to_owned()
+        };
     }
     if !t.is_finite() {
-        return if t.is_sign_negative() { "-∞".to_owned() } else { "∞".to_owned() };
+        return if t.is_sign_negative() {
+            "-∞".to_owned()
+        } else {
+            "∞".to_owned()
+        };
     }
 
     let neg = t < 0.0;
@@ -206,7 +214,11 @@ pub fn thousands(t: f64) -> String {
     // The significand, then zero padding out to the full positional width —
     // which is how values above 2^53 render every digit despite carrying only
     // seventeen significant ones.
-    let padded = buf[..k].iter().copied().chain(core::iter::repeat(b'0')).take(width);
+    let padded = buf[..k]
+        .iter()
+        .copied()
+        .chain(core::iter::repeat(b'0'))
+        .take(width);
     for (i, digit) in padded.enumerate() {
         if i > 0 && (width - i).is_multiple_of(3) {
             out.push(',');
@@ -223,7 +235,11 @@ pub fn thousands(t: f64) -> String {
 /// JavaScript, so `-0.0` is a dash while `0.4` is `"0"`.
 #[must_use]
 pub fn format_quantity(v: f64) -> String {
-    if v == 0.0 { "-".to_owned() } else { format_integer(v) }
+    if v == 0.0 {
+        "-".to_owned()
+    } else {
+        format_integer(v)
+    }
 }
 
 /// `Number.prototype.toFixed(1)` — ECMA-262 §21.1.3.3.
@@ -344,7 +360,11 @@ pub fn js_round(x: f64) -> f64 {
     }
     let floor = x.floor();
     let rounded = if x - floor >= 0.5 { floor + 1.0 } else { floor };
-    if rounded == 0.0 && x < 0.0 { -0.0 } else { rounded }
+    if rounded == 0.0 && x < 0.0 {
+        -0.0
+    } else {
+        rounded
+    }
 }
 
 /// `Math.min` — NaN-propagating, and `-0` sorts below `+0`.
@@ -357,7 +377,11 @@ pub fn js_min(a: f64, b: f64) -> f64 {
         // Numerically equal, which for zeroes is not the same as identical:
         // `Math.min(0, -0)` is `-0`, and the sign survives into `String(n)`.
         Some(Ordering::Equal) => {
-            if a.is_sign_negative() { a } else { b }
+            if a.is_sign_negative() {
+                a
+            } else {
+                b
+            }
         }
         None => f64::NAN,
     }
@@ -371,7 +395,11 @@ pub fn js_max(a: f64, b: f64) -> f64 {
         Some(Ordering::Greater) => a,
         Some(Ordering::Less) => b,
         Some(Ordering::Equal) => {
-            if a.is_sign_negative() { b } else { a }
+            if a.is_sign_negative() {
+                b
+            } else {
+                a
+            }
         }
         None => f64::NAN,
     }
@@ -416,7 +444,14 @@ pub fn to_number(s: &str) -> f64 {
         return 0.0;
     }
 
-    for (prefix, radix) in [("0x", 16u32), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
+    for (prefix, radix) in [
+        ("0x", 16u32),
+        ("0X", 16),
+        ("0o", 8),
+        ("0O", 8),
+        ("0b", 2),
+        ("0B", 2),
+    ] {
         if let Some(rest) = t.strip_prefix(prefix) {
             return radix_value(rest, radix);
         }

@@ -106,16 +106,29 @@ pub fn best_bounded(graph: &TradeGraph, k: usize, watch: Watch<'_>) -> Option<Bo
             stops: witness.as_ref().map_or(0, Vec::len),
         });
         match improve(graph, &components, rate, Shape { k, watch }, &mut reduced) {
-            Step::Exhausted => return Some(BoundedCycle { nodes: witness?, rate, proved: true }),
+            Step::Exhausted => {
+                return Some(BoundedCycle {
+                    nodes: witness?,
+                    rate,
+                    proved: true,
+                });
+            }
             Step::Abandoned => {
                 // See `ratio::max_ratio_cycle`: the withdrawal is reported only
                 // when there is a route to withdraw the claim about.
                 let nodes = witness?;
                 watch.report(Event::Abandoned);
-                return Some(BoundedCycle { nodes, rate, proved: false });
+                return Some(BoundedCycle {
+                    nodes,
+                    rate,
+                    proved: false,
+                });
             }
             Step::Improved(nodes, improved) => {
-                debug_assert!(improved > rate, "an improving walk must beat the rate it found");
+                debug_assert!(
+                    improved > rate,
+                    "an improving walk must beat the rate it found"
+                );
                 debug_assert!(nodes.len() <= k, "decomposition never lengthens a walk");
                 rate = improved;
                 witness = Some(nodes);
@@ -123,7 +136,11 @@ pub fn best_bounded(graph: &TradeGraph, k: usize, watch: Watch<'_>) -> Option<Bo
         }
     }
 
-    Some(BoundedCycle { nodes: witness?, rate, proved: false })
+    Some(BoundedCycle {
+        nodes: witness?,
+        rate,
+        proved: false,
+    })
 }
 
 /// The cap the search runs under, and the budget it runs against.
@@ -153,7 +170,9 @@ fn improve(
             if shape.watch.expired() {
                 return Step::Abandoned;
             }
-            let Some(walk) = best_closed_walk(n, edges, reduced, origin, k) else { continue };
+            let Some(walk) = best_closed_walk(n, edges, reduced, origin, k) else {
+                continue;
+            };
             let global = component.to_global(&walk);
             // The walk beats `rate`; by the mediant inequality one of its
             // simple pieces does too, and no piece is longer than the walk.
@@ -283,15 +302,26 @@ pub fn solve(
     k: usize,
     watch: Watch<'_>,
 ) -> Vec<Route> {
-    let Some(best) = best_bounded(graph, k, watch) else { return Vec::new() };
+    let Some(best) = best_bounded(graph, k, watch) else {
+        return Vec::new();
+    };
     let head_guarantee = if best.proved {
         Guarantee::OptimalForStartingCredits
     } else {
-        Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+        Guarantee::Heuristic {
+            reason: HeuristicReason::SearchBudgetExhausted,
+        }
     };
-    let Some(head) = round::route_of(graph, geometry, &best.nodes) else { return Vec::new() };
-    let mut listing =
-        round::listing(graph, geometry, limits, head.with_guarantee(head_guarantee), 2..=k);
+    let Some(head) = round::route_of(graph, geometry, &best.nodes) else {
+        return Vec::new();
+    };
+    let mut listing = round::listing(
+        graph,
+        geometry,
+        limits,
+        head.with_guarantee(head_guarantee),
+        2..=k,
+    );
     round::taint_unfinished(&mut listing, best.proved);
     listing
 }
@@ -354,7 +384,12 @@ mod tests {
 
     #[test]
     fn no_piece_is_longer_than_the_walk_it_came_from() {
-        for walk in [vec![0u32, 1, 2, 1, 3], vec![0, 1, 0, 2, 0], vec![5, 5], vec![0, 1, 2, 3]] {
+        for walk in [
+            vec![0u32, 1, 2, 1, 3],
+            vec![0, 1, 0, 2, 0],
+            vec![5, 5],
+            vec![0, 1, 2, 3],
+        ] {
             for piece in decompose(&walk) {
                 assert!(piece.len() <= walk.len(), "{piece:?} from {walk:?}");
             }
@@ -370,7 +405,10 @@ mod tests {
         let two = best_bounded(&graph, 2, Watch::unlimited()).expect("a two-cycle");
         assert_eq!(two.nodes.len(), 2);
         assert!(two.proved);
-        assert_eq!(two.rate, crate::round::best_ratio(&graph).expect("a round trip").rate);
+        assert_eq!(
+            two.rate,
+            crate::round::best_ratio(&graph).expect("a round trip").rate
+        );
     }
 
     #[test]
@@ -378,8 +416,7 @@ mod tests {
         let markets = triangle();
         let graph = build(&markets);
         let free = ratio::max_ratio_cycle(&graph, Watch::unlimited()).expect("a cycle");
-        let capped =
-            best_bounded(&graph, markets.len(), Watch::unlimited()).expect("a cycle");
+        let capped = best_bounded(&graph, markets.len(), Watch::unlimited()).expect("a cycle");
         assert_eq!(free.rate, capped.rate);
     }
 
@@ -388,11 +425,18 @@ mod tests {
         let markets = triangle();
         let graph = build(&markets);
         for k in 2..=6 {
-            let Some(found) = best_bounded(&graph, k, Watch::unlimited()) else { continue };
+            let Some(found) = best_bounded(&graph, k, Watch::unlimited()) else {
+                continue;
+            };
             let mut sorted = found.nodes.clone();
             sorted.sort_unstable();
             sorted.dedup();
-            assert_eq!(sorted.len(), found.nodes.len(), "{:?} revisits a station", found.nodes);
+            assert_eq!(
+                sorted.len(),
+                found.nodes.len(),
+                "{:?} revisits a station",
+                found.nodes
+            );
         }
     }
 
@@ -408,7 +452,11 @@ mod tests {
         let stopped =
             best_bounded(&graph, 3, Watch::unlimited().until(&spent)).expect("the warm start");
         assert!(!stopped.proved);
-        assert_eq!(stopped.nodes.len(), 2, "the round-trip warm start, unimproved");
+        assert_eq!(
+            stopped.nodes.len(),
+            2,
+            "the round-trip warm start, unimproved"
+        );
 
         let routes = super::solve(
             &graph,
@@ -419,7 +467,9 @@ mod tests {
         );
         assert_eq!(
             routes[0].guarantee,
-            Guarantee::Heuristic { reason: HeuristicReason::SearchBudgetExhausted }
+            Guarantee::Heuristic {
+                reason: HeuristicReason::SearchBudgetExhausted
+            }
         );
     }
 }

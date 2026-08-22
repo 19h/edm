@@ -55,7 +55,10 @@ fn station() -> EddnStation {
 }
 
 fn options() -> EddnOptions {
-    EddnOptions { uploader_id: "F1234567".to_owned(), ..EddnOptions::default() }
+    EddnOptions {
+        uploader_id: "F1234567".to_owned(),
+        ..EddnOptions::default()
+    }
 }
 
 #[test]
@@ -64,8 +67,13 @@ fn a_built_message_validates_against_the_published_schema() {
     let validator = jsonschema::validator_for(&schema).expect("draft-04 schema compiles");
 
     let commodities = [commodity("Silver", "Metals"), commodity("Gold", "Metals")];
-    let message =
-        build_message(&station(), 128_667_761.0, &commodities, "2026-08-05T12:00:00.000Z", &options());
+    let message = build_message(
+        &station(),
+        128_667_761.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options(),
+    );
 
     let instance = as_sent(&message.payload);
     if let Err(error) = validator.validate(&instance) {
@@ -79,8 +87,13 @@ fn a_built_message_validates_against_the_published_schema() {
 #[test]
 fn integral_prices_serialize_as_integers() {
     let commodities = [commodity("Silver", "Metals")];
-    let message =
-        build_message(&station(), 1.0, &commodities, "2026-08-05T12:00:00.000Z", &options());
+    let message = build_message(
+        &station(),
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options(),
+    );
     let text = message.payload.stringify_compact();
     assert!(text.contains(r#""meanPrice":500"#), "got: {text}");
     assert!(text.contains(r#""buyPrice":517"#), "got: {text}");
@@ -91,9 +104,15 @@ fn integral_prices_serialize_as_integers() {
     // through an independent parser and ask it the same question.
     let sent = as_sent(&message.payload);
     let row = &sent["message"]["commodities"][0];
-    for field in
-        ["meanPrice", "buyPrice", "stock", "stockBracket", "sellPrice", "demand", "demandBracket"]
-    {
+    for field in [
+        "meanPrice",
+        "buyPrice",
+        "stock",
+        "stockBracket",
+        "sellPrice",
+        "demand",
+        "demandBracket",
+    ] {
         assert!(
             row[field].is_i64(),
             "{field} came back as {} — a float here is an unretryable HTTP 400",
@@ -109,15 +128,26 @@ fn integral_prices_serialize_as_integers() {
 fn non_marketable_and_illegal_goods_are_skipped() {
     let mut illegal = commodity("BasicNarcotics", "Narcotics");
     illegal.illegal = true;
-    let commodities =
-        [commodity("Silver", "Metals"), commodity("Limpet", "NonMarketable"), illegal];
+    let commodities = [
+        commodity("Silver", "Metals"),
+        commodity("Limpet", "NonMarketable"),
+        illegal,
+    ];
 
-    let message =
-        build_message(&station(), 1.0, &commodities, "2026-08-05T12:00:00.000Z", &options());
+    let message = build_message(
+        &station(),
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options(),
+    );
     assert_eq!(message.count, 1);
 
     let text = message.payload.stringify_compact();
-    assert!(text.contains(r#""name":"silver""#), "names are lowercased to the symbol form");
+    assert!(
+        text.contains(r#""name":"silver""#),
+        "names are lowercased to the symbol form"
+    );
     assert!(!text.contains("limpet"));
     assert!(!text.contains("basicnarcotics"));
 }
@@ -131,17 +161,41 @@ fn absent_is_not_the_same_as_empty_or_false() {
     let mut bare = station();
     bare.station_type = None;
     bare.economies = Some(Vec::new());
-    let message =
-        build_message(&bare, 1.0, &commodities, "2026-08-05T12:00:00.000Z", &options());
+    let message = build_message(
+        &bare,
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options(),
+    );
     let text = message.payload.stringify_compact();
-    assert!(!text.contains("economies"), "an empty list is omitted, not sent: {text}");
+    assert!(
+        !text.contains("economies"),
+        "an empty list is omitted, not sent: {text}"
+    );
     assert!(!text.contains("stationType"));
-    assert!(!text.contains("horizons"), "an unknown flag is omitted: {text}");
+    assert!(
+        !text.contains("horizons"),
+        "an unknown flag is omitted: {text}"
+    );
 
-    let known = EddnOptions { horizons: Some(false), ..options() };
-    let message =
-        build_message(&station(), 1.0, &commodities, "2026-08-05T12:00:00.000Z", &known);
-    assert!(message.payload.stringify_compact().contains(r#""horizons":false"#));
+    let known = EddnOptions {
+        horizons: Some(false),
+        ..options()
+    };
+    let message = build_message(
+        &station(),
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &known,
+    );
+    assert!(
+        message
+            .payload
+            .stringify_compact()
+            .contains(r#""horizons":false"#)
+    );
 }
 
 /// Message key order is insertion order and is diffed byte-for-byte against the
@@ -153,16 +207,28 @@ fn message_key_order_is_stable() {
         economies: Some(vec![("Industrial".to_owned(), 1.0)]),
         ..station()
     };
-    let options = EddnOptions { horizons: Some(true), odyssey: Some(true), ..options() };
-    let message =
-        build_message(&full, 1.0, &commodities, "2026-08-05T12:00:00.000Z", &options);
+    let options = EddnOptions {
+        horizons: Some(true),
+        odyssey: Some(true),
+        ..options()
+    };
+    let message = build_message(
+        &full,
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options,
+    );
 
     let payload = message.payload.as_object().expect("an object");
     assert_eq!(
         payload.iter().map(|(k, _)| k).collect::<Vec<_>>(),
         ["$schemaRef", "header", "message"]
     );
-    let inner = payload.get("message").and_then(JsValue::as_object).expect("message");
+    let inner = payload
+        .get("message")
+        .and_then(JsValue::as_object)
+        .expect("message");
     assert_eq!(
         inner.iter().map(|(k, _)| k).collect::<Vec<_>>(),
         [
@@ -183,11 +249,26 @@ fn message_key_order_is_stable() {
 #[test]
 fn the_test_schema_is_a_suffix() {
     let commodities = [commodity("Silver", "Metals")];
-    let options = EddnOptions { test: true, ..options() };
-    let message =
-        build_message(&station(), 1.0, &commodities, "2026-08-05T12:00:00.000Z", &options);
+    let options = EddnOptions {
+        test: true,
+        ..options()
+    };
+    let message = build_message(
+        &station(),
+        1.0,
+        &commodities,
+        "2026-08-05T12:00:00.000Z",
+        &options,
+    );
     assert_eq!(
-        message.payload.as_object().unwrap().get("$schemaRef").unwrap().as_str().unwrap(),
+        message
+            .payload
+            .as_object()
+            .unwrap()
+            .get("$schemaRef")
+            .unwrap()
+            .as_str()
+            .unwrap(),
         "https://eddn.edcd.io/schemas/commodity/3/test"
     );
 }
@@ -226,7 +307,10 @@ fn a_fractional_quantity_is_truncated_the_way_every_other_uploader_truncates_it(
 
     let text = message.payload.stringify_compact();
     assert!(text.contains(r#""demand":113"#), "{text}");
-    assert!(!text.contains("113.4"), "no fraction survives to the wire\n{text}");
+    assert!(
+        !text.contains("113.4"),
+        "no fraction survives to the wire\n{text}"
+    );
     // And the price is coerced the same way, for the same reason.
     assert!(text.contains(r#""meanPrice":260"#), "{text}");
 }
@@ -255,5 +339,10 @@ fn brackets_are_passed_through_rather_than_coerced() {
         "2026-08-06T00:00:00.000Z",
         &EddnOptions::default(),
     );
-    assert!(message.payload.stringify_compact().contains(r#""demandBracket":3"#));
+    assert!(
+        message
+            .payload
+            .stringify_compact()
+            .contains(r#""demandBracket":3"#)
+    );
 }

@@ -12,7 +12,10 @@ use crate::spend;
 
 /// The route command's help text.
 #[must_use]
-#[expect(clippy::too_many_lines, reason = "it is one string; splitting it hides the layout")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "it is one string; splitting it hides the layout"
+)]
 pub fn route_usage() -> String {
     let n = |value: f64| js::format_integer(value);
     format!(
@@ -38,6 +41,23 @@ Search
   --top <n>                default {top}
   --min-profit <cr>        ignore legs below this, default {min_profit}
 
+Quick commodity lookup
+  --quick <n>              for every --item, and every commodity in --category,
+                           score every Ardent seller-buyer pair by estimated
+                           credits per hour (spread × cargo / travel time),
+                           keep the N best hops, verify those markets live
+                           with Frontier, then report the best live buy and
+                           sell location for each commodity
+  --item <a,b,...>         commodity names for --quick; each is checked
+                           against Ardent's catalogue and refused if unknown
+  --qty <t>                minimum seller stock and published buyer demand for --quick;
+                           default ceil(10% of the hold; 1,232 t if unknown)
+                           --quick defaults --shape to one-way: it looks up where
+                           to buy and sell, not a cycle. A gold hop can outpay a
+                           metals round trip. Pass --shape round-trip for a
+                           return cargo. --verify-systems is incompatible with
+                           --quick.
+
 Ship
   --cargo <t>              hold capacity; unbounded when omitted
   --credits <n>            starting balance; unbounded when omitted
@@ -56,7 +76,9 @@ Which markets (all of these prune before anything is sent)
   --category <a,b,c>       only these commodity categories. Metals, Minerals,
                            Foods, Chemicals, Machinery, Medicines, Technology,
                            Textiles, Consumer Items, Industrial Materials,
-                           Salvage, Weapons, Waste, Narcotics, Slaves
+                           Salvage, Weapons, Waste, Narcotics, Slaves.
+                           With --quick, this names the commodities to look up
+                           rather than requiring --item
   --include-illegal        rank commodities a market marks illegal *there*.
                            Off by default: such a trade is refused at the
                            counter (HTTP 401) and the black-market path needs a
@@ -149,8 +171,14 @@ mod tests {
         let route = route_usage();
         let base = crate::cli::usage();
         assert!(route.starts_with("edm route"));
-        assert!(!base.contains("edm route"), "the pinned text must not mention route");
-        assert!(!route.contains("Frontier market API client"), "and not the reverse");
+        assert!(
+            !base.contains("edm route"),
+            "the pinned text must not mention route"
+        );
+        assert!(
+            !route.contains("Frontier market API client"),
+            "and not the reverse"
+        );
     }
 
     /// Every advertised default is the one the program actually uses. A number
@@ -164,6 +192,8 @@ mod tests {
             "--max-requests <n>       ceiling, default 2,000",
             "required above 250 requests",
             "--rps <n>                requests per second, default 4",
+            "--quick <n>              for every --item, and every commodity in --category,",
+            "score every Ardent seller-buyer pair by estimated",
         ] {
             assert!(text.contains(expected), "missing: {expected}\n\n{text}");
         }

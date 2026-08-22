@@ -332,7 +332,9 @@ impl Route {
     /// an unselected edge can change which route wins, so no result from that
     /// graph may retain an exact optimality claim.
     pub fn mark_bulk_price_estimated(&mut self) {
-        self.guarantee = Guarantee::Heuristic { reason: HeuristicReason::BulkPriceEstimate };
+        self.guarantee = Guarantee::Heuristic {
+            reason: HeuristicReason::BulkPriceEstimate,
+        };
         self.add_caveat(Caveat::BulkPriceEstimated);
     }
 
@@ -355,18 +357,23 @@ impl Route {
 }
 
 fn bulk_guarantee(legs: &[RouteLeg]) -> Option<Guarantee> {
-    legs.iter().any(|leg| leg.choice.bulk_estimated).then_some(Guarantee::Heuristic {
-        reason: HeuristicReason::BulkPriceEstimate,
-    })
+    legs.iter()
+        .any(|leg| leg.choice.bulk_estimated)
+        .then_some(Guarantee::Heuristic {
+            reason: HeuristicReason::BulkPriceEstimate,
+        })
 }
 
 fn leg_caveats(legs: &[RouteLeg]) -> Vec<Caveat> {
     // Three of these are unconditional: they are properties of reading a market
     // over a network at all, and a report that only mentioned them sometimes
     // would read as if their absence meant something.
-    let mut caveats =
-        vec![Caveat::StaleListing, Caveat::JumpGraphUnmodelled, Caveat::TimeModelAssumed,
-             Caveat::AccessUnmodelled];
+    let mut caveats = vec![
+        Caveat::StaleListing,
+        Caveat::JumpGraphUnmodelled,
+        Caveat::TimeModelAssumed,
+        Caveat::AccessUnmodelled,
+    ];
     for leg in legs {
         match leg.choice.limiter {
             Limiter::Stock => caveats.push(Caveat::StockDepletion),
@@ -417,8 +424,10 @@ impl RankKey {
         millis: Millis,
         rotate: bool,
     ) -> Self {
-        let ids: Vec<i64> =
-            legs.iter().map(|l| geometry.markets[l.from as usize].market_id).collect();
+        let ids: Vec<i64> = legs
+            .iter()
+            .map(|l| geometry.markets[l.from as usize].market_id)
+            .collect();
         let goods: Vec<u32> = legs.iter().map(|l| l.choice.commodity.0).collect();
         // A cycle has no start, so two rotations of it are the same route and
         // must produce the same key. Market ids are unique, so rotating the
@@ -434,7 +443,13 @@ impl RankKey {
         let n = ids.len();
         let stations = (0..n).map(|i| ids[(i + shift) % n]).collect();
         let commodities = (0..n).map(|i| goods[(i + shift) % n]).collect();
-        Self { rate, profit, millis, stations, commodities }
+        Self {
+            rate,
+            profit,
+            millis,
+            stations,
+            commodities,
+        }
     }
 }
 
@@ -466,10 +481,22 @@ mod tests {
 
     #[test]
     fn a_rotated_cycle_ranks_identically() {
-        let markets = [market(70, 0.0, &[], &[]), market(20, 5.0, &[], &[]), market(50, 9.0, &[], &[])];
+        let markets = [
+            market(70, 0.0, &[], &[]),
+            market(20, 5.0, &[], &[]),
+            market(50, 9.0, &[], &[]),
+        ];
         let geometry = geometry(&markets);
-        let a = Route::cycle(&geometry, &[0, 1, 2], &[choice(0, 10), choice(1, 20), choice(2, 30)]);
-        let b = Route::cycle(&geometry, &[1, 2, 0], &[choice(1, 20), choice(2, 30), choice(0, 10)]);
+        let a = Route::cycle(
+            &geometry,
+            &[0, 1, 2],
+            &[choice(0, 10), choice(1, 20), choice(2, 30)],
+        );
+        let b = Route::cycle(
+            &geometry,
+            &[1, 2, 0],
+            &[choice(1, 20), choice(2, 30), choice(0, 10)],
+        );
         assert_eq!(a.rank, b.rank);
         assert_eq!(a.rank.stations, vec![20, 50, 70]);
     }
@@ -480,23 +507,39 @@ mod tests {
         let geometry = geometry(&markets);
         let route = Route::single_hop(&geometry, 0, 1, choice(0, 100));
         assert!(route.rate().steady.is_none());
-        assert!(route.caveats.contains(&super::Caveat::SingleHopNotRepeatable));
+        assert!(
+            route
+                .caveats
+                .contains(&super::Caveat::SingleHopNotRepeatable)
+        );
     }
 
     #[test]
     fn the_rank_key_is_a_total_order_that_ends_in_station_ids() {
         let base = RankKey {
-            rate: Ratio { credits: 1, millis: 1 },
+            rate: Ratio {
+                credits: 1,
+                millis: 1,
+            },
             profit: Credits(10),
             millis: Millis(10),
             stations: vec![5, 9],
             commodities: vec![0, 1],
         };
-        let lower_id = RankKey { stations: vec![4, 9], ..base.clone() };
+        let lower_id = RankKey {
+            stations: vec![4, 9],
+            ..base.clone()
+        };
         assert!(lower_id > base);
-        let faster = RankKey { millis: Millis(9), ..base.clone() };
+        let faster = RankKey {
+            millis: Millis(9),
+            ..base.clone()
+        };
         assert!(faster > base);
-        let richer = RankKey { profit: Credits(11), ..base.clone() };
+        let richer = RankKey {
+            profit: Credits(11),
+            ..base.clone()
+        };
         assert!(richer > base);
     }
 
@@ -509,7 +552,10 @@ mod tests {
         let route = Route::cycle(&geometry, &[0, 1], &[choice(0, 100), choice(1, 100)]);
         let leg = geometry.leg_millis(0, 1);
         assert_eq!(route.cycle_millis, leg + leg);
-        assert_eq!(route.first_lap_millis, route.cycle_millis + geometry.startup_millis(0));
+        assert_eq!(
+            route.first_lap_millis,
+            route.cycle_millis + geometry.startup_millis(0)
+        );
     }
 
     #[test]
@@ -522,11 +568,12 @@ mod tests {
             .with_guarantee(super::Guarantee::ProvedOptimal);
         assert_eq!(
             route.guarantee,
-            super::Guarantee::Heuristic { reason: super::HeuristicReason::BulkPriceEstimate }
+            super::Guarantee::Heuristic {
+                reason: super::HeuristicReason::BulkPriceEstimate
+            }
         );
         assert!(route.caveats.contains(&super::Caveat::BulkPriceEstimated));
     }
-
 
     #[test]
     fn an_unselected_empirical_edge_still_downgrades_the_whole_instance() {
@@ -537,9 +584,10 @@ mod tests {
         route.mark_bulk_price_estimated();
         assert_eq!(
             route.guarantee,
-            super::Guarantee::Heuristic { reason: super::HeuristicReason::BulkPriceEstimate }
+            super::Guarantee::Heuristic {
+                reason: super::HeuristicReason::BulkPriceEstimate
+            }
         );
         assert!(route.caveats.contains(&super::Caveat::BulkPriceEstimated));
     }
-
 }

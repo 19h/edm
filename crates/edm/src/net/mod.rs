@@ -110,7 +110,12 @@ pub struct HeaderView {
 impl HeaderView {
     #[must_use]
     pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
-        Self { entries: pairs.into_iter().map(|(k, v)| (k.to_lowercase(), v)).collect() }
+        Self {
+            entries: pairs
+                .into_iter()
+                .map(|(k, v)| (k.to_lowercase(), v))
+                .collect(),
+        }
     }
 
     /// `headers.get(name)` — the **last** value under that name, or `None`.
@@ -145,7 +150,10 @@ impl HeaderView {
 /// is what makes the byte-diff gate possible), so nothing here ever crosses a
 /// thread and a `Send` bound would only make the implementations harder to
 /// write.
-#[allow(async_fn_in_trait, reason = "single-threaded runtime; a Send bound would be noise")]
+#[allow(
+    async_fn_in_trait,
+    reason = "single-threaded runtime; a Send bound would be noise"
+)]
 pub trait HttpTransport {
     async fn send(&self, request: HttpRequest<'_>) -> Result<HttpResponse, TransportError>;
 }
@@ -192,7 +200,10 @@ mod tests {
             ("allow".to_owned(), "OPTIONS".to_owned()),
         ]);
         assert_eq!(headers.get("allow").as_deref(), Some("OPTIONS"));
-        assert_eq!(headers.sorted(), vec![("allow".to_owned(), "OPTIONS".to_owned())]);
+        assert_eq!(
+            headers.sorted(),
+            vec![("allow".to_owned(), "OPTIONS".to_owned())]
+        );
     }
 
     #[test]
@@ -204,7 +215,11 @@ mod tests {
         ]);
         assert_eq!(headers.get("NONCE").as_deref(), Some("abc"));
         assert_eq!(
-            headers.sorted().iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            headers
+                .sorted()
+                .iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>(),
             ["allow", "content-type", "nonce"]
         );
     }

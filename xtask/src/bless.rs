@@ -24,13 +24,20 @@ const GOLDEN_ENGINE: &str = "bun-version.txt";
 fn no_dotenv(root: &Path) -> [std::ffi::OsString; 2] {
     [
         std::ffi::OsString::from("--env-file"),
-        root.join("xtask").join("oracle").join("empty.env").into_os_string(),
+        root.join("xtask")
+            .join("oracle")
+            .join("empty.env")
+            .into_os_string(),
     ]
 }
 
 pub(crate) fn run(force: bool) -> Result<()> {
     let root = crate::repo_root()?;
-    let fixtures = root.join("crates").join("edm-core").join("tests").join("fixtures");
+    let fixtures = root
+        .join("crates")
+        .join("edm-core")
+        .join("tests")
+        .join("fixtures");
     let installed = bun_version(&root)?;
 
     match recorded_version(&fixtures)? {
@@ -127,8 +134,12 @@ fn recorded_engine(dir: &Path) -> Option<String> {
 /// imported", not "allowed to drift".
 pub(crate) fn ardent_contract() -> Result<()> {
     let root = crate::repo_root()?;
-    let committed =
-        root.join("crates").join("edm-core").join("tests").join("fixtures").join("ardent_contract.tsv");
+    let committed = root
+        .join("crates")
+        .join("edm-core")
+        .join("tests")
+        .join("fixtures")
+        .join("ardent_contract.tsv");
     let scratch = root.join("target").join("xtask-ardent");
     std::fs::create_dir_all(&scratch)?;
 
@@ -155,7 +166,10 @@ pub(crate) fn ardent_contract() -> Result<()> {
         .lines()
         .zip(old.lines())
         .find(|(new, old)| new != old)
-        .map_or_else(|| "(length differs)".to_owned(), |(new, old)| format!("{old}\n  now: {new}"));
+        .map_or_else(
+            || "(length differs)".to_owned(),
+            |(new, old)| format!("{old}\n  now: {new}"),
+        );
     bail!("ardent.ts has changed since the contract was recorded:\n  was: {first}");
 }
 
@@ -168,7 +182,9 @@ fn bun_version(root: &Path) -> Result<String> {
     if !output.status.success() {
         bail!("bun --version failed");
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim_matches(|c: char| c.is_ascii_whitespace()).to_owned())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_matches(|c: char| c.is_ascii_whitespace())
+        .to_owned())
 }
 
 /// The version the committed fixtures record, if they agree on one.
@@ -181,10 +197,14 @@ fn recorded_version(fixtures: &Path) -> Result<Option<String>> {
     files.sort();
 
     for file in files {
-        let Ok(text) = std::fs::read_to_string(&file) else { continue };
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
         // The banner is in the first few lines of every generated fixture.
         for line in text.lines().take(4) {
-            let Some(version) = version_in(line) else { continue };
+            let Some(version) = version_in(line) else {
+                continue;
+            };
             match &found {
                 Some(existing) if *existing != version => bail!(
                     "the fixtures disagree about which bun produced them ({existing} and \
@@ -201,8 +221,10 @@ fn recorded_version(fixtures: &Path) -> Result<Option<String>> {
 /// Pulls `1.2.3` out of `# … under bun 1.2.3` or `# bun 1.2.3`.
 fn version_in(line: &str) -> Option<String> {
     let rest = line.split_once("bun ")?.1;
-    let version: String =
-        rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let version: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
     (version.split('.').count() == 3 && !version.ends_with('.')).then_some(version)
 }
 
@@ -217,15 +239,19 @@ mod tests {
             Some("1.2.3")
         );
         assert_eq!(version_in("# bun 1.2.3").as_deref(), Some("1.2.3"));
-        assert_eq!(version_in("# sliced verbatim from x under bun 1.20.30").as_deref(), Some("1.20.30"));
+        assert_eq!(
+            version_in("# sliced verbatim from x under bun 1.20.30").as_deref(),
+            Some("1.20.30")
+        );
         assert_eq!(version_in("# nothing here"), None);
         assert_eq!(version_in("# bun oven"), None);
     }
 
     #[test]
     fn the_committed_fixtures_agree_on_one_engine() {
-        let fixtures =
-            crate::repo_root().unwrap().join("crates/edm-core/tests/fixtures");
+        let fixtures = crate::repo_root()
+            .unwrap()
+            .join("crates/edm-core/tests/fixtures");
         assert!(recorded_version(&fixtures).unwrap().is_some());
     }
 }

@@ -78,7 +78,9 @@ impl Nonce {
         let lowered = s.to_lowercase();
         let bytes = lowered.as_bytes();
         let ok = bytes.len() == 12
-            && bytes.iter().all(|&b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            && bytes
+                .iter()
+                .all(|&b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
         if !ok {
             return Err(NonceError);
         }
@@ -316,18 +318,33 @@ mod tests {
 
     #[test]
     fn parse_arg_lowercases_before_testing() {
-        assert_eq!(Nonce::parse_arg("ABCDEF012345").unwrap().as_str(), "abcdef012345");
-        assert_eq!(Nonce::parse_arg("abcdef012345").unwrap().as_str(), "abcdef012345");
+        assert_eq!(
+            Nonce::parse_arg("ABCDEF012345").unwrap().as_str(),
+            "abcdef012345"
+        );
+        assert_eq!(
+            Nonce::parse_arg("abcdef012345").unwrap().as_str(),
+            "abcdef012345"
+        );
     }
 
     #[test]
     fn parse_arg_rejects_non_hex_and_wrong_lengths() {
         // The last of these is twelve *characters* of fullwidth digits, which
         // `toLowerCase` leaves alone and the pattern rejects. [R41]
-        let bad =
-            ["", "abcdef01234", "abcdef0123456", "abcdefg12345", "abcdef 12345", "０１２３４５６７８９ab"];
+        let bad = [
+            "",
+            "abcdef01234",
+            "abcdef0123456",
+            "abcdefg12345",
+            "abcdef 12345",
+            "０１２３４５６７８９ab",
+        ];
         for value in bad {
-            assert!(Nonce::parse_arg(value).is_err(), "{value:?} should not parse");
+            assert!(
+                Nonce::parse_arg(value).is_err(),
+                "{value:?} should not parse"
+            );
         }
     }
 
@@ -341,8 +358,18 @@ mod tests {
 
     #[test]
     fn response_header_preserves_case() {
-        assert_eq!(Nonce::from_response_header("ABCDEF012345").unwrap().as_str(), "ABCDEF012345");
-        assert_eq!(Nonce::from_response_header("aBcDeF012345").unwrap().as_str(), "aBcDeF012345");
+        assert_eq!(
+            Nonce::from_response_header("ABCDEF012345")
+                .unwrap()
+                .as_str(),
+            "ABCDEF012345"
+        );
+        assert_eq!(
+            Nonce::from_response_header("aBcDeF012345")
+                .unwrap()
+                .as_str(),
+            "aBcDeF012345"
+        );
         assert!(Nonce::from_response_header("abcdefg12345").is_none());
         assert!(Nonce::from_response_header("abcdef01234").is_none());
     }
@@ -353,22 +380,35 @@ mod tests {
         assert_eq!(strip_frame(b"EDDE"), None);
         assert_eq!(strip_frame(b"EDDE\0\0\0"), None);
         assert_eq!(strip_frame(b"EDDE\0\0\0\0"), Some(&b""[..]));
-        assert_eq!(strip_frame(b"edde\0\0\0\0"), None, "the magic is case-sensitive");
+        assert_eq!(
+            strip_frame(b"edde\0\0\0\0"),
+            None,
+            "the magic is case-sensitive"
+        );
     }
 
     #[test]
     fn frame_never_inspects_the_length_word() {
         // Bytes 4..8 are garbage here and it makes no difference. [R60]
-        assert_eq!(strip_frame(b"EDDE\xff\xff\xff\xffpayload"), Some(&b"payload"[..]));
+        assert_eq!(
+            strip_frame(b"EDDE\xff\xff\xff\xffpayload"),
+            Some(&b"payload"[..])
+        );
     }
 
     #[test]
     fn one_bom_is_stripped_and_only_one() {
-        assert_eq!(decode_utf8_fatal("\u{FEFF}{}".as_bytes()).as_deref(), Ok("{}"));
+        assert_eq!(
+            decode_utf8_fatal("\u{FEFF}{}".as_bytes()).as_deref(),
+            Ok("{}")
+        );
         assert_eq!(
             decode_utf8_fatal("\u{FEFF}\u{FEFF}{}".as_bytes()).as_deref(),
             Ok("\u{FEFF}{}")
         );
-        assert_eq!(decode_utf8_fatal("{\u{FEFF}}".as_bytes()).as_deref(), Ok("{\u{FEFF}}"));
+        assert_eq!(
+            decode_utf8_fatal("{\u{FEFF}}".as_bytes()).as_deref(),
+            Ok("{\u{FEFF}}")
+        );
     }
 }

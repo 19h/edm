@@ -26,6 +26,9 @@ pub struct Survey {
     /// How wide the enumeration is actually complete to. Equal to the requested
     /// radius when the frontier closed.
     pub complete_to_ly: f64,
+    /// True for a bounded commodity price prefix rather than a radial system
+    /// enumeration. Rendering must never call that prefix "complete".
+    pub price_index: bool,
     pub ardent_requests: u32,
     pub counts: spend::Counts,
     pub exclusions: Vec<spend::Exclusion>,
@@ -48,7 +51,12 @@ pub fn preflight(config: &RouteConfig) -> Option<Refusal> {
 pub fn refuse(out: &Out, config: &RouteConfig, refusal: &Refusal) {
     out.error_paragraph(&spend::refusal_message(
         refusal,
-        &Estimate::build(spend::Counts::default(), Vec::new(), config.rate_per_second, &SizePrior::default()),
+        &Estimate::build(
+            spend::Counts::default(),
+            Vec::new(),
+            config.rate_per_second,
+            &SizePrior::default(),
+        ),
         config.radius_ly,
         config.max_requests,
     ));
@@ -93,9 +101,12 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
     // A radius past the ceiling is refused before the plan is drawn: the table
     // would be a page of numbers describing a sweep that is not going to
     // happen, and the mistake is a typo, not a decision.
-    if let Verdict::Refused(refusal @ Refusal::RadiusTooWide) =
-        spend::verdict(&estimate, config.radius_ly, config.max_requests, config.confirmed)
-    {
+    if let Verdict::Refused(refusal @ Refusal::RadiusTooWide) = spend::verdict(
+        &estimate,
+        config.radius_ly,
+        config.max_requests,
+        config.confirmed,
+    ) {
         out.error_paragraph(&spend::refusal_message(
             &refusal,
             &estimate,
@@ -112,6 +123,7 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
         reference: &config.reference,
         radius_ly: config.radius_ly,
         complete_to_ly: survey.complete_to_ly,
+        price_index: survey.price_index,
         ardent_requests: survey.ardent_requests,
         estimate: &estimate,
         rate_per_second: config.rate_per_second,
@@ -119,7 +131,12 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
         prior,
     }));
 
-    match spend::verdict(&estimate, config.radius_ly, config.max_requests, config.confirmed) {
+    match spend::verdict(
+        &estimate,
+        config.radius_ly,
+        config.max_requests,
+        config.confirmed,
+    ) {
         Verdict::Refused(refusal) => {
             out.error_paragraph(&spend::refusal_message(
                 &refusal,
@@ -166,6 +183,7 @@ mod tests {
     fn survey(systems: usize, markets: usize) -> Survey {
         Survey {
             complete_to_ly: 30.0,
+            price_index: false,
             ardent_requests: 1,
             counts: spend::Counts {
                 systems,
@@ -187,7 +205,10 @@ mod tests {
     /// The headline safeguard: over the ceiling, nothing proceeds.
     #[test]
     fn over_the_ceiling_nothing_proceeds() {
-        let (decision, text) = run(&["route", "Sol", "--max-requests", "100"], &survey(200, 400));
+        let (decision, text) = run(
+            &["route", "Sol", "--max-requests", "100"],
+            &survey(200, 400),
+        );
         assert_eq!(decision, Decision::Refused(Refusal::TooManyRequests));
         assert!(!decision.proceeds());
         assert!(text.contains("above the 100 ceiling"), "{text}");
@@ -199,9 +220,15 @@ mod tests {
     /// numbers beside it cannot be acted on.
     #[test]
     fn a_refusal_shows_its_own_arithmetic() {
-        let (_, text) = run(&["route", "Sol", "--max-requests", "100"], &survey(200, 400));
+        let (_, text) = run(
+            &["route", "Sol", "--max-requests", "100"],
+            &survey(200, 400),
+        );
         assert!(text.contains("ROUTE PLAN"), "{text}");
-        assert!(text.contains("600  = 200 official batch + 400 market"), "{text}");
+        assert!(
+            text.contains("600  = 200 official batch + 400 market"),
+            "{text}"
+        );
     }
 
     /// And it is refused before a single Ardent query, not after the region has

@@ -49,7 +49,10 @@ fn main_dispatches_help_then_unknown_commands_then_errors() {
     // chain, no usage text — and exits 1.
     let run = drive(&["market", "--market-id", "abc"], &FakeHttp::default());
     run.assert_exit(1);
-    assert_eq!(run.stderr, "--market-id must be an unsigned decimal integer\n");
+    assert_eq!(
+        run.stderr,
+        "--market-id must be an unsigned decimal integer\n"
+    );
     assert!(run.stdout.is_empty());
 
     // R47: a switch that swallowed `constructor` holds a function, so
@@ -77,5 +80,8 @@ fn main_dispatches_help_then_unknown_commands_then_errors() {
         run.stderr,
         "authToken looks truncated: 5 characters, expected at least 512\n"
     );
-    assert!(run.calls.is_empty(), "credentials load before anything is sent");
+    assert!(
+        run.calls.is_empty(),
+        "credentials load before anything is sent"
+    );
 }

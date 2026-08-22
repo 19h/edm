@@ -6,15 +6,15 @@
 //! calls with printing in an order the parity harness diffs.
 
 pub mod ardent;
-pub mod game_api;
 pub mod cmd;
 pub mod commander;
 pub mod eddn;
 pub mod exchange;
-pub mod sweep;
+pub mod game_api;
 pub mod net;
 pub mod out;
 pub mod ports;
 pub mod route;
 pub mod secret;
+pub mod sweep;
 pub mod sys;

@@ -20,7 +20,11 @@ use crate::js;
 const SECTOR_SIZE: f64 = 1280.0;
 
 /// The corner of sector (0,0,0), in light years.
-pub const GALAXY_ORIGIN: Coordinates = Coordinates { x: 49_985.0, y: 40_985.0, z: 24_105.0 };
+pub const GALAXY_ORIGIN: Coordinates = Coordinates {
+    x: 49_985.0,
+    y: 40_985.0,
+    z: 24_105.0,
+};
 
 /// A point in galactic space. Held as `f64` because Ardent reports fractional
 /// light years and the boxel arithmetic depends on them.
@@ -82,7 +86,10 @@ pub struct AddressParts {
 pub fn decode(address: f64) -> Result<AddressParts, String> {
     // ts:2370
     if !js::safe_int(address) || address < 0.0 {
-        return Err(format!("{} is not a system address", js::js_number(address)));
+        return Err(format!(
+            "{} is not a system address",
+            js::js_number(address)
+        ));
     }
 
     let mut bits = address as u64;
@@ -110,8 +117,16 @@ pub fn decode(address: f64) -> Result<AddressParts, String> {
         mass_code,
         mass_code_letter: char::from(b'a' + mass_code as u8),
         boxel_size,
-        sector: Coordinates { x: sector_x, y: sector_y, z: sector_z },
-        boxel: Coordinates { x: boxel_x, y: boxel_y, z: boxel_z },
+        sector: Coordinates {
+            x: sector_x,
+            y: sector_y,
+            z: sector_z,
+        },
+        boxel: Coordinates {
+            x: boxel_x,
+            y: boxel_y,
+            z: boxel_z,
+        },
         index,
         origin: Coordinates {
             x: sector_x * SECTOR_SIZE + boxel_x * boxel_size - GALAXY_ORIGIN.x,
@@ -174,8 +189,13 @@ fn place(
     axis: Axis,
     boxel_size: f64,
 ) -> Result<Placement, String> {
-    let outside =
-        || format!("{}={} falls outside the galactic grid", axis.name(), js::js_number(value));
+    let outside = || {
+        format!(
+            "{}={} falls outside the galactic grid",
+            axis.name(),
+            js::js_number(value)
+        )
+    };
 
     let shifted = value + offset;
     if shifted < 0.0 {
@@ -185,7 +205,10 @@ fn place(
     if sector > sector_limit {
         return Err(outside());
     }
-    Ok(Placement { sector, boxel: ((shifted - sector * SECTOR_SIZE) / boxel_size).floor() })
+    Ok(Placement {
+        sector,
+        boxel: ((shifted - sector * SECTOR_SIZE) / boxel_size).floor(),
+    })
 }
 
 /// Do these coordinates fall inside the boxel the address describes?

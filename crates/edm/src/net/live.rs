@@ -75,9 +75,9 @@ impl HttpTransport for LiveHttp {
             // where `fetch` sends it, and the game-internal API's PUT routes want
             // the framing.
             Body::EmptyText => builder.header("content-length", "0").body(""),
-            Body::Json(bytes) => {
-                builder.header("content-type", "application/json").body(bytes.to_vec())
-            }
+            Body::Json(bytes) => builder
+                .header("content-type", "application/json")
+                .body(bytes.to_vec()),
         };
 
         let response = builder.send().await.map_err(|e| classify(&e))?;
@@ -144,7 +144,10 @@ fn decode_content(headers: &HeaderView, bytes: &[u8]) -> Result<Vec<u8>, Transpo
     let mut out = Vec::new();
     let failed = |what: &str| TransportError::Other(format!("could not decode a {what} body"));
 
-    match edm_core::js::text::js_trim(&encoding).to_ascii_lowercase().as_str() {
+    match edm_core::js::text::js_trim(&encoding)
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "gzip" | "x-gzip" => flate2::read::GzDecoder::new(bytes)
             .read_to_end(&mut out)
             .map(|_| ())

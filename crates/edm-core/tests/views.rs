@@ -35,8 +35,6 @@ fn emit(blocks: &[Block<'_>], width: usize) -> String {
     out
 }
 
-
-
 fn snapshot_at_widths(name: &str, blocks: &[Block<'_>]) {
     for width in WIDTHS {
         insta::assert_snapshot!(format!("{name}_w{width}"), emit(blocks, width));
@@ -246,7 +244,10 @@ fn sweep_results() {
             name: "Jaques Station",
             status: Some(200.0),
             snapshot: Some(&snapshot),
-            eddn: Some(EddnOutcome { ok: true, detail: "OK" }),
+            eddn: Some(EddnOutcome {
+                ok: true,
+                detail: "OK",
+            }),
             attempts: Some(1.0),
         },
         Visit {
@@ -294,7 +295,8 @@ fn request_and_response() {
     let header_list = headers();
     let url = format!(
         "https://api.orerve.net/2.0/elite/market/list?{}",
-        "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk=".repeat(3)
+        "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk="
+            .repeat(3)
     );
     let view = RequestView {
         method: "GET",
@@ -335,16 +337,38 @@ fn opaque_payload_is_pretty_printed_when_it_parses() {
 #[test]
 fn trade_plan_and_log() {
     let fields = [
-        PlanField { label: "marketId", value: Cow::Borrowed("3223343616"), source: "flag" },
-        PlanField { label: "commodity", value: Cow::Borrowed("Gold (128049202)"), source: "market" },
-        PlanField { label: "unitPrice", value: Cow::Borrowed("9,301 cr"), source: "market" },
-        PlanField { label: "qty", value: Cow::Borrowed("13"), source: "flag" },
-        PlanField { label: "total", value: Cow::Borrowed("120,913 cr"), source: "default" },
+        PlanField {
+            label: "marketId",
+            value: Cow::Borrowed("3223343616"),
+            source: "flag",
+        },
+        PlanField {
+            label: "commodity",
+            value: Cow::Borrowed("Gold (128049202)"),
+            source: "market",
+        },
+        PlanField {
+            label: "unitPrice",
+            value: Cow::Borrowed("9,301 cr"),
+            source: "market",
+        },
+        PlanField {
+            label: "qty",
+            value: Cow::Borrowed("13"),
+            source: "flag",
+        },
+        PlanField {
+            label: "total",
+            value: Cow::Borrowed("120,913 cr"),
+            source: "default",
+        },
     ];
-    let notes = [
-        "Gold: stock - | demand 812 | buy - | sell 9,301 | fence 9,280 | held 117".to_owned(),
-    ];
-    snapshot_at_widths("trade_plan", &views::trade_plan(Kind::Sell, 13.0, "Gold", &fields, &notes));
+    let notes =
+        ["Gold: stock - | demand 812 | buy - | sell 9,301 | fence 9,280 | held 117".to_owned()];
+    snapshot_at_widths(
+        "trade_plan",
+        &views::trade_plan(Kind::Sell, 13.0, "Gold", &fields, &notes),
+    );
 
     let document = JsValue::parse(MARKET).expect("fixture parses");
     let snapshot = domain::parse_market_snapshot(&document).expect("fixture is a market");
@@ -392,7 +416,10 @@ fn system_markets_and_the_structural_fallback() {
     let document = JsValue::parse(STARSYSTEM).expect("fixture parses");
     let payload = document.as_record().expect("fixture is an object");
     let points = read_market_points(payload);
-    snapshot_at_widths("market_points", &views::market_points(&points, "MARKETS  Colonia"));
+    snapshot_at_widths(
+        "market_points",
+        &views::market_points(&points, "MARKETS  Colonia"),
+    );
 
     let drifted = JsValue::parse(DRIFTED).expect("fixture parses");
     let found = collect_points_of_interest(&drifted);
@@ -412,11 +439,19 @@ fn commodity_bands_and_rows_are_locale_sorted() {
     let snapshot = domain::parse_market_snapshot(&document).expect("fixture is a market");
     let blocks = views::commodity_table(&snapshot.commodities);
 
-    let labels: Vec<String> =
-        bands(&blocks).iter().map(|band| band.split("  ").next().unwrap().to_owned()).collect();
+    let labels: Vec<String> = bands(&blocks)
+        .iter()
+        .map(|band| band.split("  ").next().unwrap().to_owned())
+        .collect();
     assert_eq!(
         labels,
-        ["CHEMICALS", "METALS", "NARCOTICS", "NONMARKETABLE", "UNCATEGORISED"],
+        [
+            "CHEMICALS",
+            "METALS",
+            "NARCOTICS",
+            "NONMARKETABLE",
+            "UNCATEGORISED"
+        ],
         "band order is localeCompare over the category names"
     );
 
@@ -443,7 +478,10 @@ fn commodity_bands_and_rows_are_locale_sorted() {
 fn r32_a_band_can_lengthen_when_uppercased() {
     let commodities = [commodity("Kompressor", "straße")];
     let blocks = views::commodity_table(&commodities);
-    assert_eq!(bands(&blocks), ["STRASSE  1 items | 0 supplied | 0 in demand"]);
+    assert_eq!(
+        bands(&blocks),
+        ["STRASSE  1 items | 0 supplied | 0 in demand"]
+    );
 }
 
 /// Type bands follow `POI_TYPE_ORDER`; anything unrecognised shares the last
@@ -455,8 +493,10 @@ fn market_point_bands_follow_the_type_order() {
     let points = read_market_points(payload);
     let blocks = views::market_points(&points, "MARKETS");
 
-    let labels: Vec<String> =
-        bands(&blocks).iter().map(|band| band.split("  ").next().unwrap().to_owned()).collect();
+    let labels: Vec<String> = bands(&blocks)
+        .iter()
+        .map(|band| band.split("  ").next().unwrap().to_owned())
+        .collect();
     assert_eq!(
         labels,
         ["STARPORT", "OUTPOST", "CARRIER", "SURFACESTATION"],
@@ -479,7 +519,11 @@ fn distanceless_markets_sort_last_then_by_name() {
         .filter(|row| row[0].starts_with("37056893"))
         .map(|row| row[1].clone())
         .collect();
-    assert_eq!(carriers, ["A1B-C2D", "K7Q-B0X"], "both are distanceless, so name decides");
+    assert_eq!(
+        carriers,
+        ["A1B-C2D", "K7Q-B0X"],
+        "both are distanceless, so name decides"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -499,11 +543,18 @@ fn zero_renders_as_a_dash_or_a_zero_depending_on_the_cell() {
     let hold = cells(&views::inventory_table(snapshot.inventory));
     assert_eq!(hold[0][4], "-", "marked 0 is a dash");
     assert_eq!(hold[0][5], "0", "owner 0 is a zero");
-    assert_eq!(hold[2], ["?", "-", "-", ".", "-", "0", "0", "-"], "a null entry degrades whole");
+    assert_eq!(
+        hold[2],
+        ["?", "-", "-", ".", "-", "0", "0", "-"],
+        "a null entry degrades whole"
+    );
 
     // The market listing: a stocked-out commodity shows a dash, its id does not.
     let listing = cells(&views::commodity_table(&snapshot.commodities));
-    let gold = listing.iter().find(|row| row[1] == "Gold").expect("Gold is listed");
+    let gold = listing
+        .iter()
+        .find(|row| row[1] == "Gold")
+        .expect("Gold is listed");
     assert_eq!(gold[0], "128049202", "the id is String(n), never grouped");
     assert_eq!(gold[2], "-", "stock 0 is a dash");
     assert_eq!(gold[4], "-", "buyPrice 0 is a dash");
@@ -580,7 +631,11 @@ fn r35_the_eddn_cell_is_clamped_before_it_is_measured() {
     let blocks = views::sweep_summary(&visits, "SWEEP", Metric::Utf16);
 
     let cell = cells(&blocks).remove(0).remove(6);
-    assert_eq!(cell.chars().count(), 24, "clamped to 24 while the row is built");
+    assert_eq!(
+        cell.chars().count(),
+        24,
+        "clamped to 24 while the row is built"
+    );
     assert_eq!(cell, "HTTP 400 Bad Request: F~");
 
     // And the column is measured from the already-clamped text, so the header
@@ -607,10 +662,16 @@ fn r18_the_summary_probes_for_keys_not_for_values() {
     assert!(labels.contains(&"credits"), "a null credits still prints");
     assert!(labels.contains(&"debt"));
     assert!(labels.contains(&"allowsDumping"));
-    assert!(!labels.contains(&"lastModified"), "a non-object lastModified is dropped");
+    assert!(
+        !labels.contains(&"lastModified"),
+        "a non-object lastModified is dropped"
+    );
     assert_eq!(rows[0], ["credits", "0 cr"]);
     assert_eq!(
-        rows.iter().find(|row| row[0] == "allowsDumping").expect("row").as_slice(),
+        rows.iter()
+            .find(|row| row[0] == "allowsDumping")
+            .expect("row")
+            .as_slice(),
         ["allowsDumping", "no"],
         "readBoolean is `=== true || === 1`, so null is no"
     );
@@ -631,10 +692,26 @@ fn sample_estimate() -> edm_core::spend::Estimate {
             cached_fresh: 22,
         },
         vec![
-            Exclusion { label: "Odyssey settlements", removed: 771, keep_with: "--settlements" },
-            Exclusion { label: "fleet carriers", removed: 194, keep_with: "--include-carriers" },
-            Exclusion { label: "outposts (pad L)", removed: 86, keep_with: "--pad M" },
-            Exclusion { label: "beyond 2,000 Ls", removed: 22, keep_with: "--max-star-distance" },
+            Exclusion {
+                label: "Odyssey settlements",
+                removed: 771,
+                keep_with: "--settlements",
+            },
+            Exclusion {
+                label: "fleet carriers",
+                removed: 194,
+                keep_with: "--include-carriers",
+            },
+            Exclusion {
+                label: "outposts (pad L)",
+                removed: 86,
+                keep_with: "--pad M",
+            },
+            Exclusion {
+                label: "beyond 2,000 Ls",
+                removed: 22,
+                keep_with: "--max-star-distance",
+            },
         ],
         4.0,
         &SizePrior::default(),
@@ -646,6 +723,7 @@ fn plan_view(estimate: &edm_core::spend::Estimate) -> views::PlanView<'_> {
         reference: "Sol",
         radius_ly: 20.0,
         complete_to_ly: 20.0,
+        price_index: false,
         ardent_requests: 1,
         estimate,
         rate_per_second: 4.0,
@@ -682,7 +760,10 @@ fn the_plan_names_every_exclusion_and_how_to_undo_it() {
         ("outposts (pad L)", "--pad M"),
     ] {
         assert!(text.contains(label), "missing exclusion {label}\n{text}");
-        assert!(text.contains(flag), "missing the flag that keeps {label}\n{text}");
+        assert!(
+            text.contains(flag),
+            "missing the flag that keeps {label}\n{text}"
+        );
     }
     assert!(text.contains("-771"), "the settlement count itself\n{text}");
 }
@@ -695,7 +776,10 @@ fn the_plan_shows_the_request_split() {
     let text = cells(&route_plan_blocks(&estimate)).concat().join("\n");
     // 135 markets, not the 157 found: the 22 still-fresh cached ones cost
     // nothing, and a plan that priced them would overstate what it will spend.
-    assert!(text.contains("253  = 118 official batch + 135 market"), "{text}");
+    assert!(
+        text.contains("253  = 118 official batch + 135 market"),
+        "{text}"
+    );
 }
 
 /// An enumeration that could not close its frontier says so in the radius row
@@ -712,7 +796,25 @@ fn an_incomplete_enumeration_is_stated_next_to_the_radius() {
     });
     let text = cells(&blocks).concat().join("\n");
     assert!(text.contains("60 Ly asked, complete to 41 Ly"), "{text}");
-    assert!(!text.contains("complete,"), "must not also claim completeness\n{text}");
+    assert!(
+        !text.contains("complete,"),
+        "must not also claim completeness\n{text}"
+    );
+}
+
+#[test]
+fn a_price_index_plan_never_claims_a_complete_regional_survey() {
+    let estimate = sample_estimate();
+    let blocks = views::route_plan(&views::PlanView {
+        price_index: true,
+        ardent_requests: 3,
+        ..plan_view(&estimate)
+    });
+    let text = cells(&blocks).concat().join("\n");
+    assert!(text.contains("price index"), "{text}");
+    assert!(text.contains("not regional"), "{text}");
+    assert!(text.contains("not enumerated"), "{text}");
+    assert!(!text.contains("complete,"), "{text}");
 }
 
 fn sample_coverage() -> views::RouteCoverage {
@@ -755,11 +857,16 @@ fn coverage_reports_underlying_observation_span_and_unknown_times() {
     coverage.newest_observed_ms = Some(1_700_000_120_000.0);
     coverage.measured_at_ms = 1_700_000_600_000.0;
     coverage.observation_time_unknown = 2;
-    let notes = coverage.notes().join("
-");
+    let notes = coverage.notes().join(
+        "
+",
+    );
     assert!(notes.contains("observations span"), "{notes}");
     assert!(notes.contains("10 minutes old"), "{notes}");
-    assert!(notes.contains("2 priced listings have no underlying market timestamp"), "{notes}");
+    assert!(
+        notes.contains("2 priced listings have no underlying market timestamp"),
+        "{notes}"
+    );
     assert!(!notes.contains("read at one instant"), "{notes}");
 }
 
@@ -774,7 +881,10 @@ fn route_coverage_snapshots() {
 fn unreached_markets_are_named_as_unreached() {
     let notes = sample_coverage().notes();
     let joined = notes.join("\n");
-    assert!(joined.contains("6 markets in radius were not reached"), "{joined}");
+    assert!(
+        joined.contains("6 markets in radius were not reached"),
+        "{joined}"
+    );
     assert!(joined.contains("not ranked low"), "{joined}");
     assert!(joined.contains("2 systems failed"), "{joined}");
 }
@@ -788,8 +898,14 @@ fn the_coverage_notes_agree_with_themselves_in_number() {
         ..views::RouteCoverage::default()
     };
     let joined = one.notes().join("\n");
-    assert!(joined.contains("1 market in radius was not reached and is absent"), "{joined}");
-    assert!(joined.contains("1 system failed, so any market in it is unknown"), "{joined}");
+    assert!(
+        joined.contains("1 market in radius was not reached and is absent"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("1 system failed, so any market in it is unknown"),
+        "{joined}"
+    );
 }
 
 /// A clean sweep says only the one thing that is true of it.
@@ -807,7 +923,10 @@ fn a_complete_sweep_carries_no_warnings() {
     };
     let notes = coverage.notes();
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].contains("read live from the game-internal API"), "{notes:?}");
+    assert!(
+        notes[0].contains("read live from the game-internal API"),
+        "{notes:?}"
+    );
 }
 
 /// A sweep that found nothing says nothing, rather than claiming live prices it
@@ -932,7 +1051,10 @@ fn a_market_with_no_listing_says_so_rather_than_zero() {
 #[test]
 fn a_retried_market_says_how_many_attempts_it_took() {
     assert!(line(|l| l.attempts = 3).ends_with("after 3 attempts"));
-    assert!(!line(|l| l.attempts = 1).contains("attempts"), "not for the first");
+    assert!(
+        !line(|l| l.attempts = 1).contains("attempts"),
+        "not for the first"
+    );
 }
 
 /// The pacing lines exist because a slow sweep and a throttled one look the
@@ -985,7 +1107,9 @@ fn every_pacing_line_names_what_changed() {
         "  pace  rate recovered to 4 req/s"
     );
     assert_eq!(
-        views::pace_line(&views::PaceEvent::BreakerTripped { reason: "FailureRate" }),
+        views::pace_line(&views::PaceEvent::BreakerTripped {
+            reason: "FailureRate"
+        }),
         "  pace  stopping early: FailureRate"
     );
 }
@@ -1027,8 +1151,14 @@ fn a_station_with_no_market_is_not_a_failure() {
     assert!(!text.contains("markets failed"), "not a failure\n{text}");
 
     let notes = coverage.notes().join("\n");
-    assert!(notes.contains("1 station has no commodity market"), "{notes}");
-    assert!(notes.contains("it answered, it are") || notes.contains("not trading"), "{notes}");
+    assert!(
+        notes.contains("1 station has no commodity market"),
+        "{notes}"
+    );
+    assert!(
+        notes.contains("it answered, it are") || notes.contains("not trading"),
+        "{notes}"
+    );
     assert!(!notes.contains("not reached"), "they were reached\n{notes}");
 }
 
@@ -1041,7 +1171,10 @@ fn the_absent_note_agrees_in_number() {
         ..views::RouteCoverage::default()
     };
     let notes = many.notes().join("\n");
-    assert!(notes.contains("40 stations have no commodity market"), "{notes}");
+    assert!(
+        notes.contains("40 stations have no commodity market"),
+        "{notes}"
+    );
 }
 
 /// The coverage notes are written for a reader about to look at a ranking —

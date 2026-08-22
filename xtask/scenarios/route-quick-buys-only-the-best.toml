@@ -1,0 +1,135 @@
+# route-quick-buys-only-the-best
+why = "The whole point of `--quick`: Ardent's commodity price index nominates the candidates, and only those market ids are paid for. Eight free Ardent reads — a system, the commodity catalogue every `--item` is checked against, and three price pages per commodity — describe eight stations across two commodities; two game-internal API requests follow. Hops are scored by estimated credits per hour rather than by raw price, so `--quick 1` keeps the best pair per commodity, not the cheapest seller and dearest buyer independently. It also pins the three ways a candidate can be rejected before a request exists — a fleet carrier the default filter removes, a station outside `--radius`, and a seller whose advertised stock is below `--qty` — and the one that is easy to lose: Ardent's `/nearby` route omits its own centre system, so both winners here come from the reference-system commodity page that fills that hole."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold,silver", "--qty", "100", "--cargo", "784", "--shape", "round-trip", "--rps", "8", "--no-cache", "--concurrency", "1", "--detail"]
+oracle = "none"
+expect-frontier-requests = 2
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+# Every --item is checked against this before a query is spent on it: Ardent
+# answers an id it does not index with 200 and an empty page, which downstream
+# is indistinguishable from a region with no stock.
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"},{"commodityName":"silver"},{"commodityName":"lowtemperaturediamond"}]
+"""
+
+# Gold sellers. The carrier is the cheapest gold in the region and must not be
+# polled; Pricier Dock is a legitimate starport that simply loses on price; the
+# thin seller is priced better than Galileo but cannot fill a tenth of the hold.
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009401,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3229009402,"stationName":"Thin Seam","stationType":"Coriolis","distanceToArrival":90,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":8100,"stock":40,"stockBracket":1},
+ {"commodityName":"gold","marketId":3229009403,"stationName":"Pricier Dock","stationType":"Orbis","distanceToArrival":150,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9400,"stock":6000,"stockBracket":3}
+]
+"""
+
+# Gold buyers. Far Counting pays the most in the galaxy and is 40 Ly away, so
+# `--radius 20` removes it after Ardent's own page cap has already been applied.
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009404,"stationName":"Far Counting","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828642,"systemName":"Ross 154","systemX":0,"systemY":40,"systemZ":0,"sellPrice":19000,"demand":9000,"demandBracket":3},
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":10200,"demand":9000,"demandBracket":3}
+]
+"""
+
+# Sol itself. `/nearby` never returns its own centre, so without this page
+# Galileo and Titan City — the two markets that actually trade here — would be
+# invisible to a lookup made from Sol.
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":128016384,"stationName":"Galileo","stationType":"Ocellus","distanceToArrival":505,"maxLandingPadSize":3,"systemAddress":10477373803,"systemName":"Sol","systemX":0,"systemY":0,"systemZ":0,"buyPrice":9000,"stock":5000,"stockBracket":3,"sellPrice":8900,"demand":0,"demandBracket":0},
+ {"commodityName":"gold","marketId":128016576,"stationName":"Titan City","stationType":"Coriolis","distanceToArrival":505,"maxLandingPadSize":3,"systemAddress":10477373803,"systemName":"Sol","systemX":0,"systemY":0,"systemZ":0,"buyPrice":0,"stock":0,"stockBracket":0,"sellPrice":11500,"demand":7000,"demandBracket":3}
+]
+"""
+
+# Silver is the return leg. Its two winners are the same two market ids as
+# gold's, which must cost one request each rather than two.
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/silver/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"silver","marketId":3229009403,"stationName":"Pricier Dock","stationType":"Orbis","distanceToArrival":150,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":5200,"stock":6000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/silver/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"silver","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":5900,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/silver"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"silver","marketId":128016576,"stationName":"Titan City","stationType":"Coriolis","distanceToArrival":505,"maxLandingPadSize":3,"systemAddress":10477373803,"systemName":"Sol","systemX":0,"systemY":0,"systemZ":0,"buyPrice":4500,"stock":6000,"stockBracket":3,"sellPrice":4400,"demand":0,"demandBracket":0},
+ {"commodityName":"silver","marketId":128016384,"stationName":"Galileo","stationType":"Ocellus","distanceToArrival":505,"maxLandingPadSize":3,"systemAddress":10477373803,"systemName":"Sol","systemX":0,"systemY":0,"systemZ":0,"buyPrice":0,"stock":0,"stockBracket":0,"sellPrice":6200,"demand":9000,"demandBracket":3}
+]
+"""
+
+# One worker, so the two live reads land in candidate order: Galileo first.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=128016384&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-source.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=128016576&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-sink.json"

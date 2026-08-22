@@ -3,22 +3,22 @@ enumerating systems within 10 Ly of Sol...
 3 systems; reading their market lists (16 at a time)...
   3 / 3 systems read, 4 stations found
 == ROUTE PLAN ======================================================================================
-+-------------------------+------------------------------------------------+
-| Field                   | Value                                          |
-+=========================+================================================+
-| reference               | Sol                                            |
-| radius                  | 10 Ly (complete, 1 Ardent query)               |
-| systems                 | 3 in radius                                    |
-| stations known          | 4 (Ardent)                                     |
-|   - Odyssey settlements | -1   (--settlements to keep)                   |
-|   - fleet carriers      | -1   (--include-carriers to keep)              |
-| markets to poll         | 2                                              |
-| game-internal API requests           | 2  (one per market)                            |
-| estimated transfer      | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
-| pacing                  | 8 req/s                                        |
-| estimated wall clock    | 1s                                             |
-| ceiling                 | 2 of 2,000   (--max-requests to raise)         |
-+-------------------------+------------------------------------------------+
++----------------------------+------------------------------------------------+
+| Field                      | Value                                          |
++============================+================================================+
+| reference                  | Sol                                            |
+| radius                     | 10 Ly (complete, 1 Ardent query)               |
+| systems                    | 3 in radius                                    |
+| stations known             | 4 (Ardent)                                     |
+|   - Odyssey settlements    | -1   (--settlements to keep)                   |
+|   - fleet carriers         | -1   (--include-carriers to keep)              |
+| markets to poll            | 2                                              |
+| game-internal API requests | 2  (one per market)                            |
+| estimated transfer         | 28-52 KB  (prior: 500 KB/system, 20 KB/market) |
+| pacing                     | 8 req/s                                        |
+| estimated wall clock       | 1s                                             |
+| ceiling                    | 2 of 2,000   (--max-requests to raise)         |
++----------------------------+------------------------------------------------+
 [1/2] Galileo (Sol)  HTTP 200  2 tradable
 == RESPONSE  HTTP 410 Gone =========================================================================
 +----------------+--------------+
@@ -42,7 +42,7 @@ enumerating systems within 10 Ly of Sol...
 +----------------------+--------------+
    every price below was read live from the game-internal API during this run
    1 priced listing has no underlying market timestamp; retrieval time was not substituted
-   1 station has no commodity market right now — it answered, it are simply not trading, and it are
+   1 station has no commodity market right now — it answered, it is simply not trading, and it is
    not missing from the ranking
 == BEST ROUND TRIPS ================================================================================
    no profitable round trip in this data

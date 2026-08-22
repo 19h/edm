@@ -19,11 +19,11 @@ use edm_core::consts::MARKET_LIST;
 use edm_core::domain::eddn::{EddnOptions, EddnStation, build_message};
 use edm_core::domain::starsystem::MarketPoint;
 use edm_core::domain::{MarketSnapshot, parse_market_snapshot};
-use edm_core::js::json::JsValue;
 use edm_core::js;
+use edm_core::js::json::JsValue;
 
-use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::eddn::EddnResult;
+use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::net::HttpTransport;
 use crate::out::Out;
 use crate::ports::{Clock, Entropy};
@@ -199,11 +199,16 @@ pub fn done_line(p: &Progress<'_>) -> String {
         js::js_number(p.total as f64),
         p.name,
         js::js_number(p.market_id),
-        p.status.map_or_else(|| "-".to_owned(), |s| js::js_number(f64::from(s))),
+        p.status
+            .map_or_else(|| "-".to_owned(), |s| js::js_number(f64::from(s))),
         p.outcome,
     );
     if p.attempts > 1 {
-        let _ = write!(line, "  after {} attempts", js::js_number(f64::from(p.attempts)));
+        let _ = write!(
+            line,
+            "  after {} attempts",
+            js::js_number(f64::from(p.attempts))
+        );
     }
     if let Some(result) = p.eddn {
         line.push_str("  eddn ");
@@ -230,7 +235,11 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.origin,
         MARKET_LIST,
         cx.method_override,
-        game_api::list_fields(&js::js_number(market_id), cx.credentials, stamp.frontier_time),
+        game_api::list_fields(
+            &js::js_number(market_id),
+            cx.credentials,
+            stamp.frontier_time,
+        ),
         stamp,
         cx.headers,
     );
@@ -246,7 +255,10 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         cx.out,
         &request,
         cx.dry_run,
-        crate::exchange::SendOptions { quiet: true, ignore_dry_run: false },
+        crate::exchange::SendOptions {
+            quiet: true,
+            ignore_dry_run: false,
+        },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),
     )
@@ -312,7 +324,10 @@ struct Job {
 
 // One function, because the invariant that makes the channel close soundly
 // spans the whole loop and splitting it would hide the thing most worth reading.
-#[allow(clippy::too_many_lines, reason = "the retirement invariant spans the loop")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the retirement invariant spans the loop"
+)]
 /// Sweeps every target with a pool of workers.
 ///
 /// Results come back in the order the markets were *listed*, not the order they
@@ -331,7 +346,10 @@ pub async fn sweep<H: HttpTransport, C: Clock, E: Entropy>(
 
     let (tx, rx) = async_channel::unbounded::<Job>();
     for index in 0..targets.len() {
-        let _ = tx.try_send(Job { index: index as u32, attempts: 0 });
+        let _ = tx.try_send(Job {
+            index: index as u32,
+            attempts: 0,
+        });
     }
 
     // INVARIANT: `outstanding` == queued + held-by-a-worker. It is decremented
@@ -399,9 +417,8 @@ pub async fn sweep<H: HttpTransport, C: Clock, E: Entropy>(
 
                 // A 2xx that failed to decrypt carries a status of 200, which is
                 // not transient — retrying it would just fail the same way. R84.
-                let retry = failure.is_some()
-                    && !visit.has_data()
-                    && is_transient_status(visit.status);
+                let retry =
+                    failure.is_some() && !visit.has_data() && is_transient_status(visit.status);
                 if retry && f64::from(job.attempts) < max_attempts {
                     // To the BACK of the queue, keeping its attempt count, so
                     // one bad market cannot be retried head-first while others
@@ -508,11 +525,17 @@ mod tests {
         // No status at all — a timeout or a dropped connection — is retryable.
         assert!(is_transient_status(None));
         for code in [408, 429, 500, 503, 599] {
-            assert!(is_transient_status(Some(code)), "{code} should be transient");
+            assert!(
+                is_transient_status(Some(code)),
+                "{code} should be transient"
+            );
         }
         // A 4xx means the request was wrong; repeating it repeats the mistake.
         for code in [200, 400, 401, 403, 404, 405, 418] {
-            assert!(!is_transient_status(Some(code)), "{code} should not be transient");
+            assert!(
+                !is_transient_status(Some(code)),
+                "{code} should not be transient"
+            );
         }
     }
 

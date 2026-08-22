@@ -33,11 +33,13 @@ use edm_route::time::TimeModel;
 use edm_route::view;
 
 use crate::route::acquire;
-use crate::route::ingest;
 use crate::route::cache::Cache;
 use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
+use crate::route::ingest;
 use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
+
+mod quick;
 
 /// Above this many markets, the cache pre-pass says it is happening.
 ///
@@ -56,6 +58,33 @@ struct SpecialOpportunities {
     colonisation_markets: usize,
     stateful_markets: usize,
     commodity_override_markets: usize,
+}
+
+/// What bounded the candidate universe before the normal live ranking.
+///
+/// This is deliberately carried to JSON rather than inferred from counts: a
+/// price-index prefix that happened to yield the same number of markets as a
+/// small regional survey is still not a complete regional answer.
+#[derive(Clone, Debug)]
+pub(super) struct QuickProvenance {
+    pub commodities: Vec<String>,
+    pub markets_per_side: usize,
+    pub seller_minimum: f64,
+    pub buyer_minimum: f64,
+    pub candidate_rows: usize,
+    pub market_ids: Vec<f64>,
+    pub unpublished_buyer_candidates: usize,
+    /// Requested commodities that produced no candidate. A consumer that reads
+    /// only the routes cannot otherwise tell a commodity that lost on price
+    /// from one that was never in the answer.
+    pub commodities_without_candidates: Vec<String>,
+    /// The subset of those for which Ardent's index returned no row at all,
+    /// which is what a misspelt `--item` looks like.
+    pub commodities_absent_from_index: Vec<String>,
+    /// Per commodity, the best live seller and buyer among the polled markets.
+    /// Empty until the sweep has run, because until then there is no live price
+    /// to report.
+    pub best_live: Vec<quick::BestLive>,
 }
 
 /// How many Ardent market lists are read at once.
@@ -120,10 +149,29 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         out.set_exit(crate::out::EXIT_FAILURE);
         return Ok(());
     }
-    if config.verify_systems
-        && config.radius_ly > edm_core::consts::MARKETDATA_DISTANCE_LY_FALLBACK
+    // A quick lookup asks Ardent's commodity index for exact market ids, so it
+    // bypasses regional enumeration entirely. It still reaches the same
+    // authenticated poller, cache writer and optional EDDN relay below that
+    // mode's boundary. Dispatch before the regional `--verify-systems` rule:
+    // quick mode gives that incompatible flag its own precise explanation.
+    // Before either search: a hold of nought tonnes has no answer, and the one
+    // the optimiser would give is a statement about the market rather than about
+    // the ship. Reachable from an explicit `--cargo 0` and from a ship that
+    // really has no rack.
+    if config.cargo == Some(0.0) {
+        return Err(
+            "the hold has no capacity, so every leg would carry nothing. Pass --cargo <t> with the capacity you will be flying"
+                .to_owned(),
+        );
+    }
+    if config.quick.is_some() {
+        return quick::run(app, config, timer).await;
+    }
+    if config.verify_systems && config.radius_ly > edm_core::consts::MARKETDATA_DISTANCE_LY_FALLBACK
     {
-        out.error("--verify-systems follows Frontier's 40 Ly marketdata policy; use --radius 40 or less");
+        out.error(
+            "--verify-systems follows Frontier's 40 Ly marketdata policy; use --radius 40 or less",
+        );
         out.set_exit(crate::out::EXIT_FAILURE);
         return Ok(());
     }
@@ -133,10 +181,17 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             out.line(&text);
         }
     };
-    note(format!("resolving \"{}\" through Ardent...", config.reference));
+    note(format!(
+        "resolving \"{}\" through Ardent...",
+        config.reference
+    ));
     let centre = resolve(&ardent, &config.reference).await?;
 
-    let budget = if config.ardent_queries == 0 { DEFAULT_ANCHOR_BUDGET } else { config.ardent_queries };
+    let budget = if config.ardent_queries == 0 {
+        DEFAULT_ANCHOR_BUDGET
+    } else {
+        config.ardent_queries
+    };
     note(format!(
         "enumerating systems within {} Ly of {}...",
         edm_core::js::js_number(config.radius_ly),
@@ -170,7 +225,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         &centre,
         config.radius_ly,
         budget,
-        anchor_report.as_ref().map(|f| f as discover::AnchorReport<'_>),
+        anchor_report
+            .as_ref()
+            .map(|f| f as discover::AnchorReport<'_>),
     )
     .await
     .map_err(|error| format!("enumerating systems around {}: {error}", centre.name))?;
@@ -186,8 +243,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // A counter rather than a line per system: eight thousand lines is not a
     // progress report, it is the output. One line rewritten in place is, and
     // `Out::progress` already clamps to the terminal width \[R33\].
-    let gather_report = (!config.quiet).then_some(
-        move |done: usize, total: usize, found: usize| {
+    let gather_report =
+        (!config.quiet).then_some(move |done: usize, total: usize, found: usize| {
             if done.is_multiple_of(64) || done == total {
                 out.progress(&format!(
                     "  {} / {} systems read, {} stations found",
@@ -196,8 +253,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                     edm_core::js::format_integer(found as f64),
                 ));
             }
-        },
-    );
+        });
     let (mut stations, _systems_with_markets) = gather(
         &ardent,
         &atlas,
@@ -213,7 +269,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let mut digest_requests = 0usize;
     let mut official_topology = None;
     if config.verify_systems {
-        let digest_cache = crate::route::digest::Cache::new(cache.root(), config.cache, config.refresh);
+        let digest_cache =
+            crate::route::digest::Cache::new(cache.root(), config.cache, config.refresh);
         let cached = digest_cache.get(&app.ports.fs, DIGEST_SOURCE, app.ports.clock.now_ms());
         if let Some(snapshot) = cached {
             official_topology = Some(snapshot);
@@ -222,6 +279,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             // crawler's full hard cap before page zero, never a guessed prefix.
             let crawl_survey = Survey {
                 complete_to_ly: enumeration.complete_to_ly,
+                price_index: false,
                 ardent_requests: enumeration.ardent_requests,
                 counts: Counts {
                     systems: enumeration.systems.len(),
@@ -285,13 +343,15 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                                     },
                                 )
                                 .await
-                                .ok_or_else(|| "daily-digest request produced no response".to_owned())?;
+                                .ok_or_else(|| {
+                                    "daily-digest request produced no response".to_owned()
+                                })?;
                             if !(200..300).contains(&exchange.status) {
                                 return Err(format!("daily-digest HTTP {}", exchange.status));
                             }
-                            exchange
-                                .decrypted
-                                .ok_or_else(|| "daily-digest response could not be decoded".to_owned())
+                            exchange.decrypted.ok_or_else(|| {
+                                "daily-digest response could not be decoded".to_owned()
+                            })
                         }
                     },
                 )
@@ -354,13 +414,22 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
 
     let survey = Survey {
         complete_to_ly: enumeration.complete_to_ly,
+        price_index: false,
         ardent_requests: enumeration.ardent_requests,
         counts: Counts {
             systems: enumeration.systems.len(),
             systems_to_read: systems_to_read + digest_requests,
             stations_known: selection.considered,
-            markets_to_poll: if config.verify_systems { 0 } else { selection.keep.len() },
-            cached_fresh: if config.verify_systems { 0 } else { prepared.hits.fresh },
+            markets_to_poll: if config.verify_systems {
+                0
+            } else {
+                selection.keep.len()
+            },
+            cached_fresh: if config.verify_systems {
+                0
+            } else {
+                prepared.hits.fresh
+            },
         },
         exclusions: selection.exclusions.clone(),
     };
@@ -369,7 +438,10 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         // One marketdata batch may contain five systems. Budget transfer at the
         // old per-system starsystem size rather than pretending batching makes
         // the bytes disappear.
-        SizePrior { system_bytes: 5.0 * SizePrior::default().system_bytes, ..SizePrior::default() }
+        SizePrior {
+            system_bytes: 5.0 * SizePrior::default().system_bytes,
+            ..SizePrior::default()
+        }
     } else {
         SizePrior::default()
     };
@@ -419,11 +491,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                         &app.credentials,
                         stamp.frontier_time,
                     )?;
-                    let request = app.prepare(
-                        edm_core::consts::STARSYSTEM_MARKETDATA,
-                        fields,
-                        stamp,
-                    );
+                    let request =
+                        app.prepare(edm_core::consts::STARSYSTEM_MARKETDATA, fields, stamp);
                     let exchange = app
                         .send(
                             &request,
@@ -504,6 +573,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         // quantity reads separately; candidate rows can never satisfy them.
         let exact_survey = Survey {
             complete_to_ly: enumeration.complete_to_ly,
+            price_index: false,
             ardent_requests: enumeration.ardent_requests,
             counts: Counts {
                 systems: official_addresses.len(),
@@ -671,8 +741,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     }
 
     // Read before `rank` consumes the listings; the ranking cannot change it.
-    let unreached =
-        !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
+    let unreached = !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
 
     // The optimiser has no clock and no output. Both are lent to it here, and
     // `edm_route::watch` explains why they cannot be anywhere else.
@@ -738,7 +807,11 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let watch = edm_route::watch::Watch::unlimited().until(&search_expired);
     // Under `--json` stdout is one document \[C28\], so there is nowhere for a
     // progress line to go.
-    let watch = if config.quiet { watch } else { watch.reporting(&report_progress) };
+    let watch = if config.quiet {
+        watch
+    } else {
+        watch.reporting(&report_progress)
+    };
 
     rank(
         out,
@@ -748,6 +821,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         &candidate_demand_prices,
         &coverage,
         opportunities,
+        None,
         watch,
     );
 
@@ -827,7 +901,11 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
             .filter_map(|listing| listing.observed_at_ms)
             .fold(None::<f64>, |newest, observed| {
                 Some(newest.map_or(observed, |current| {
-                    if current.total_cmp(&observed).is_lt() { observed } else { current }
+                    if current.total_cmp(&observed).is_lt() {
+                        observed
+                    } else {
+                        current
+                    }
                 }))
             }),
         observation_time_unknown: m
@@ -837,7 +915,10 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
             .filter(|listing| listing.observed_at_ms.is_none())
             .count(),
         measured_at_ms: m.at_ms,
-        truncated_to_ly: m.enumeration.truncated.then_some(m.enumeration.complete_to_ly),
+        truncated_to_ly: m
+            .enumeration
+            .truncated
+            .then_some(m.enumeration.complete_to_ly),
         breaker_tripped: m.breaker_tripped,
         ranked: true,
         eddn_refusal: m.acquired.relayed.first_refusal.clone(),
@@ -845,7 +926,10 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
 }
 
 /// Solve, and print what the search will actually claim.
-#[allow(clippy::too_many_arguments, reason = "orchestration boundary keeps ranking inputs explicit")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "orchestration boundary keeps ranking inputs explicit"
+)]
 fn rank(
     out: &crate::out::Out,
     config: &RouteConfig,
@@ -854,6 +938,7 @@ fn rank(
     candidate_demand_prices: &HashMap<(i64, i64), i64>,
     coverage: &RouteCoverage,
     opportunities: SpecialOpportunities,
+    quick: Option<&QuickProvenance>,
     watch: edm_route::watch::Watch<'_>,
 ) {
     // By value: `ingest::markets` drops each payload as it builds its `Market`,
@@ -924,7 +1009,7 @@ fn rank(
             &solution,
             &markets,
             &commodities,
-            coverage_json(coverage, &crossing, opportunities),
+            coverage_json(coverage, &crossing, opportunities, quick),
         );
         out.document(&document.stringify(2));
         return;
@@ -957,10 +1042,11 @@ fn coverage_json(
     coverage: &RouteCoverage,
     crossing: &ingest::Crossing,
     opportunities: SpecialOpportunities,
+    quick: Option<&QuickProvenance>,
 ) -> edm_core::js::json::JsValue {
     use edm_core::js::json::{JsObject, JsValue};
     let n = |value: usize| JsValue::Num(value as f64);
-    JsValue::Obj(JsObject::from_document_order(vec![
+    let mut fields = vec![
         ("systemsRead".into(), n(coverage.systems_read)),
         ("systemsTotal".into(), n(coverage.systems_total)),
         ("systemsFailed".into(), n(coverage.systems_failed)),
@@ -972,39 +1058,176 @@ fn coverage_json(
         ("cacheHits".into(), n(coverage.cache_hits)),
         ("requestsSent".into(), n(coverage.requests_sent)),
         ("throttled".into(), n(coverage.throttled)),
-        ("elapsedSeconds".into(), JsValue::Num(coverage.elapsed_seconds)),
+        (
+            "elapsedSeconds".into(),
+            JsValue::Num(coverage.elapsed_seconds),
+        ),
         (
             "oldestMarketObservedAt".into(),
-            coverage.oldest_observed_ms.map_or(JsValue::Null, JsValue::Num),
+            coverage
+                .oldest_observed_ms
+                .map_or(JsValue::Null, JsValue::Num),
         ),
         (
             "newestMarketObservedAt".into(),
-            coverage.newest_observed_ms.map_or(JsValue::Null, JsValue::Num),
+            coverage
+                .newest_observed_ms
+                .map_or(JsValue::Null, JsValue::Num),
         ),
-        ("marketObservationTimeUnknown".into(), n(coverage.observation_time_unknown)),
+        (
+            "marketObservationTimeUnknown".into(),
+            n(coverage.observation_time_unknown),
+        ),
         (
             "completeToLy".into(),
             coverage.truncated_to_ly.map_or(JsValue::Null, JsValue::Num),
         ),
-        ("breakerTripped".into(), JsValue::Bool(coverage.breaker_tripped)),
-        ("rowsSkippedNonIntegral".into(), JsValue::Num(f64::from(crossing.non_integral))),
-        ("listingsSkippedInvalidIdentity".into(), JsValue::Num(f64::from(crossing.invalid_identity))),
+        (
+            "breakerTripped".into(),
+            JsValue::Bool(coverage.breaker_tripped),
+        ),
+        (
+            "rowsSkippedNonIntegral".into(),
+            JsValue::Num(f64::from(crossing.non_integral)),
+        ),
+        (
+            "listingsSkippedInvalidIdentity".into(),
+            JsValue::Num(f64::from(crossing.invalid_identity)),
+        ),
         (
             "specialOpportunities".into(),
             JsValue::Obj(JsObject::from_document_order(vec![
                 ("rescueSystems".into(), n(opportunities.rescue_systems)),
-                ("colonisationMarkets".into(), n(opportunities.colonisation_markets)),
+                (
+                    "colonisationMarkets".into(),
+                    n(opportunities.colonisation_markets),
+                ),
                 ("statefulMarkets".into(), n(opportunities.stateful_markets)),
-                ("commodityOverrideMarkets".into(), n(opportunities.commodity_override_markets)),
+                (
+                    "commodityOverrideMarkets".into(),
+                    n(opportunities.commodity_override_markets),
+                ),
             ])),
         ),
-        ("notes".into(), JsValue::Arr(coverage.notes().into_iter().map(|note| JsValue::Str(note.into())).collect())),
+    ];
+    if let Some(quick) = quick {
+        fields.push(("quickLookup".into(), quick_lookup_json(quick)));
+    }
+    fields.push((
+        "notes".into(),
+        JsValue::Arr(
+            coverage
+                .notes()
+                .into_iter()
+                .map(|note| JsValue::Str(note.into()))
+                .collect(),
+        ),
+    ));
+    JsValue::Obj(JsObject::from_document_order(fields))
+}
+
+/// The provenance block for `--quick`, split out because it is a document of
+/// its own: what was asked for, what bounded the answer, and what the live
+/// reads found.
+fn quick_lookup_json(quick: &QuickProvenance) -> edm_core::js::json::JsValue {
+    use edm_core::js::json::{JsObject, JsValue};
+    let n = |value: usize| JsValue::Num(value as f64);
+    let strings = |values: &[String]| {
+        JsValue::Arr(
+            values
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .map(JsValue::Str)
+                .collect(),
+        )
+    };
+    JsValue::Obj(JsObject::from_document_order(vec![
+        ("commodities".into(), strings(&quick.commodities)),
+        ("marketsPerSide".into(), n(quick.markets_per_side)),
+        ("minimumSupply".into(), JsValue::Num(quick.seller_minimum)),
+        ("minimumDemand".into(), JsValue::Num(quick.buyer_minimum)),
+        ("candidateRows".into(), n(quick.candidate_rows)),
+        (
+            "marketIds".into(),
+            JsValue::Arr(quick.market_ids.iter().copied().map(JsValue::Num).collect()),
+        ),
+        (
+            "unpublishedBuyerCandidates".into(),
+            n(quick.unpublished_buyer_candidates),
+        ),
+        (
+            "bestLive".into(),
+            JsValue::Arr(quick.best_live.iter().map(best_live_json).collect()),
+        ),
+        (
+            "commoditiesWithoutCandidates".into(),
+            strings(&quick.commodities_without_candidates),
+        ),
+        (
+            "commoditiesAbsentFromIndex".into(),
+            strings(&quick.commodities_absent_from_index),
+        ),
+        (
+            "indexPageCap".into(),
+            n(edm_core::cli::config::QUICK_LOOKUP_MAX_MARKETS_PER_SIDE),
+        ),
+        ("includesReferenceSystem".into(), JsValue::Bool(true)),
+        ("completeRegionalSurvey".into(), JsValue::Bool(false)),
+    ]))
+}
+
+/// One best live seller or buyer.
+fn best_live_json(entry: &quick::BestLive) -> edm_core::js::json::JsValue {
+    use edm_core::js::json::{JsObject, JsValue};
+    JsValue::Obj(JsObject::from_document_order(vec![
+        (
+            "commodity".into(),
+            JsValue::Str(entry.commodity.clone().into()),
+        ),
+        ("name".into(), JsValue::Str(entry.display.clone().into())),
+        (
+            "side".into(),
+            JsValue::Str(entry.direction.market_role().into()),
+        ),
+        ("price".into(), JsValue::Num(entry.price)),
+        // Null rather than zero: an unreported demand is a quantity nobody
+        // published, not a market that buys nothing.
+        (
+            "quantity".into(),
+            if entry.unpublished {
+                JsValue::Null
+            } else {
+                JsValue::Num(entry.volume)
+            },
+        ),
+        (
+            "quantityUnpublished".into(),
+            JsValue::Bool(entry.unpublished),
+        ),
+        (
+            "indexPrice".into(),
+            entry.index_price.map_or(JsValue::Null, JsValue::Num),
+        ),
+        ("marketId".into(), JsValue::Num(entry.market_id)),
+        (
+            "stationName".into(),
+            JsValue::Str(entry.station.clone().into()),
+        ),
+        (
+            "systemName".into(),
+            JsValue::Str(entry.system.clone().into()),
+        ),
+        ("distanceLy".into(), JsValue::Num(entry.distance_ly)),
     ]))
 }
 
 /// The travel model, with every constant a flag.
 fn time_model(config: &RouteConfig) -> TimeModel {
-    TimeModel { jump_range_ly: config.jump_range_ly, ..TimeModel::default() }
+    TimeModel {
+        jump_range_ly: config.jump_range_ly,
+        ..TimeModel::default()
+    }
 }
 
 /// The ship, or the absence of one.
@@ -1014,10 +1237,14 @@ fn time_model(config: &RouteConfig) -> TimeModel {
 /// is the right default for "what is out there".
 fn ship(config: &RouteConfig) -> ShipConfig {
     ShipConfig {
-        cargo: config.cargo.map_or(ShipConfig::default().cargo, |tons| Tons(tons as i64)),
+        cargo: config
+            .cargo
+            .map_or(ShipConfig::default().cargo, |tons| Tons(tons as i64)),
         credits: config
             .credits
-            .map_or(ShipConfig::default().credits, |credits| Credits(credits as i64)),
+            .map_or(ShipConfig::default().credits, |credits| {
+                Credits(credits as i64)
+            }),
     }
 }
 
@@ -1084,7 +1311,10 @@ async fn resolve<H: HttpTransport>(
     ardent: &ArdentClient<'_, H>,
     reference: &str,
 ) -> Result<ReferenceSystem, String> {
-    Ok(ardent.resolve_location(reference, Lookup::Auto).await?.system)
+    Ok(ardent
+        .resolve_location(reference, Lookup::Auto)
+        .await?
+        .system)
 }
 
 /// One `/markets` per enumerated system, concurrently and out loud.
@@ -1126,7 +1356,9 @@ async fn gather<H: HttpTransport, F: Fs>(
         };
         let (done, answered, found) = (&done, &answered, &found);
         async move {
-            let result = ardent.system_markets_cached(atlas, fs, now_ms, &reference).await;
+            let result = ardent
+                .system_markets_cached(atlas, fs, now_ms, &reference)
+                .await;
             done.set(done.get() + 1);
             if let Ok(stations) = &result {
                 answered.set(answered.get() + 1);
@@ -1137,7 +1369,8 @@ async fn gather<H: HttpTransport, F: Fs>(
             if let Some(report) = report {
                 report(done.get(), total, found.get());
             }
-            result.map_err(|error| format!("reading Ardent markets for {}: {error}", reference.name))
+            result
+                .map_err(|error| format!("reading Ardent markets for {}: {error}", reference.name))
         }
     }))
     // `buffered`, not `buffer_unordered`: both run sixteen at once, but this
@@ -1189,7 +1422,9 @@ fn official_stations(
         .collect::<HashMap<_, _>>();
     let mut stations = Vec::new();
     for system in systems {
-        let Some(&coords) = coordinates.get(&system.address) else { continue };
+        let Some(&coords) = coordinates.get(&system.address) else {
+            continue;
+        };
         if system.address > 9_007_199_254_740_992 {
             continue;
         }
@@ -1251,7 +1486,11 @@ fn apply_official_enrichment(
             continue;
         };
         let market_id = station.market_id as u64;
-        let Some(market) = system.markets.iter().find(|market| market.market_id == market_id) else {
+        let Some(market) = system
+            .markets
+            .iter()
+            .find(|market| market.market_id == market_id)
+        else {
             continue;
         };
         let pad_ok = match config.pad {
@@ -1275,8 +1514,12 @@ fn apply_official_enrichment(
         });
         if let Ok(market_id) = i64::try_from(market.market_id) {
             for commodity in &market.commodities {
-                let Some(price) = commodity.demand_price() else { continue };
-                let Ok(commodity_id) = i64::try_from(commodity.commodity_id) else { continue };
+                let Some(price) = commodity.demand_price() else {
+                    continue;
+                };
+                let Ok(commodity_id) = i64::try_from(commodity.commodity_id) else {
+                    continue;
+                };
                 if price > 0 {
                     candidate_demand_prices.insert((market_id, commodity_id), price);
                 }
@@ -1304,7 +1547,11 @@ mod tests {
             station_type: Some("Coriolis".to_owned()),
             max_landing_pad_size: None,
             distance_to_arrival: None,
-            coordinates: Coordinates { x: 0.0, y: 0.0, z: 0.0 },
+            coordinates: Coordinates {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
         }
     }
 
@@ -1332,13 +1579,18 @@ mod tests {
 
     #[test]
     fn an_empty_region_prices_no_official_batches() {
-        assert!(selected_system_addresses(&select::Selection::default())
-            .expect("empty is valid")
-            .is_empty());
+        assert!(
+            selected_system_addresses(&select::Selection::default())
+                .expect("empty is valid")
+                .is_empty()
+        );
     }
 
     fn route_config(argv: &[&str]) -> RouteConfig {
-        let owned = argv.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
+        let owned = argv
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>();
         let parsed = edm_core::cli::parse_with(&owned, edm_core::cli::Table::Extended)
             .expect("route parses");
         let env = edm_core::cli::EnvSnapshot::empty();
@@ -1348,7 +1600,8 @@ mod tests {
 
     #[test]
     fn official_enrichment_applies_pads_services_and_candidate_demand_only() {
-        let document = edm_core::js::json::JsValue::parse(r#"{
+        let document = edm_core::js::json::JsValue::parse(
+            r#"{
           "starsystems":{"1":{"systemAddr":"1","name":"Official System","hasFleetCarriers":false,
           "techBroker":"none","materialTrader":"none","blackMarket":false,"facilitator":false,
           "voucherredemption":false,"carrierVendor":false,"modulepacks":false,"cacheuntil":1,
@@ -1356,12 +1609,17 @@ mod tests {
           "distFromSystem":12,"market_state":"","starsystem_id":"1","service_blackmarket":"0",
           "service_commodities":"1","commodities":{"128049165":{"type":"consumer","sellPrice":41832,
           "illegalJurisdictionQty":0}},"allowDumping":true,"simulatedAt":1,
-          "smallPads":true,"mediumPads":true,"largePads":true,"surface":false}}}}}"#)
-            .expect("fixture JSON");
+          "smallPads":true,"mediumPads":true,"largePads":true,"surface":false}}}}}"#,
+        )
+        .expect("fixture JSON");
         let systems = edm_core::domain::marketdata::parse_marketdata(&document).systems;
         let mut candidate = station("Candidate", 1.0);
         candidate.market_id = 1001.0;
-        let mut selection = select::Selection { keep: vec![candidate], exclusions: Vec::new(), considered: 1 };
+        let mut selection = select::Selection {
+            keep: vec![candidate],
+            exclusions: Vec::new(),
+            considered: 1,
+        };
         let mut prices = HashMap::new();
         let removed = apply_official_enrichment(
             &mut selection,
@@ -1375,7 +1633,6 @@ mod tests {
         assert_eq!(prices.get(&(1001, 128_049_165)), Some(&41_832));
     }
 
-
     #[test]
     fn special_opportunities_are_structured_in_json_coverage() {
         let opportunities = SpecialOpportunities {
@@ -1388,19 +1645,22 @@ mod tests {
             &RouteCoverage::default(),
             &ingest::Crossing::default(),
             opportunities,
+            None,
         ) else {
             panic!("coverage object")
         };
-        let Some(edm_core::js::json::JsValue::Obj(special)) =
-            coverage.get("specialOpportunities")
+        let Some(edm_core::js::json::JsValue::Obj(special)) = coverage.get("specialOpportunities")
         else {
             panic!("special opportunities object")
         };
-        assert_eq!(special.get("rescueSystems"), Some(&edm_core::js::json::JsValue::Num(1.0)));
+        assert_eq!(
+            special.get("rescueSystems"),
+            Some(&edm_core::js::json::JsValue::Num(1.0))
+        );
         assert_eq!(
             special.get("commodityOverrideMarkets"),
             Some(&edm_core::js::json::JsValue::Num(4.0))
         );
+        assert!(coverage.get("quickLookup").is_none());
     }
-
 }

@@ -198,7 +198,11 @@ pub fn inventory_table<'a>(inventory: &'a [JsValue]) -> Vec<Block<'a>> {
             };
 
             let mut stolen = String::with_capacity(1);
-            push_flag(&mut stolen, item.is_some_and(|record| record.flag("stolen")), 'S');
+            push_flag(
+                &mut stolen,
+                item.is_some_and(|record| record.flag("stolen")),
+                'S',
+            );
 
             Row::Data(vec![
                 Cow::Borrowed(match item.map_or("", |record| record.string("commodity")) {
@@ -244,7 +248,8 @@ pub const DEFAULT_SNAPSHOT_TITLE: &str = "MARKET SUMMARY";
 pub fn market_summary<'a>(snapshot: &'a MarketSnapshot<'_>, title: &str) -> Vec<Block<'a>> {
     let payload = snapshot.payload;
     let commodities = &snapshot.commodities;
-    let count = |predicate: fn(&Commodity<'_>) -> bool| commodities.iter().filter(|c| predicate(c)).count();
+    let count =
+        |predicate: fn(&Commodity<'_>) -> bool| commodities.iter().filter(|c| predicate(c)).count();
 
     let mut distinct: Vec<&str> = Vec::new();
     for commodity in commodities {
@@ -255,23 +260,38 @@ pub fn market_summary<'a>(snapshot: &'a MarketSnapshot<'_>, title: &str) -> Vec<
 
     let mut rows: Vec<Row<'a>> = Vec::new();
     if payload.present("credits") {
-        rows.push(field_row("credits", format!("{} cr", format_integer(payload.num("credits")))));
+        rows.push(field_row(
+            "credits",
+            format!("{} cr", format_integer(payload.num("credits"))),
+        ));
     }
     if payload.present("debt") {
-        rows.push(field_row("debt", format!("{} cr", format_integer(payload.num("debt")))));
+        rows.push(field_row(
+            "debt",
+            format!("{} cr", format_integer(payload.num("debt"))),
+        ));
     }
     if let Some(last_modified) = payload.record("lastModified") {
         // The seconds are interpolated ungrouped and the ISO form follows in
         // parentheses [R21].
-        rows.push(field_row("lastModified", unix_seconds_display(last_modified.num("sec"))));
+        rows.push(field_row(
+            "lastModified",
+            unix_seconds_display(last_modified.num("sec")),
+        ));
     }
 
     rows.push(field_row(
         "commodities",
         format!("{} in {} categories", commodities.len(), distinct.len()),
     ));
-    rows.push(field_row("supplied (stock > 0)", count(|c| c.stock > 0.0).to_string()));
-    rows.push(field_row("in demand", count(|c| c.demand > 0.0).to_string()));
+    rows.push(field_row(
+        "supplied (stock > 0)",
+        count(|c| c.stock > 0.0).to_string(),
+    ));
+    rows.push(field_row(
+        "in demand",
+        count(|c| c.demand > 0.0).to_string(),
+    ));
     rows.push(field_row(
         "consumers / producers",
         format!("{} / {}", count(|c| c.consumer), count(|c| c.producer)),
@@ -283,12 +303,23 @@ pub fn market_summary<'a>(snapshot: &'a MarketSnapshot<'_>, title: &str) -> Vec<
     if payload.present("allowsDumping") {
         rows.push(field_row(
             "allowsDumping",
-            if payload.flag("allowsDumping") { "yes" } else { "no" },
+            if payload.flag("allowsDumping") {
+                "yes"
+            } else {
+                "no"
+            },
         ));
     }
-    rows.push(field_row("inventory items", snapshot.inventory.len().to_string()));
+    rows.push(field_row(
+        "inventory items",
+        snapshot.inventory.len().to_string(),
+    ));
 
-    vec![Block::Table { title: title.to_owned(), columns: columns::FIELD_COLUMNS, rows }]
+    vec![Block::Table {
+        title: title.to_owned(),
+        columns: columns::FIELD_COLUMNS,
+        rows,
+    }]
 }
 
 /// `emitMarketSnapshot` (ts:781) — the summary, the hold, then the listing.
@@ -336,7 +367,10 @@ pub struct RequestView<'a> {
 fn header_rows(headers: &[Header]) -> Vec<Row<'_>> {
     let mut sorted: Vec<&Header> = headers.iter().collect();
     sorted.sort_by(|(left, _), (right, _)| collate::locale_cmp(left, right));
-    sorted.iter().map(|(name, value)| field_row(name, value.as_str())).collect()
+    sorted
+        .iter()
+        .map(|(name, value)| field_row(name, value.as_str()))
+        .collect()
 }
 
 /// `emitRequest` (ts:1175).
@@ -364,11 +398,21 @@ pub fn request<'a>(view: &RequestView<'a>, full_url: bool) -> Vec<Block<'a>> {
     ];
     rows.extend(header_rows(view.headers));
     rows.push(Row::band("ENVELOPE"));
-    rows.extend(view.fields.iter().map(|(name, display)| field_row(name, display.clone())));
-    rows.push(field_row("plaintext", format!("{} bytes", format_integer(view.plaintext_bytes))));
+    rows.extend(
+        view.fields
+            .iter()
+            .map(|(name, display)| field_row(name, display.clone())),
+    );
+    rows.push(field_row(
+        "plaintext",
+        format!("{} bytes", format_integer(view.plaintext_bytes)),
+    ));
     rows.push(field_row("nonce", view.nonce));
     rows.push(field_row("fTime", unix_seconds_display(view.frontier_time)));
-    rows.push(field_row("requestTime", milliseconds_display(view.request_time)));
+    rows.push(field_row(
+        "requestTime",
+        milliseconds_display(view.request_time),
+    ));
 
     let mut blocks = vec![Block::Table {
         // ts:1178
@@ -385,7 +429,9 @@ pub fn request<'a>(view: &RequestView<'a>, full_url: bool) -> Vec<Block<'a>> {
         return blocks;
     }
     // ts:1197
-    blocks.push(Block::Note("pass --full-url to print the encrypted query in full".to_owned()));
+    blocks.push(Block::Note(
+        "pass --full-url to print the encrypted query in full".to_owned(),
+    ));
     blocks
 }
 
@@ -475,7 +521,9 @@ pub fn sweep_summary<'a>(visits: &'a [Visit<'a>], title: &str, metric: Metric) -
             Row::Data(vec![
                 Cow::Owned(js_number(visit.market_id)),
                 Cow::Borrowed(visit.name),
-                visit.status.map_or(Cow::Borrowed("-"), |status| Cow::Owned(js_number(status))),
+                visit
+                    .status
+                    .map_or(Cow::Borrowed("-"), |status| Cow::Owned(js_number(status))),
                 commodities.map_or(Cow::Borrowed("-"), |list| {
                     Cow::Owned(format_integer(list.len() as f64))
                 }),
@@ -491,7 +539,11 @@ pub fn sweep_summary<'a>(visits: &'a [Visit<'a>], title: &str, metric: Metric) -
         })
         .collect();
 
-    vec![Block::Table { title: title.to_owned(), columns: columns::SWEEP_COLUMNS, rows }]
+    vec![Block::Table {
+        title: title.to_owned(),
+        columns: columns::SWEEP_COLUMNS,
+        rows,
+    }]
 }
 
 // ---------------------------------------------------------------------------
@@ -573,7 +625,9 @@ pub fn trade_log<'a>(
     credits: Option<f64>,
 ) -> Vec<Block<'a>> {
     let total_units = records.iter().fold(0.0, |sum, record| sum + record.qty);
-    let total_value = records.iter().fold(0.0, |sum, record| sum + record.qty * record.unit_price);
+    let total_value = records
+        .iter()
+        .fold(0.0, |sum, record| sum + record.qty * record.unit_price);
 
     let mut rows: Vec<Row<'a>> = records
         .iter()
@@ -584,10 +638,12 @@ pub fn trade_log<'a>(
                 Cow::Owned(format_integer(record.qty)),
                 Cow::Owned(format_integer(record.unit_price)),
                 Cow::Owned(format_integer(record.qty * record.unit_price)),
-                record.status.map_or(Cow::Borrowed("-"), |status| Cow::Owned(js_number(status))),
                 record
-                    .cargo_used
-                    .map_or(Cow::Borrowed("-"), |used| Cow::Owned(cargo_cell(used, capacity))),
+                    .status
+                    .map_or(Cow::Borrowed("-"), |status| Cow::Owned(js_number(status))),
+                record.cargo_used.map_or(Cow::Borrowed("-"), |used| {
+                    Cow::Owned(cargo_cell(used, capacity))
+                }),
             ])
         })
         .collect();
@@ -615,7 +671,10 @@ pub fn trade_log<'a>(
     }];
     if let Some(credits) = credits {
         // ts:2317
-        blocks.push(Block::Note(format!("credits now {}", format_integer(credits))));
+        blocks.push(Block::Note(format!(
+            "credits now {}",
+            format_integer(credits)
+        )));
     }
     blocks.extend(inventory_table(inventory));
     blocks
@@ -692,7 +751,11 @@ pub fn market_points<'a>(points: &'a [MarketPoint<'_>], title: &str) -> Vec<Bloc
     }
 
     vec![
-        Block::Table { title: title.to_owned(), columns: columns::MARKET_POINT_COLUMNS, rows },
+        Block::Table {
+            title: title.to_owned(),
+            columns: columns::MARKET_POINT_COLUMNS,
+            rows,
+        },
         Block::Note(MARKET_POINT_LEGEND.to_owned()),
     ]
 }
@@ -707,7 +770,9 @@ pub fn points_of_interest<'a>(points: &'a [PointOfInterest<'_>]) -> Vec<Block<'a
         .iter()
         .map(|point| {
             Row::Data(vec![
-                point.market_id.map_or(Cow::Borrowed("-"), |id| Cow::Owned(js_number(id))),
+                point
+                    .market_id
+                    .map_or(Cow::Borrowed("-"), |id| Cow::Owned(js_number(id))),
                 Cow::Borrowed(point.name),
                 Cow::Borrowed(point.kind.unwrap_or("-")),
                 Cow::Borrowed(point.economy.unwrap_or("-")),
@@ -739,6 +804,8 @@ pub struct PlanView<'a> {
     /// What the enumeration actually established. Equal to `radius_ly` when the
     /// frontier closed; smaller when Ardent's row cap stopped it short.
     pub complete_to_ly: f64,
+    /// A bounded commodity price-index prefix, not a radial enumeration.
+    pub price_index: bool,
     pub ardent_requests: u32,
     pub estimate: &'a crate::spend::Estimate,
     pub rate_per_second: f64,
@@ -762,6 +829,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         reference,
         radius_ly,
         complete_to_ly,
+        price_index,
         ardent_requests,
         estimate,
         rate_per_second,
@@ -769,9 +837,28 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         prior,
     } = view;
 
-    let coverage = if complete_to_ly >= radius_ly {
-        format!("{} Ly (complete, {} Ardent {})", js_number(radius_ly), int(f64::from(ardent_requests)),
-                if ardent_requests == 1 { "query" } else { "queries" })
+    let coverage = if price_index {
+        format!(
+            "{} Ly price index ({} Ardent {}; not regional)",
+            js_number(radius_ly),
+            int(f64::from(ardent_requests)),
+            if ardent_requests == 1 {
+                "query"
+            } else {
+                "queries"
+            },
+        )
+    } else if complete_to_ly >= radius_ly {
+        format!(
+            "{} Ly (complete, {} Ardent {})",
+            js_number(radius_ly),
+            int(f64::from(ardent_requests)),
+            if ardent_requests == 1 {
+                "query"
+            } else {
+                "queries"
+            }
+        )
     } else {
         // Say what was actually established rather than what was asked for.
         format!(
@@ -787,7 +874,9 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         field_row("radius", coverage),
         field_row(
             "systems",
-            if estimate.systems_to_read == 0 {
+            if price_index {
+                "not enumerated (commodity price index)".to_owned()
+            } else if estimate.systems_to_read == 0 {
                 // Not "0 worth reading": by default no system is read at all,
                 // and a zero here would read as "the filter emptied them".
                 format!("{} in radius", int(estimate.systems as f64))
@@ -799,20 +888,37 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
                 )
             },
         ),
-        field_row("stations known", format!("{} (Ardent)", int(estimate.stations_known as f64))),
+        field_row(
+            if price_index {
+                "price rows considered"
+            } else {
+                "stations known"
+            },
+            format!("{} (Ardent)", int(estimate.stations_known as f64)),
+        ),
     ];
 
     for exclusion in &estimate.exclusions {
         // Built directly rather than through `field_row`, whose label borrows.
         rows.push(Row::Data(vec![
             Cow::Owned(format!("  - {}", exclusion.label)),
-            Cow::Owned(format!("-{}   ({} to keep)", int(exclusion.removed as f64), exclusion.keep_with)),
+            Cow::Owned(format!(
+                "-{}   ({} to keep)",
+                int(exclusion.removed as f64),
+                exclusion.keep_with
+            )),
         ]));
     }
 
-    rows.push(field_row("markets to poll", int(estimate.markets_to_poll as f64)));
+    rows.push(field_row(
+        "markets to poll",
+        int(estimate.markets_to_poll as f64),
+    ));
     if estimate.cached_fresh > 0 {
-        rows.push(field_row("cached and still fresh", int(estimate.cached_fresh as f64)));
+        rows.push(field_row(
+            "cached and still fresh",
+            int(estimate.cached_fresh as f64),
+        ));
     }
     // The split is only worth showing when there are two kinds. By default a
     // sweep reads no official discovery batches at all, and "= 0 official + 135
@@ -840,11 +946,21 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
             int(prior.market_bytes / 1024.0)
         ),
     ));
-    rows.push(field_row("pacing", format!("{} req/s", js_number(rate_per_second))));
-    rows.push(field_row("estimated wall clock", spend::duration_estimate(estimate.seconds)));
+    rows.push(field_row(
+        "pacing",
+        format!("{} req/s", js_number(rate_per_second)),
+    ));
+    rows.push(field_row(
+        "estimated wall clock",
+        spend::duration_estimate(estimate.seconds),
+    ));
     rows.push(field_row(
         "ceiling",
-        format!("{} of {}   (--max-requests to raise)", int(estimate.requests), int(max_requests)),
+        format!(
+            "{} of {}   (--max-requests to raise)",
+            int(estimate.requests),
+            int(max_requests)
+        ),
     ));
 
     vec![Block::Table {
@@ -887,9 +1003,15 @@ pub fn coverage_titled(title: &str, coverage: &RouteCoverage) -> Vec<Block<'stat
             int(coverage.markets_found as f64)
         ),
     ));
-    rows.push(field_row("markets priced", int(coverage.markets_priced as f64)));
+    rows.push(field_row(
+        "markets priced",
+        int(coverage.markets_priced as f64),
+    ));
     if coverage.systems_failed > 0 {
-        rows.push(field_row("systems failed", int(coverage.systems_failed as f64)));
+        rows.push(field_row(
+            "systems failed",
+            int(coverage.systems_failed as f64),
+        ));
     }
     if coverage.markets_absent > 0 {
         rows.push(field_row(
@@ -898,7 +1020,10 @@ pub fn coverage_titled(title: &str, coverage: &RouteCoverage) -> Vec<Block<'stat
         ));
     }
     if coverage.markets_failed > 0 {
-        rows.push(field_row("markets failed", int(coverage.markets_failed as f64)));
+        rows.push(field_row(
+            "markets failed",
+            int(coverage.markets_failed as f64),
+        ));
     }
     if coverage.cache_hits > 0 {
         rows.push(field_row("from cache", int(coverage.cache_hits as f64)));
@@ -918,29 +1043,44 @@ pub fn coverage_titled(title: &str, coverage: &RouteCoverage) -> Vec<Block<'stat
             held.push(format!("{} rejected", int(eddn.failed as f64)));
         }
         if eddn.abandoned > 0 {
-            held.push(format!("{} not sent after that", int(eddn.abandoned as f64)));
+            held.push(format!(
+                "{} not sent after that",
+                int(eddn.abandoned as f64)
+            ));
         }
         rows.push(field_row(
             "relayed to EDDN",
             if held.is_empty() {
                 int(eddn.sent as f64)
             } else {
-                format!("{}   (held back: {})", int(eddn.sent as f64), held.join(", "))
+                format!(
+                    "{}   (held back: {})",
+                    int(eddn.sent as f64),
+                    held.join(", ")
+                )
             },
         ));
     }
-    rows.push(field_row("requests sent", int(coverage.requests_sent as f64)));
+    rows.push(field_row(
+        "requests sent",
+        int(coverage.requests_sent as f64),
+    ));
     if coverage.throttled > 0 {
-        rows.push(field_row("throttled", format!("{} (429 or 503)", int(coverage.throttled as f64))));
+        rows.push(field_row(
+            "throttled",
+            format!("{} (429 or 503)", int(coverage.throttled as f64)),
+        ));
     }
-    rows.push(field_row("elapsed", crate::spend::duration_estimate(coverage.elapsed_seconds)));
+    rows.push(field_row(
+        "elapsed",
+        crate::spend::duration_estimate(coverage.elapsed_seconds),
+    ));
 
-    let mut blocks =
-        vec![Block::Table {
-            title: title.to_owned(),
-            columns: columns::ROUTE_FIELD_COLUMNS,
-            rows,
-        }];
+    let mut blocks = vec![Block::Table {
+        title: title.to_owned(),
+        columns: columns::ROUTE_FIELD_COLUMNS,
+        rows,
+    }];
     for note in coverage.notes() {
         blocks.push(Block::Note(note));
     }
@@ -983,9 +1123,21 @@ pub struct EddnRefusal(pub Option<String>);
 ///
 /// Worth the four lines: these notes exist to make a partial answer legible,
 /// and "1 markets were not reached" is the sentence a reader stops trusting.
-fn plural(count: usize, noun: &str, one: &'static str, many: &'static str) -> (String, &'static str) {
-    let word = if count == 1 { noun.to_owned() } else { format!("{noun}s") };
-    (format!("{} {word}", crate::js::format_integer(count as f64)), if count == 1 { one } else { many })
+fn plural(
+    count: usize,
+    noun: &str,
+    one: &'static str,
+    many: &'static str,
+) -> (String, &'static str) {
+    let word = if count == 1 {
+        noun.to_owned()
+    } else {
+        format!("{noun}s")
+    };
+    (
+        format!("{} {word}", crate::js::format_integer(count as f64)),
+        if count == 1 { one } else { many },
+    )
 }
 
 /// What a sweep reached, and what it did not.
@@ -1102,13 +1254,7 @@ impl RouteCoverage {
         }
 
         if self.markets_absent > 0 {
-            let (count, verb) = plural(self.markets_absent, "station", "has", "have");
-            let they = if self.markets_absent == 1 { "it" } else { "they" };
-            notes.push(format!(
-                "{count} {verb} no commodity market right now — {they} answered, {they} are \
-                 simply not trading{}",
-                if self.ranked { format!(", and {they} are not missing from the ranking") } else { String::new() },
-            ));
+            notes.push(absent_note(self.markets_absent, self.ranked));
         }
         if self.markets_failed > 0 {
             let (count, verb) = plural(self.markets_failed, "market", "was", "were");
@@ -1121,7 +1267,11 @@ impl RouteCoverage {
             let (count, verb) = plural(self.systems_failed, "system", "failed", "failed");
             notes.push(format!(
                 "{count} {verb}, so any market in {} is unknown to this run",
-                if self.systems_failed == 1 { "it" } else { "them" },
+                if self.systems_failed == 1 {
+                    "it"
+                } else {
+                    "them"
+                },
             ));
         }
         if let Some(limit) = self.truncated_to_ly {
@@ -1192,7 +1342,10 @@ pub fn sweep_line(line: &SweepLine<'_>) -> String {
         let _ = write!(
             out,
             "  HTTP {}",
-            line.status.map_or_else(|| "-".to_owned(), |code| js::format_integer(f64::from(code)))
+            line.status.map_or_else(
+                || "-".to_owned(),
+                |code| js::format_integer(f64::from(code))
+            )
         );
     }
     match line.tradable {
@@ -1202,7 +1355,11 @@ pub fn sweep_line(line: &SweepLine<'_>) -> String {
         None => out.push_str("  no listing"),
     }
     if line.attempts > 1 {
-        let _ = write!(out, "  after {} attempts", js::format_integer(f64::from(line.attempts)));
+        let _ = write!(
+            out,
+            "  after {} attempts",
+            js::format_integer(f64::from(line.attempts))
+        );
     }
     out
 }
@@ -1216,11 +1373,24 @@ pub fn sweep_line(line: &SweepLine<'_>) -> String {
 #[derive(Clone, Copy, Debug)]
 pub enum PaceEvent<'a> {
     /// The server asked us to slow down.
-    Throttled { status: u16, retry_after: Option<&'a str>, new_rate: f64 },
+    Throttled {
+        status: u16,
+        retry_after: Option<&'a str>,
+        new_rate: f64,
+    },
     /// A failed job is going back into the queue.
-    Retrying { station: &'a str, attempt: u32, delay_ms: f64, status: Option<u16> },
+    Retrying {
+        station: &'a str,
+        attempt: u32,
+        delay_ms: f64,
+        status: Option<u16>,
+    },
     /// A job has been given up on.
-    GaveUp { station: &'a str, attempts: u32, reason: &'a str },
+    GaveUp {
+        station: &'a str,
+        attempts: u32,
+        reason: &'a str,
+    },
     /// The rate recovered after a run of clean responses.
     Recovered { new_rate: f64 },
     /// The run is stopping early.
@@ -1230,7 +1400,11 @@ pub enum PaceEvent<'a> {
 #[must_use]
 pub fn pace_line(event: &PaceEvent<'_>) -> String {
     match *event {
-        PaceEvent::Throttled { status, retry_after, new_rate } => {
+        PaceEvent::Throttled {
+            status,
+            retry_after,
+            new_rate,
+        } => {
             let held = retry_after.map_or_else(
                 || "no Retry-After".to_owned(),
                 |value| format!("Retry-After: {value}"),
@@ -1241,13 +1415,25 @@ pub fn pace_line(event: &PaceEvent<'_>) -> String {
                 js_number(new_rate),
             )
         }
-        PaceEvent::Retrying { station, attempt, delay_ms, status } => format!(
+        PaceEvent::Retrying {
+            station,
+            attempt,
+            delay_ms,
+            status,
+        } => format!(
             "  pace  {station} HTTP {} — attempt {} in {} ms",
-            status.map_or_else(|| "-".to_owned(), |code| js::format_integer(f64::from(code))),
+            status.map_or_else(
+                || "-".to_owned(),
+                |code| js::format_integer(f64::from(code))
+            ),
             js::format_integer(f64::from(attempt) + 1.0),
             js::format_integer(js::js_round(delay_ms)),
         ),
-        PaceEvent::GaveUp { station, attempts, reason } => format!(
+        PaceEvent::GaveUp {
+            station,
+            attempts,
+            reason,
+        } => format!(
             "  pace  {station} given up after {} attempts ({reason})",
             js::format_integer(f64::from(attempts)),
         ),
@@ -1258,4 +1444,27 @@ pub fn pace_line(event: &PaceEvent<'_>) -> String {
             format!("  pace  stopping early: {reason}")
         }
     }
+}
+
+/// A station that answered and is not trading, in the right number.
+///
+/// Its own function because agreement here needs four words to move together —
+/// the count, its verb, its pronoun and *that* pronoun's verb — and the
+/// singular case is the common one: one station in forty.
+fn absent_note(absent: usize, ranked: bool) -> String {
+    let (count, verb) = plural(absent, "station", "has", "have");
+    let (they, are) = if absent == 1 {
+        ("it", "is")
+    } else {
+        ("they", "are")
+    };
+    format!(
+        "{count} {verb} no commodity market right now — {they} answered, {they} {are} simply not \
+         trading{}",
+        if ranked {
+            format!(", and {they} {are} not missing from the ranking")
+        } else {
+            String::new()
+        },
+    )
 }

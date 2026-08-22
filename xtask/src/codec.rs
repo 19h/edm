@@ -32,7 +32,11 @@ fn frame(block: &[u8], decompressed: usize) -> Vec<u8> {
 pub(crate) fn lz4_literals(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() + data.len() / 255 + 2);
     let length = data.len();
-    let token = if length >= 15 { 0xF0 } else { (length as u8) << 4 };
+    let token = if length >= 15 {
+        0xF0
+    } else {
+        (length as u8) << 4
+    };
     out.push(token);
     if length >= 15 {
         // The extension is a run of 0xFF bytes plus a terminator, and the
@@ -88,7 +92,10 @@ pub(crate) struct Sealed {
 
 pub(crate) fn seal(plaintext: &str, encoding: Encoding, nonce: &str) -> Result<Sealed> {
     if encoding == Encoding::Raw {
-        return Ok(Sealed { bytes: plaintext.as_bytes().to_vec(), uncompressed: None });
+        return Ok(Sealed {
+            bytes: plaintext.as_bytes().to_vec(),
+            uncompressed: None,
+        });
     }
     let Some(nonce) = Nonce::from_response_header(nonce) else {
         bail!("`nonce` must be twelve hexadecimal characters to seal a body, got {nonce:?}");
@@ -189,7 +196,10 @@ mod tests {
             wire::open_response(&text, &nonce, 10).unwrap_err(),
             wire::DecodeError::MissingFrame
         );
-        assert_eq!(wire::open_opaque(&text, NONCE, None).as_deref(), Some("plain text"));
+        assert_eq!(
+            wire::open_opaque(&text, NONCE, None).as_deref(),
+            Some("plain text")
+        );
     }
 
     #[test]

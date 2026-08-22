@@ -36,7 +36,11 @@ pub struct Credentials {
 pub fn validate_ascii(name: &str, value: &str) -> Result<(), String> {
     // `/^[\x20-\x7e]+$/` — note the `+`, so the empty string fails too.
     let ok = !value.is_empty() && value.bytes().all(|b| (0x20..=0x7e).contains(&b));
-    if ok { Ok(()) } else { Err(format!("{name} must contain printable ASCII only")) }
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("{name} must contain printable ASCII only"))
+    }
 }
 
 /// `validateExactLength` (ts:64), measured in UTF-16 code units.
@@ -45,7 +49,9 @@ pub fn validate_exact_length(name: &str, value: &str, expected: usize) -> Result
     if length == expected {
         Ok(())
     } else {
-        Err(format!("{name} must be exactly {expected} characters; received {length}"))
+        Err(format!(
+            "{name} must be exactly {expected} characters; received {length}"
+        ))
     }
 }
 
@@ -60,7 +66,9 @@ pub fn validate_min_length(name: &str, value: &str, minimum: usize) -> Result<()
     if length >= minimum {
         Ok(())
     } else {
-        Err(format!("{name} looks truncated: {length} characters, expected at least {minimum}"))
+        Err(format!(
+            "{name} looks truncated: {length} characters, expected at least {minimum}"
+        ))
     }
 }
 
@@ -115,7 +123,10 @@ pub enum FieldValue {
     Text(String),
     Number(f64),
     /// A credential: goes on the wire in full, renders as a length.
-    Masked { wire: String, shown: String },
+    Masked {
+        wire: String,
+        shown: String,
+    },
 }
 
 impl std::fmt::Debug for FieldValue {
@@ -156,19 +167,28 @@ impl FieldValue {
 impl Field {
     #[must_use]
     pub fn text(name: &'static str, value: impl Into<String>) -> Self {
-        Self { name, value: FieldValue::Text(value.into()) }
+        Self {
+            name,
+            value: FieldValue::Text(value.into()),
+        }
     }
 
     #[must_use]
     pub fn number(name: &'static str, value: f64) -> Self {
-        Self { name, value: FieldValue::Number(value) }
+        Self {
+            name,
+            value: FieldValue::Number(value),
+        }
     }
 
     #[must_use]
     pub fn secret(name: &'static str, value: &Secret) -> Self {
         Self {
             name,
-            value: FieldValue::Masked { wire: value.expose().to_owned(), shown: value.masked() },
+            value: FieldValue::Masked {
+                wire: value.expose().to_owned(),
+                shown: value.masked(),
+            },
         }
     }
 }
@@ -464,7 +484,10 @@ mod tests {
         assert_eq!(error, "machineToken must contain printable ASCII only");
 
         let error = Credentials::load("F1", "m", "short", &"a".repeat(2024)).unwrap_err();
-        assert_eq!(error, "machineToken must be exactly 80 characters; received 5");
+        assert_eq!(
+            error,
+            "machineToken must be exactly 80 characters; received 5"
+        );
     }
 
     #[test]
@@ -480,7 +503,10 @@ mod tests {
         let fields = list_fields("4306502403", &credentials(), 1_700_000_000.0);
         let plaintext = serialize_envelope(&fields);
         assert!(plaintext.starts_with("marketId=4306502403&cmdrId=F1234567&fTime=1700000000&"));
-        assert!(plaintext.contains(&"m".repeat(80)), "the token reaches the wire in full");
+        assert!(
+            plaintext.contains(&"m".repeat(80)),
+            "the token reaches the wire in full"
+        );
     }
 
     /// The masked rendering is a length, and never the value — and neither is
@@ -501,8 +527,14 @@ mod tests {
             &HeaderConfig::default(),
         );
         let debug = format!("{request:?}");
-        assert!(!debug.contains(&"a".repeat(20)), "the auth token must not survive Debug");
-        assert!(!debug.contains(&"m".repeat(20)), "the machine token must not survive Debug");
+        assert!(
+            !debug.contains(&"a".repeat(20)),
+            "the auth token must not survive Debug"
+        );
+        assert!(
+            !debug.contains(&"m".repeat(20)),
+            "the machine token must not survive Debug"
+        );
         assert!(debug.contains("2024 chars (hidden)"));
         assert!(!format!("{:?}", credentials()).contains(&"a".repeat(20)));
 
@@ -541,7 +573,10 @@ mod tests {
             stamp,
             &HeaderConfig::default(),
         );
-        assert!(matches!(overridden.body_kind(), crate::net::Body::EmptyText));
+        assert!(matches!(
+            overridden.body_kind(),
+            crate::net::Body::EmptyText
+        ));
     }
 
     /// The sealed query is standard padded base64 appended raw, and it must
@@ -564,8 +599,16 @@ mod tests {
         );
         let query = request.query();
         assert!(!query.is_empty());
-        assert!(query.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)));
-        assert!(request.url.starts_with("https://api.orerve.net/2.0/elite/market/list?"));
+        assert!(
+            query
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
+        );
+        assert!(
+            request
+                .url
+                .starts_with("https://api.orerve.net/2.0/elite/market/list?")
+        );
     }
     #[test]
     fn read_only_envelopes_keep_observed_order_and_exact_addresses() {

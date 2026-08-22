@@ -9,8 +9,8 @@
 //! ill-defined under ties, and the ranking would then depend on the order the
 //! instance happened to arrive in.
 
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 /// Keeps the `capacity` largest items offered to it.
 #[derive(Debug)]
@@ -50,7 +50,10 @@ impl<K: Ord, T> TopN<K, T> {
     /// An empty heap of the given capacity. A capacity of zero accepts nothing.
     #[must_use]
     pub fn new(capacity: usize) -> Self {
-        Self { capacity, heap: BinaryHeap::new() }
+        Self {
+            capacity,
+            heap: BinaryHeap::new(),
+        }
     }
 
     /// How many items are held.
@@ -84,7 +87,9 @@ impl<K: Ord, T> TopN<K, T> {
             self.heap.push(Reverse(Entry { key, value }));
             return true;
         }
-        let Some(Reverse(worst)) = self.heap.peek() else { return false };
+        let Some(Reverse(worst)) = self.heap.peek() else {
+            return false;
+        };
         if key <= worst.key {
             return false;
         }

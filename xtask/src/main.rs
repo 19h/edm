@@ -62,14 +62,19 @@ fn main() -> ExitCode {
 fn dispatch() -> Result<()> {
     // `args_os` and a lossy decode, for the same reason the program itself uses
     // them: `std::env::args()` panics on a non-UTF-8 argument. **[R55]**
-    let argv: Vec<String> =
-        std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     let mut rest = argv.iter().skip(1);
 
     match argv.first().map(String::as_str) {
         Some("parity") => {
-            let mut options =
-                parity::Options { suite: parity::Suite::All, filter: None, list: false };
+            let mut options = parity::Options {
+                suite: parity::Suite::All,
+                filter: None,
+                list: false,
+            };
             while let Some(flag) = rest.next() {
                 match flag.as_str() {
                     "--suite" => {
@@ -99,7 +104,11 @@ fn dispatch() -> Result<()> {
                     other => bail!("unknown option {other}\n\n{USAGE}"),
                 }
             }
-            if golden { bless::goldens(force) } else { bless::run(force) }
+            if golden {
+                bless::goldens(force)
+            } else {
+                bless::run(force)
+            }
         }
         Some("gates") => gates::run(),
         Some("mock") => {
@@ -153,5 +162,8 @@ fn serve(name: Option<&str>) -> Result<()> {
 /// The workspace root, from this crate's manifest directory.
 pub(crate) fn repo_root() -> Result<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.parent().map(Path::to_owned).context("xtask has no parent directory")
+    manifest
+        .parent()
+        .map(Path::to_owned)
+        .context("xtask has no parent directory")
 }

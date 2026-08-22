@@ -10,10 +10,10 @@
 
 mod support;
 
+use edm_route::Wanted;
 use edm_route::model::{Limits, ShipConfig};
 use edm_route::num::{Credits, Ratio, Tons};
 use edm_route::report::Guarantee;
-use edm_route::Wanted;
 use edm_route::time::TimeModel;
 use edm_route::watch::Watch;
 use edm_route::{model, ratio, solve};
@@ -178,12 +178,22 @@ fn a_rate_cannot_be_read_without_its_guarantee() {
         support::market(1, 0.0, &[(0, 100, 500)], &[(1, 900, 500)]),
         support::market(2, 5.0, &[(1, 100, 500)], &[(0, 900, 500)]),
     ];
-    let solution = solve(&markets, TimeModel::default(), &ship(), &limits(), Wanted::all(), Watch::unlimited());
+    let solution = solve(
+        &markets,
+        TimeModel::default(),
+        &ship(),
+        &limits(),
+        Wanted::all(),
+        Watch::unlimited(),
+    );
     let claim = solution.round_trip[0].rate();
     assert!(claim.steady.is_some());
     assert!(!claim.caveats.is_empty());
     assert_eq!(
         claim.steady,
-        Some(Ratio::new(solution.round_trip[0].profit, solution.round_trip[0].cycle_millis))
+        Some(Ratio::new(
+            solution.round_trip[0].profit,
+            solution.round_trip[0].cycle_millis
+        ))
     );
 }

@@ -111,7 +111,10 @@ struct Covered {
 /// Errors are not swallowed. An Ardent outage that read as an empty region
 /// would be indistinguishable from a genuinely empty one, and the whole command
 /// downstream is a claim about completeness.
-#[expect(clippy::too_many_arguments, reason = "a client, its cache, and the query it answers")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a client, its cache, and the query it answers"
+)]
 pub async fn enumerate<H: HttpTransport, F: crate::ports::Fs>(
     ardent: &ArdentClient<'_, H>,
     atlas: &crate::route::atlas::Atlas,
@@ -137,11 +140,15 @@ pub async fn enumerate<H: HttpTransport, F: crate::ports::Fs>(
     }];
     let mut seen: HashSet<u64> = HashSet::from([address_key(centre.address)]);
 
-    let page = ardent.nearby_cached(atlas, fs, now_ms, &centre.name, radius_ly).await?;
+    let page = ardent
+        .nearby_cached(atlas, fs, now_ms, &centre.name, radius_ly)
+        .await?;
     let mut requests = 1u32;
     let mut anchors = 0u32;
-    let mut balls =
-        vec![Covered { centre: centre.coordinates, radius_ly: covered_to(&page, reach) }];
+    let mut balls = vec![Covered {
+        centre: centre.coordinates,
+        radius_ly: covered_to(&page, reach),
+    }];
     absorb(&mut systems, &mut seen, centre.coordinates, radius_ly, page);
 
     let (complete_to_ly, truncated) = loop {
@@ -169,10 +176,15 @@ pub async fn enumerate<H: HttpTransport, F: crate::ports::Fs>(
                 complete_to_ly: frontier.nearest_ly,
             });
         }
-        let page = ardent.nearby_cached(atlas, fs, now_ms, &anchor.name, radius_ly).await?;
+        let page = ardent
+            .nearby_cached(atlas, fs, now_ms, &anchor.name, radius_ly)
+            .await?;
         requests += 1;
         anchors += 1;
-        balls.push(Covered { centre: anchor.coordinates, radius_ly: covered_to(&page, reach) });
+        balls.push(Covered {
+            centre: anchor.coordinates,
+            radius_ly: covered_to(&page, reach),
+        });
         absorb(&mut systems, &mut seen, centre.coordinates, radius_ly, page);
     };
 
@@ -243,7 +255,10 @@ fn frontier(systems: &[NearbySystem], radius_ly: f64, balls: &[Covered]) -> Opti
         }
     }
 
-    farthest.map(|(index, _)| Frontier { farthest: index, nearest_ly })
+    farthest.map(|(index, _)| Frontier {
+        farthest: index,
+        nearest_ly,
+    })
 }
 
 /// Unions a page into the accumulated set, first row of an address winning.
@@ -299,7 +314,11 @@ mod tests {
     use crate::net::{HeaderView, HttpRequest, HttpResponse, HttpTransport, TransportError};
 
     const BASE: &str = "http://ardent.test";
-    const ORIGIN: Coordinates = Coordinates { x: 0.0, y: 0.0, z: 0.0 };
+    const ORIGIN: Coordinates = Coordinates {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
     const SOL_ADDRESS: f64 = 10_477_373_803.0;
 
     /// A transport that answers `/nearby` from a script keyed on the system
@@ -321,7 +340,10 @@ mod tests {
     impl HttpTransport for FakeArdent {
         async fn send(&self, request: HttpRequest<'_>) -> Result<HttpResponse, TransportError> {
             self.calls.borrow_mut().push(request.url.to_owned());
-            let path = request.url.split_once('?').map_or(request.url, |(head, _)| head);
+            let path = request
+                .url
+                .split_once('?')
+                .map_or(request.url, |(head, _)| head);
             let name = path
                 .split_once("/system/name/")
                 .and_then(|(_, rest)| rest.split('/').next())
@@ -340,7 +362,11 @@ mod tests {
     }
 
     fn centre() -> ReferenceSystem {
-        ReferenceSystem { name: "Sol".to_owned(), address: SOL_ADDRESS, coordinates: ORIGIN }
+        ReferenceSystem {
+            name: "Sol".to_owned(),
+            address: SOL_ADDRESS,
+            coordinates: ORIGIN,
+        }
     }
 
     /// A point `x` light years along one axis — enough geometry for a cap that
@@ -364,8 +390,10 @@ mod tests {
     }
 
     fn page(from: Coordinates, entries: &[(&str, f64, Coordinates)]) -> String {
-        let rows: Vec<String> =
-            entries.iter().map(|(name, address, at)| row(name, *address, *at, from)).collect();
+        let rows: Vec<String> = entries
+            .iter()
+            .map(|(name, address, at)| row(name, *address, *at, from))
+            .collect();
         format!("[{}]", rows.join(","))
     }
 
@@ -373,15 +401,27 @@ mod tests {
     /// years — already in the ascending order Ardent sorts by.
     fn line(from: Coordinates, count: usize, step: f64, prefix: &str, first: f64) -> String {
         let entries: Vec<(String, f64, Coordinates)> = (1..=count)
-            .map(|k| (format!("{prefix}{k:04}"), first + k as f64, at(from.x + step * k as f64)))
+            .map(|k| {
+                (
+                    format!("{prefix}{k:04}"),
+                    first + k as f64,
+                    at(from.x + step * k as f64),
+                )
+            })
             .collect();
-        let borrowed: Vec<(&str, f64, Coordinates)> =
-            entries.iter().map(|(name, address, at)| (name.as_str(), *address, *at)).collect();
+        let borrowed: Vec<(&str, f64, Coordinates)> = entries
+            .iter()
+            .map(|(name, address, at)| (name.as_str(), *address, *at))
+            .collect();
         page(from, &borrowed)
     }
 
     fn names(enumeration: &Enumeration) -> Vec<&str> {
-        enumeration.systems.iter().map(|system| system.name.as_str()).collect()
+        enumeration
+            .systems
+            .iter()
+            .map(|system| system.name.as_str())
+            .collect()
     }
 
     async fn run(http: &FakeArdent, radius_ly: f64, budget: u32) -> Enumeration {
@@ -408,8 +448,24 @@ mod tests {
             page(
                 ORIGIN,
                 &[
-                    ("Alpha Centauri", 1.0, Coordinates { x: 3.03125, y: -0.09375, z: 3.15625 }),
-                    ("Barnard's Star", 2.0, Coordinates { x: -3.03125, y: 1.375, z: 4.9375 }),
+                    (
+                        "Alpha Centauri",
+                        1.0,
+                        Coordinates {
+                            x: 3.03125,
+                            y: -0.09375,
+                            z: 3.15625,
+                        },
+                    ),
+                    (
+                        "Barnard's Star",
+                        2.0,
+                        Coordinates {
+                            x: -3.03125,
+                            y: 1.375,
+                            z: 4.9375,
+                        },
+                    ),
                 ],
             ),
         );
@@ -452,7 +508,14 @@ mod tests {
         assert!(!found.truncated);
         assert_eq!(found.complete_to_ly, 20.0);
         assert_eq!(found.systems.len(), 1 + NEARBY_ROW_CAP + 2);
-        assert_eq!(found.systems.iter().filter(|system| system.name == "S0999").count(), 1);
+        assert_eq!(
+            found
+                .systems
+                .iter()
+                .filter(|system| system.name == "S0999")
+                .count(),
+            1
+        );
 
         // The anchor was the farthest uncovered system, not merely an uncovered
         // one.
@@ -497,7 +560,11 @@ mod tests {
         // 9.5 was the opening page's reach; the anchor pushed the claim out to
         // the first system it in turn could not speak for, at 10.501.
         let claimed = found.complete_to_ly;
-        assert!((claimed - 10.501).abs() < 1e-9, "{}", js::js_number(claimed));
+        assert!(
+            (claimed - 10.501).abs() < 1e-9,
+            "{}",
+            js::js_number(claimed)
+        );
         assert_eq!(found.systems.len(), 1 + 2 * NEARBY_ROW_CAP);
     }
 
@@ -543,7 +610,10 @@ mod tests {
     async fn rows_outside_the_radius_are_dropped_after_recomputation() {
         let http = FakeArdent::default().page(
             "Sol",
-            page(ORIGIN, &[("Inside", 31.0, at(19.6)), ("Outside", 32.0, at(20.4))]),
+            page(
+                ORIGIN,
+                &[("Inside", 31.0, at(19.6)), ("Outside", 32.0, at(20.4))],
+            ),
         );
 
         let found = run(&http, 20.0, DEFAULT_ANCHOR_BUDGET).await;

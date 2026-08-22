@@ -20,9 +20,9 @@ use edm_core::js::{self, time};
 use edm_core::render::{Block, views};
 
 use crate::ardent::{ArdentClient, ResolvedSystem};
-use crate::game_api;
 use crate::eddn::EddnResult;
 use crate::exchange::SendOptions;
+use crate::game_api;
 use crate::net::HttpTransport;
 use crate::out::EXIT_FAILURE;
 use crate::ports::{Clock, Entropy, Fs};
@@ -72,7 +72,14 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     //
     // R77: `--json` reaches `visitMarket` as `quiet`, so both tables really are
     // suppressed here. That is not the bug R76 describes.
-    let visit = poll(app, market_id, station.as_ref(), eddn.as_ref(), app.session.json).await?;
+    let visit = poll(
+        app,
+        market_id,
+        station.as_ref(),
+        eddn.as_ref(),
+        app.session.json,
+    )
+    .await?;
 
     if app.session.json {
         // ts:1582
@@ -83,15 +90,23 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                     "station".to_owned(),
                     station.as_ref().map_or(JsValue::Null, station_json),
                 ),
-                ("status".to_owned(), num_or_null(visit.status.map(f64::from))),
-                ("eddn".to_owned(), visit.eddn.as_ref().map_or(JsValue::Null, eddn_json)),
+                (
+                    "status".to_owned(),
+                    num_or_null(visit.status.map(f64::from)),
+                ),
+                (
+                    "eddn".to_owned(),
+                    visit.eddn.as_ref().map_or(JsValue::Null, eddn_json),
+                ),
                 (
                     "payload".to_owned(),
                     visit
                         .document
                         .as_ref()
                         .and_then(parse_market_snapshot)
-                        .map_or(JsValue::Null, |snapshot| JsValue::Obj(snapshot.payload.clone())),
+                        .map_or(JsValue::Null, |snapshot| {
+                            JsValue::Obj(snapshot.payload.clone())
+                        }),
                 ),
             ])
             .stringify(2),
@@ -100,8 +115,12 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 
     // ts:1591 — nothing usable came back, and `send` has already reported why.
-    let Some(document) = visit.document.as_ref() else { return Ok(()) };
-    let Some(snapshot) = parse_market_snapshot(document) else { return Ok(()) };
+    let Some(document) = visit.document.as_ref() else {
+        return Ok(());
+    };
+    let Some(snapshot) = parse_market_snapshot(document) else {
+        return Ok(());
+    };
 
     let title = format!(
         // ts:1594
@@ -119,7 +138,11 @@ async fn single<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             "EDDN: {} ({} commodities{})",
             result.detail,
             js::format_integer(result.commodities as f64),
-            if eddn.as_ref().is_some_and(|options| options.test) { ", test schema" } else { "" },
+            if eddn.as_ref().is_some_and(|options| options.test) {
+                ", test schema"
+            } else {
+                ""
+            },
         ))]);
     }
     Ok(())
@@ -136,7 +159,10 @@ async fn resolve_station<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return Ok(EddnStation {
             system_name: system_name.to_owned(),
             station_name: station_name.to_owned(),
-            station_type: app.cli.optional_value(Flag::StationType, None).map(str::to_owned),
+            station_type: app
+                .cli
+                .optional_value(Flag::StationType, None)
+                .map(str::to_owned),
             economies: None,
         });
     }
@@ -175,13 +201,21 @@ async fn poll<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     quiet: bool,
 ) -> Result<Visit, String> {
     let exchange = app
-        .fetch_market(&js::js_number(market_id), SendOptions { quiet, ignore_dry_run: false })
+        .fetch_market(
+            &js::js_number(market_id),
+            SendOptions {
+                quiet,
+                ignore_dry_run: false,
+            },
+        )
         .await?;
     let status = exchange.as_ref().map(|exchange| exchange.status);
 
     let mut document = None;
     if let Some(text) = decrypted(exchange.as_ref()) {
-        document = JsValue::parse(text).ok().filter(|value| parse_market_snapshot(value).is_some());
+        document = JsValue::parse(text)
+            .ok()
+            .filter(|value| parse_market_snapshot(value).is_some());
         // ts:1399 — a body that decoded but is not a listing is printed whole
         // rather than silently dropped.
         if document.is_none() && !quiet {
@@ -195,8 +229,13 @@ async fn poll<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     {
         // The timestamp is the moment of publication, not of the poll.
         let timestamp = time::iso8601_from_ms(app.ports.clock.now_ms()).unwrap_or_default();
-        let message =
-            build_message(station, market_id, &snapshot.commodities, &timestamp, options);
+        let message = build_message(
+            station,
+            market_id,
+            &snapshot.commodities,
+            &timestamp,
+            options,
+        );
         result = Some(if app.session.dry_run {
             EddnResult {
                 ok: true,
@@ -210,12 +249,21 @@ async fn poll<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             }
         } else {
             let body = message.payload.stringify_compact();
-            crate::eddn::submit(app.http, &app.overrides.eddn_url, body.as_bytes(), message.count)
-                .await
+            crate::eddn::submit(
+                app.http,
+                &app.overrides.eddn_url,
+                body.as_bytes(),
+                message.count,
+            )
+            .await
         });
     }
 
-    Ok(Visit { status, document, eddn: result })
+    Ok(Visit {
+        status,
+        document,
+        eddn: result,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -273,20 +321,28 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         stamp,
     );
     // Read-only, so it runs even under `--dry-run` \[R74\].
-    let exchange =
-        app.send(&request, SendOptions { quiet: true, ignore_dry_run: true }).await;
+    let exchange = app
+        .send(
+            &request,
+            SendOptions {
+                quiet: true,
+                ignore_dry_run: true,
+            },
+        )
+        .await;
     let Some(text) = decrypted(exchange.as_ref()) else {
         // ts:1619
         return Err(
-            "Could not read the star system; try `markets` first to see what is there".to_owned()
+            "Could not read the star system; try `markets` first to see what is there".to_owned(),
         );
     };
 
     // ts:1621 — an unparseable payload throws here rather than degrading; the
     // message is the JSON lexer's, and ours is not JavaScriptCore's \[C15\].
     let payload = JsValue::parse(text).map_err(|error| error.to_string())?;
-    let all: Vec<MarketPoint<'_>> =
-        payload.as_record().map_or_else(Vec::new, read_market_points);
+    let all: Vec<MarketPoint<'_>> = payload
+        .as_record()
+        .map_or_else(Vec::new, read_market_points);
     if all.is_empty() {
         // ts:1625
         return Err(
@@ -295,17 +351,31 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         );
     }
 
-    let include_carriers = app.cli.switch_value(Flag::Carriers, false).map_err(message)?;
-    let include_idle = app.cli.switch_value(Flag::AllMarkets, false).map_err(message)?;
+    let include_carriers = app
+        .cli
+        .switch_value(Flag::Carriers, false)
+        .map_err(message)?;
+    let include_idle = app
+        .cli
+        .switch_value(Flag::AllMarkets, false)
+        .map_err(message)?;
 
-    let skipped_carriers =
-        if include_carriers { 0 } else { all.iter().filter(|point| point.is_carrier()).count() };
-    let survivors: Vec<&MarketPoint<'_>> =
-        all.iter().filter(|point| include_carriers || !point.is_carrier()).collect();
+    let skipped_carriers = if include_carriers {
+        0
+    } else {
+        all.iter().filter(|point| point.is_carrier()).count()
+    };
+    let survivors: Vec<&MarketPoint<'_>> = all
+        .iter()
+        .filter(|point| include_carriers || !point.is_carrier())
+        .collect();
     // Counted *after* the carrier filter, exactly as the TypeScript's second
     // `targets.filter` is.
-    let skipped_idle =
-        if include_idle { 0 } else { survivors.iter().filter(|point| !point.trades()).count() };
+    let skipped_idle = if include_idle {
+        0
+    } else {
+        survivors.iter().filter(|point| !point.trades()).count()
+    };
     let targets: Vec<MarketPoint<'_>> = survivors
         .into_iter()
         .filter(|point| include_idle || point.trades())
@@ -318,15 +388,24 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
 
     // Read only now, after two network calls have already happened \[R50\].
-    let settings =
-        config::sweep_settings(&app.cli, app.session.json).map_err(message)?;
+    let settings = config::sweep_settings(&app.cli, app.session.json).map_err(message)?;
 
     if !app.session.json {
         let mut rows = vec![
             // ts:1642
-            field("system", format!("{} ({})", resolved.system.name, js::js_number(resolved.system.address))),
+            field(
+                "system",
+                format!(
+                    "{} ({})",
+                    resolved.system.name,
+                    js::js_number(resolved.system.address)
+                ),
+            ),
             field("markets", format!("{} of {}", targets.len(), all.len())),
-            field("workers", format!("{} pulling from one queue", settings.workers)),
+            field(
+                "workers",
+                format!("{} pulling from one queue", settings.workers),
+            ),
             field(
                 "timeout",
                 format!(
@@ -371,7 +450,11 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         if let Some(snapshot) = visit.snapshot() {
             app.out.emit(&views::market_snapshot(
                 &snapshot,
-                &format!("MARKET  {} ({})", visit.name, js::js_number(visit.market_id)),
+                &format!(
+                    "MARKET  {} ({})",
+                    visit.name,
+                    js::js_number(visit.market_id)
+                ),
             ));
         }
     };
@@ -404,8 +487,6 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // would hand out references to temporaries.
     let snapshots: Vec<Option<MarketSnapshot<'_>>> =
         visits.iter().map(sweep::MarketVisit::snapshot).collect();
-
-
 
     if app.session.json {
         // ts:1658
@@ -467,18 +548,28 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     app.out.emit(&views::sweep_summary(
         &rows,
         // ts:1670 — the dash is U+2014.
-        &format!("SWEEP RESULTS  {} \u{2014} {} markets", resolved.system.name, visits.len()),
+        &format!(
+            "SWEEP RESULTS  {} \u{2014} {} markets",
+            resolved.system.name,
+            visits.len()
+        ),
         app.out.metric(),
     ));
 
-    let failed = snapshots.iter().filter(|snapshot| snapshot.is_none()).count();
+    let failed = snapshots
+        .iter()
+        .filter(|snapshot| snapshot.is_none())
+        .count();
     if failed > 0 {
         app.out.set_exit(EXIT_FAILURE);
         // ts:1674
         app.note(format!("{failed} markets returned no usable data"));
     }
     if let Some(options) = &eddn {
-        let sent = visits.iter().filter(|visit| visit.eddn.as_ref().is_some_and(|e| e.ok)).count();
+        let sent = visits
+            .iter()
+            .filter(|visit| visit.eddn.as_ref().is_some_and(|e| e.ok))
+            .count();
         let rejected: Vec<&sweep::MarketVisit> = visits
             .iter()
             .filter(|visit| visit.eddn.as_ref().is_some_and(|result| !result.ok))
@@ -487,14 +578,21 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         app.note(format!(
             "EDDN: {sent} sent, {} rejected{}",
             rejected.len(),
-            if options.test { " (test schema — not relayed to consumers)" } else { "" },
+            if options.test {
+                " (test schema — not relayed to consumers)"
+            } else {
+                ""
+            },
         ));
         for visit in rejected.iter().take(5) {
             // ts:1680 — two leading spaces, inside a note that indents by three.
             app.note(format!(
                 "  {}: {}",
                 visit.name,
-                visit.eddn.as_ref().map_or("", |result| result.detail.as_str())
+                visit
+                    .eddn
+                    .as_ref()
+                    .map_or("", |result| result.detail.as_str())
             ));
         }
     }
@@ -513,7 +611,9 @@ fn load_eddn<H, C, E, F>(app: &App<'_, H, C, E, F>) -> Result<Option<EddnOptions
     if !config::wants_eddn(&app.cli).map_err(message)? {
         return Ok(None);
     }
-    config::eddn_config(&app.cli, &app.session.credentials).map(Some).map_err(message)
+    config::eddn_config(&app.cli, &app.session.credentials)
+        .map(Some)
+        .map_err(message)
 }
 
 /// `EddnStation` (ts:2848) as JSON.
@@ -523,23 +623,29 @@ fn station_json(station: &EddnStation) -> JsValue {
         ("stationName".to_owned(), str_value(&station.station_name)),
         (
             "stationType".to_owned(),
-            station.station_type.as_deref().map_or(JsValue::Null, str_value),
+            station
+                .station_type
+                .as_deref()
+                .map_or(JsValue::Null, str_value),
         ),
         (
             "economies".to_owned(),
-            station.economies.as_ref().map_or(JsValue::Null, |economies| {
-                JsValue::Arr(
-                    economies
-                        .iter()
-                        .map(|(name, proportion)| {
-                            object([
-                                ("name".to_owned(), str_value(name)),
-                                ("proportion".to_owned(), JsValue::Num(*proportion)),
-                            ])
-                        })
-                        .collect(),
-                )
-            }),
+            station
+                .economies
+                .as_ref()
+                .map_or(JsValue::Null, |economies| {
+                    JsValue::Arr(
+                        economies
+                            .iter()
+                            .map(|(name, proportion)| {
+                                object([
+                                    ("name".to_owned(), str_value(name)),
+                                    ("proportion".to_owned(), JsValue::Num(*proportion)),
+                                ])
+                            })
+                            .collect(),
+                    )
+                }),
         ),
     ])
 }
@@ -548,9 +654,15 @@ fn station_json(station: &EddnStation) -> JsValue {
 fn eddn_json(result: &EddnResult) -> JsValue {
     object([
         ("ok".to_owned(), JsValue::Bool(result.ok)),
-        ("status".to_owned(), num_or_null(result.status.map(f64::from))),
+        (
+            "status".to_owned(),
+            num_or_null(result.status.map(f64::from)),
+        ),
         ("detail".to_owned(), str_value(&result.detail)),
-        ("commodities".to_owned(), JsValue::Num(result.commodities as f64)),
+        (
+            "commodities".to_owned(),
+            JsValue::Num(result.commodities as f64),
+        ),
     ])
 }
 
@@ -568,6 +680,9 @@ pub(crate) fn resolved_json(resolved: &ResolvedSystem) -> JsValue {
             ]),
         ),
         ("via".to_owned(), str_value(&resolved.via)),
-        ("station".to_owned(), resolved.station.as_deref().map_or(JsValue::Null, str_value)),
+        (
+            "station".to_owned(),
+            resolved.station.as_deref().map_or(JsValue::Null, str_value),
+        ),
     ])
 }

@@ -109,11 +109,15 @@ fn purity(root: &Path) -> Result<()> {
         let forbidden: Vec<&str> = ["tokio", "reqwest", "rustix", "getrandom"]
             .into_iter()
             .filter(|name| {
-                tree.lines().any(|line| line.split_whitespace().any(|word| word == *name))
+                tree.lines()
+                    .any(|line| line.split_whitespace().any(|word| word == *name))
             })
             .collect();
         if !forbidden.is_empty() {
-            bail!("{package}'s normal dependency tree reaches {}", forbidden.join(", "));
+            bail!(
+                "{package}'s normal dependency tree reaches {}",
+                forbidden.join(", ")
+            );
         }
     }
     Ok(())
@@ -132,8 +136,15 @@ fn purity(root: &Path) -> Result<()> {
 /// `f64` is legal in `time.rs`, which evaluates a square root, and in the
 /// display paths. It is not legal anywhere the search compares two things.
 fn route_exactness(root: &Path) -> Result<()> {
-    const SOLVING_PATH: [&str; 7] =
-        ["num.rs", "weight.rs", "single.rs", "round.rs", "ratio.rs", "bounded.rs", "distinct.rs"];
+    const SOLVING_PATH: [&str; 7] = [
+        "num.rs",
+        "weight.rs",
+        "single.rs",
+        "round.rs",
+        "ratio.rs",
+        "bounded.rs",
+        "distinct.rs",
+    ];
     let dir = root.join("crates").join("edm-route").join("src");
 
     let mut offenders = Vec::new();
@@ -200,7 +211,9 @@ fn no_committed_credentials(root: &Path) -> Result<()> {
             continue;
         }
         let relative = String::from_utf8_lossy(name).into_owned();
-        let Ok(bytes) = std::fs::read(root.join(&relative)) else { continue };
+        let Ok(bytes) = std::fs::read(root.join(&relative)) else {
+            continue;
+        };
         for length in credential_runs(&bytes) {
             hits.push(format!("{relative}: a {length}-character printable run"));
         }
@@ -223,7 +236,8 @@ fn no_committed_credentials(root: &Path) -> Result<()> {
 fn credential_runs(bytes: &[u8]) -> Vec<usize> {
     const MIN_DISTINCT: usize = 16;
     let token_byte = |byte: u8| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'_' | b'.' | b'-' | b'~')
+        byte.is_ascii_alphanumeric()
+            || matches!(byte, b'+' | b'/' | b'=' | b'_' | b'.' | b'-' | b'~')
     };
 
     let mut found = Vec::new();
@@ -254,7 +268,11 @@ fn cargo_tree(root: &Path, args: &[&str]) -> Result<String> {
         .output()
         .context("running cargo tree")?;
     if !output.status.success() {
-        bail!("cargo tree {} failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr));
+        bail!(
+            "cargo tree {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -292,7 +310,9 @@ fn parity_isolation(root: &Path) -> Result<()> {
             (Flag::resolve(&normalized), Flag::resolve_route(&normalized))
             && base != route
         {
-            bail!("{display} resolves to {base:?} in the base table and {route:?} in the route table");
+            bail!(
+                "{display} resolves to {base:?} in the base table and {route:?} in the route table"
+            );
         }
     }
 
@@ -341,9 +361,18 @@ fn parity_isolation(root: &Path) -> Result<()> {
     //    two-table arrangement exists to prevent, so it is asserted directly
     //    rather than inferred from the scenarios that happen to be committed.
     for argv in [
-        vec!["market".to_owned(), "Colonia".to_owned(), "--radius".to_owned(), "30".to_owned()],
+        vec![
+            "market".to_owned(),
+            "Colonia".to_owned(),
+            "--radius".to_owned(),
+            "30".to_owned(),
+        ],
         vec!["markets".to_owned(), "--pad".to_owned(), "L".to_owned()],
-        vec!["trade".to_owned(), "--min-profit".to_owned(), "1000".to_owned()],
+        vec![
+            "trade".to_owned(),
+            "--min-profit".to_owned(),
+            "1000".to_owned(),
+        ],
     ] {
         let dispatched = cli::parse_dispatch(&argv);
         if dispatched.route.is_some() || dispatched.base.is_ok() {
@@ -370,8 +399,14 @@ mod tests {
 
     #[test]
     fn a_credential_shaped_run_is_found_at_either_width() {
-        assert_eq!(credential_runs(format!("{}\n", token(80)).as_bytes()), vec![80]);
-        assert_eq!(credential_runs(format!("{}\n", token(2024)).as_bytes()), vec![2024]);
+        assert_eq!(
+            credential_runs(format!("{}\n", token(80)).as_bytes()),
+            vec![80]
+        );
+        assert_eq!(
+            credential_runs(format!("{}\n", token(2024)).as_bytes()),
+            vec![2024]
+        );
         // A run at end-of-file with no trailing newline still counts.
         assert_eq!(credential_runs(token(80).as_bytes()), vec![80]);
     }
@@ -380,13 +415,21 @@ mod tests {
     fn text_that_merely_happens_to_be_eighty_wide_is_not_a_credential() {
         assert_eq!(credential_runs(b"short\n"), Vec::<usize>::new());
         // Only the exact widths the API validates.
-        assert_eq!(credential_runs(format!("{}\n", token(81)).as_bytes()), Vec::<usize>::new());
+        assert_eq!(
+            credential_runs(format!("{}\n", token(81)).as_bytes()),
+            Vec::<usize>::new()
+        );
         // An eighty-column table rule.
-        assert_eq!(credential_runs(format!("{}\n", "=".repeat(80)).as_bytes()), Vec::<usize>::new());
+        assert_eq!(
+            credential_runs(format!("{}\n", "=".repeat(80)).as_bytes()),
+            Vec::<usize>::new()
+        );
         // A line of the JSON corpus: right length, wrong alphabet.
         let json = format!("{{\"a\":\"{}\"}}", token(72));
         assert_eq!(json.len(), 80);
-        assert_eq!(credential_runs(format!("{json}\n").as_bytes()), Vec::<usize>::new());
+        assert_eq!(
+            credential_runs(format!("{json}\n").as_bytes()),
+            Vec::<usize>::new()
+        );
     }
 }
-

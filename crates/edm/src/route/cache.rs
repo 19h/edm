@@ -56,7 +56,11 @@ impl Cache {
     /// Falls back to a relative path rather than failing: a cache that cannot
     /// find a home should degrade to not caching, never to not running.
     #[must_use]
-    pub fn locate(xdg_cache_home: Option<&str>, home: Option<&str>, explicit: Option<&str>) -> PathBuf {
+    pub fn locate(
+        xdg_cache_home: Option<&str>,
+        home: Option<&str>,
+        explicit: Option<&str>,
+    ) -> PathBuf {
         if let Some(path) = explicit {
             return PathBuf::from(path);
         }
@@ -71,7 +75,12 @@ impl Cache {
 
     #[must_use]
     pub fn new(root: PathBuf, max_age_minutes: f64, enabled: bool, refresh: bool) -> Self {
-        Self { root, max_age_ms: max_age_minutes * 60_000.0, enabled, refresh }
+        Self {
+            root,
+            max_age_ms: max_age_minutes * 60_000.0,
+            enabled,
+            refresh,
+        }
     }
 
     #[must_use]
@@ -134,7 +143,10 @@ impl Cache {
             ("version".into(), JsValue::Num(f64::from(FORMAT_VERSION))),
             ("payload".into(), document.clone()),
         ]);
-        let _ = fs.write(&self.path(market_id), &JsValue::Obj(entry).stringify_compact());
+        let _ = fs.write(
+            &self.path(market_id),
+            &JsValue::Obj(entry).stringify_compact(),
+        );
     }
 }
 
@@ -159,7 +171,9 @@ pub struct Entry {
 pub enum Lookup {
     Fresh(Entry),
     /// Present, but older than `--max-age`.
-    Stale { age_ms: f64 },
+    Stale {
+        age_ms: f64,
+    },
     Missing,
     /// Present and unreadable — truncated, or from an older format version.
     Corrupt,
@@ -211,7 +225,11 @@ fn decode(text: &str) -> Option<Entry> {
     if !read_at_ms.is_finite() {
         return None;
     }
-    Some(Entry { market_id, read_at_ms, payload: object.get("payload")?.clone() })
+    Some(Entry {
+        market_id,
+        read_at_ms,
+        payload: object.get("payload")?.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -240,7 +258,9 @@ mod tests {
 
         let found = cache.get(&fs, 3_229_009_408.0, 1_000.0 + 5.0 * MINUTE);
 
-        let Lookup::Fresh(entry) = found else { panic!("{found:?}") };
+        let Lookup::Fresh(entry) = found else {
+            panic!("{found:?}")
+        };
         assert_eq!(entry.market_id, 3_229_009_408.0);
         assert_eq!(entry.read_at_ms, 1_000.0);
         assert_eq!(entry.payload, payload("Jaques Station"));
@@ -261,7 +281,13 @@ mod tests {
         assert!(matches!(found, Lookup::Stale { .. }), "{found:?}");
         let mut hits = Hits::default();
         found.tally(&mut hits);
-        assert_eq!(hits, Hits { stale: 1, ..Hits::default() });
+        assert_eq!(
+            hits,
+            Hits {
+                stale: 1,
+                ..Hits::default()
+            }
+        );
     }
 
     /// Exactly at the bound is still fresh; the comparison is strict so that a
@@ -272,8 +298,14 @@ mod tests {
         let fs = RecordingFs::default();
         let cache = cache();
         cache.put(&fs, 1.0, &payload("Edge"), 0.0);
-        assert!(matches!(cache.get(&fs, 1.0, 30.0 * MINUTE), Lookup::Fresh(_)));
-        assert!(matches!(cache.get(&fs, 1.0, 30.0 * MINUTE + 1.0), Lookup::Stale { .. }));
+        assert!(matches!(
+            cache.get(&fs, 1.0, 30.0 * MINUTE),
+            Lookup::Fresh(_)
+        ));
+        assert!(matches!(
+            cache.get(&fs, 1.0, 30.0 * MINUTE + 1.0),
+            Lookup::Stale { .. }
+        ));
     }
 
     /// Half a file from an interrupted run costs one request, not the sweep.
@@ -281,7 +313,8 @@ mod tests {
     fn a_truncated_entry_is_a_miss() {
         let fs = RecordingFs::default();
         let cache = cache();
-        fs.write(&cache.path(9.0), "{\"marketId\":9,\"readAt\":1,\"vers").expect("in memory");
+        fs.write(&cache.path(9.0), "{\"marketId\":9,\"readAt\":1,\"vers")
+            .expect("in memory");
 
         assert_eq!(cache.get(&fs, 9.0, 2.0), Lookup::Corrupt);
     }
@@ -291,8 +324,11 @@ mod tests {
     fn an_entry_from_another_format_version_is_a_miss() {
         let fs = RecordingFs::default();
         let cache = cache();
-        fs.write(&cache.path(9.0), "{\"marketId\":9,\"readAt\":1,\"version\":0,\"payload\":{}}")
-            .expect("in memory");
+        fs.write(
+            &cache.path(9.0),
+            "{\"marketId\":9,\"readAt\":1,\"version\":0,\"payload\":{}}",
+        )
+        .expect("in memory");
 
         assert_eq!(cache.get(&fs, 9.0, 2.0), Lookup::Corrupt);
     }
@@ -325,8 +361,11 @@ mod tests {
     fn an_entry_with_a_nonfinite_timestamp_never_becomes_immortal() {
         let fs = RecordingFs::default();
         let cache = cache();
-        fs.write(&cache.path(9.0), "{\"marketId\":9,\"readAt\":null,\"version\":1,\"payload\":{}}")
-            .expect("in memory");
+        fs.write(
+            &cache.path(9.0),
+            "{\"marketId\":9,\"readAt\":null,\"version\":1,\"payload\":{}}",
+        )
+        .expect("in memory");
 
         assert_eq!(cache.get(&fs, 9.0, 1e12), Lookup::Corrupt);
     }
@@ -345,7 +384,11 @@ mod tests {
         let off = Cache::new(PathBuf::from("/cache2"), 30.0, false, false);
         off.put(&fs, 2.0, &payload("B"), 0.0);
         assert_eq!(off.get(&fs, 2.0, 0.0), Lookup::Skipped);
-        assert_eq!(cache().get(&fs, 2.0, 0.0), Lookup::Missing, "and nothing was written");
+        assert_eq!(
+            cache().get(&fs, 2.0, 0.0),
+            Lookup::Missing,
+            "and nothing was written"
+        );
     }
 
     /// The file name is the id as the program prints it, not as Rust's default
@@ -364,10 +407,22 @@ mod tests {
             PathBuf::from("/x/edm/route"),
             "XDG wins"
         );
-        assert_eq!(Cache::locate(None, Some("/h"), None), PathBuf::from("/h/.cache/edm/route"));
-        assert_eq!(Cache::locate(Some(""), Some("/h"), None), PathBuf::from("/h/.cache/edm/route"));
-        assert_eq!(Cache::locate(Some("/x"), Some("/h"), Some("/e")), PathBuf::from("/e"));
+        assert_eq!(
+            Cache::locate(None, Some("/h"), None),
+            PathBuf::from("/h/.cache/edm/route")
+        );
+        assert_eq!(
+            Cache::locate(Some(""), Some("/h"), None),
+            PathBuf::from("/h/.cache/edm/route")
+        );
+        assert_eq!(
+            Cache::locate(Some("/x"), Some("/h"), Some("/e")),
+            PathBuf::from("/e")
+        );
         // Homeless, but still runnable.
-        assert_eq!(Cache::locate(None, None, None), PathBuf::from(".edm-cache/route"));
+        assert_eq!(
+            Cache::locate(None, None, None),
+            PathBuf::from(".edm-cache/route")
+        );
     }
 }

@@ -39,7 +39,10 @@ fn nonce(text: &str) -> Nonce {
 #[test]
 fn nonce_is_the_ascii_characters() {
     let ours = seal_query(b"hello world", &nonce("0123456789ab"));
-    assert_eq!(ours, "OY34r5co34DSbwc=", "the TypeScript's encryptEnvelope output");
+    assert_eq!(
+        ours, "OY34r5co34DSbwc=",
+        "the TypeScript's encryptEnvelope output"
+    );
 
     // What decoding the hex would give: six bytes, zero-padded to the IETF
     // twelve. This is the natural bug and it must not agree.
@@ -53,7 +56,10 @@ fn nonce_is_the_ascii_characters() {
         cipher.apply_keystream(&mut buffer);
         base64::engine::general_purpose::STANDARD.encode(&buffer)
     };
-    assert_ne!(ours, wrong, "hex-decoding the nonce must change the ciphertext");
+    assert_ne!(
+        ours, wrong,
+        "hex-decoding the nonce must change the ciphertext"
+    );
 }
 
 /// **[R57]** again, from the other end. `validateNonce` lowercases (ts:72) but
@@ -70,13 +76,25 @@ fn response_nonce_case_is_keystream_relevant() {
 
     let lower = Nonce::from_response_header("0f1e2d3c4b5a").expect("valid header");
     let upper = Nonce::from_response_header("0F1E2D3C4B5A").expect("valid header");
-    assert_eq!(open_response(JAMESON_BODY, &lower, JAMESON_SIZE).as_deref(), Ok(JAMESON_TEXT));
-    assert_eq!(open_response(UPPER_BODY, &upper, JAMESON_SIZE).as_deref(), Ok(JAMESON_TEXT));
+    assert_eq!(
+        open_response(JAMESON_BODY, &lower, JAMESON_SIZE).as_deref(),
+        Ok(JAMESON_TEXT)
+    );
+    assert_eq!(
+        open_response(UPPER_BODY, &upper, JAMESON_SIZE).as_deref(),
+        Ok(JAMESON_TEXT)
+    );
 
     // Swap them and the plaintext is unrecognisable — it does not even reach
     // the LZ4 layer.
-    assert_eq!(open_response(JAMESON_BODY, &upper, JAMESON_SIZE), Err(DecodeError::MissingFrame));
-    assert_eq!(open_response(UPPER_BODY, &lower, JAMESON_SIZE), Err(DecodeError::MissingFrame));
+    assert_eq!(
+        open_response(JAMESON_BODY, &upper, JAMESON_SIZE),
+        Err(DecodeError::MissingFrame)
+    );
+    assert_eq!(
+        open_response(UPPER_BODY, &lower, JAMESON_SIZE),
+        Err(DecodeError::MissingFrame)
+    );
 }
 
 /// `parse_arg` accepts upper case and folds it, because a *request* nonce is
@@ -85,7 +103,12 @@ fn response_nonce_case_is_keystream_relevant() {
 #[test]
 fn the_two_constructors_disagree_on_case() {
     assert_eq!(nonce("ABCDEF012345").as_str(), "abcdef012345");
-    assert_eq!(Nonce::from_response_header("ABCDEF012345").unwrap().as_str(), "ABCDEF012345");
+    assert_eq!(
+        Nonce::from_response_header("ABCDEF012345")
+            .unwrap()
+            .as_str(),
+        "ABCDEF012345"
+    );
     assert_ne!(
         seal_query(b"x", &nonce("ABCDEF012345")),
         seal_query(b"x", &Nonce::from_response_header("ABCDEF012345").unwrap()),
@@ -128,10 +151,16 @@ fn sealed_output_is_standard_padded_base64() {
     // under the URL-safe one.
     let sealed = seal_query(b"\x00\x00", &nonce("000000000000"));
     assert!(is_wire_base64(&sealed));
-    assert!(sealed.ends_with('='), "two bytes must produce one pad character: {sealed}");
+    assert!(
+        sealed.ends_with('='),
+        "two bytes must produce one pad character: {sealed}"
+    );
 
     let long = seal_query(&[0u8; 96], &nonce("abcdef012345"));
-    assert!(long.contains('+') || long.contains('/'), "no URL-safe substitution: {long}");
+    assert!(
+        long.contains('+') || long.contains('/'),
+        "no URL-safe substitution: {long}"
+    );
 }
 
 /// ChaCha20 is XOR against a keystream, so the two directions really are one
@@ -160,7 +189,10 @@ fn opens_a_real_response() {
 #[test]
 fn the_body_is_js_trimmed_first() {
     let padded = format!("  \t\r\n{JAMESON_BODY} \u{FEFF}\u{2028}");
-    assert_eq!(open_response(&padded, &nonce(NONCE), JAMESON_SIZE).as_deref(), Ok(JAMESON_TEXT));
+    assert_eq!(
+        open_response(&padded, &nonce(NONCE), JAMESON_SIZE).as_deref(),
+        Ok(JAMESON_TEXT)
+    );
 }
 
 /// **[R58]** — the gate's `*` quantifier accepts the empty string, so an empty
@@ -169,10 +201,18 @@ fn the_body_is_js_trimmed_first() {
 /// with no body.
 #[test]
 fn an_empty_2xx_body_reports_a_missing_frame_not_bad_base64() {
-    assert_eq!(open_response("", &nonce(NONCE), 10), Err(DecodeError::MissingFrame));
-    assert_eq!(open_response("   ", &nonce(NONCE), 10), Err(DecodeError::MissingFrame));
     assert_eq!(
-        open_response("", &nonce(NONCE), 10).unwrap_err().to_string(),
+        open_response("", &nonce(NONCE), 10),
+        Err(DecodeError::MissingFrame)
+    );
+    assert_eq!(
+        open_response("   ", &nonce(NONCE), 10),
+        Err(DecodeError::MissingFrame)
+    );
+    assert_eq!(
+        open_response("", &nonce(NONCE), 10)
+            .unwrap_err()
+            .to_string(),
         "Decrypted response lacks the EDDE compression header",
     );
 }
@@ -187,7 +227,9 @@ fn rejects_non_base64_bodies() {
         );
     }
     assert_eq!(
-        open_response("!!!!", &nonce(NONCE), 10).unwrap_err().to_string(),
+        open_response("!!!!", &nonce(NONCE), 10)
+            .unwrap_err()
+            .to_string(),
         "Response is not valid standard Base64",
     );
 }
@@ -198,10 +240,16 @@ fn rejects_non_base64_bodies() {
 #[test]
 fn the_frame_check_is_length_first() {
     let short = seal_query(b"EDDE", &nonce(NONCE));
-    assert_eq!(open_response(&short, &nonce(NONCE), 10), Err(DecodeError::MissingFrame));
+    assert_eq!(
+        open_response(&short, &nonce(NONCE), 10),
+        Err(DecodeError::MissingFrame)
+    );
 
     let wrong_magic = seal_query(b"EDDF\0\0\0\0\x00", &nonce(NONCE));
-    assert_eq!(open_response(&wrong_magic, &nonce(NONCE), 10), Err(DecodeError::MissingFrame));
+    assert_eq!(
+        open_response(&wrong_magic, &nonce(NONCE), 10),
+        Err(DecodeError::MissingFrame)
+    );
 }
 
 /// **[R60]** — bytes 4..8 are the uncompressed length in the real format, and
@@ -221,7 +269,10 @@ fn the_frame_length_word_is_never_inspected() {
 fn one_leading_bom_is_removed() {
     // The sealed payload is U+FEFF U+FEFF "ok" — eight UTF-8 bytes.
     const BOM_BODY: &str = "kJLbAonOvwTtZHfacFM9l1w=";
-    assert_eq!(open_response(BOM_BODY, &nonce(NONCE), 8).as_deref(), Ok("\u{FEFF}ok"));
+    assert_eq!(
+        open_response(BOM_BODY, &nonce(NONCE), 8).as_deref(),
+        Ok("\u{FEFF}ok")
+    );
 }
 
 /// **C5** — our message, not Bun's `Invalid byte sequence`.
@@ -254,7 +305,10 @@ fn accepts(block: &[u8], expected: usize, text: &str) {
 fn rejects(block: &[u8], expected: usize, message: &str) {
     let err = open_block(block, expected).expect_err("block should have been refused");
     assert_eq!(err.to_string(), message);
-    assert!(matches!(err, DecodeError::Lz4(_)), "should be an LZ4 failure, got {err:?}");
+    assert!(
+        matches!(err, DecodeError::Lz4(_)),
+        "should be an LZ4 failure, got {err:?}"
+    );
 }
 
 #[test]
@@ -318,7 +372,11 @@ fn lz4_accepts_fewer_than_five_trailing_literals() {
     // The LZ4 format reserves the last five bytes as literals and a real
     // compressor honours it. The TypeScript does not check, so a block ending
     // in two literals decodes rather than failing.
-    accepts(&[0x40, b'a', b'b', b'c', b'd', 0x04, 0x00, 0x20, b'x', b'y'], 10, "abcdabcdxy");
+    accepts(
+        &[0x40, b'a', b'b', b'c', b'd', 0x04, 0x00, 0x20, b'x', b'y'],
+        10,
+        "abcdabcdxy",
+    );
 }
 
 #[test]
@@ -378,20 +436,43 @@ fn lz4_rejects_a_match_that_overruns_the_output() {
 fn lz4_rejects_a_short_block() {
     // Decodes cleanly, just not to the declared size. Both numbers are in the
     // message and both are interpolated ungrouped.
-    rejects(&[0x30, b'a', b'b', b'c'], 4, "LZ4 size mismatch: expected 4, produced 3");
+    rejects(
+        &[0x30, b'a', b'b', b'c'],
+        4,
+        "LZ4 size mismatch: expected 4, produced 3",
+    );
 }
 
 /// The six transcribed strings, asserted directly. Anything that edits them is
 /// changing what a user sees.
 #[test]
 fn lz4_messages_are_the_typescripts() {
-    assert_eq!(Lz4Error::TruncatedLength.to_string(), "Truncated LZ4 length");
-    assert_eq!(Lz4Error::InvalidLiteralLength.to_string(), "Invalid LZ4 literal length");
-    assert_eq!(Lz4Error::TruncatedMatchOffset.to_string(), "Truncated LZ4 match offset");
-    assert_eq!(Lz4Error::InvalidMatchOffset.to_string(), "Invalid LZ4 match offset");
-    assert_eq!(Lz4Error::InvalidMatchLength.to_string(), "Invalid LZ4 match length");
     assert_eq!(
-        Lz4Error::SizeMismatch { expected: 1_048_576, produced: 0 }.to_string(),
+        Lz4Error::TruncatedLength.to_string(),
+        "Truncated LZ4 length"
+    );
+    assert_eq!(
+        Lz4Error::InvalidLiteralLength.to_string(),
+        "Invalid LZ4 literal length"
+    );
+    assert_eq!(
+        Lz4Error::TruncatedMatchOffset.to_string(),
+        "Truncated LZ4 match offset"
+    );
+    assert_eq!(
+        Lz4Error::InvalidMatchOffset.to_string(),
+        "Invalid LZ4 match offset"
+    );
+    assert_eq!(
+        Lz4Error::InvalidMatchLength.to_string(),
+        "Invalid LZ4 match length"
+    );
+    assert_eq!(
+        Lz4Error::SizeMismatch {
+            expected: 1_048_576,
+            produced: 0
+        }
+        .to_string(),
         "LZ4 size mismatch: expected 1048576, produced 0",
     );
 }
@@ -403,7 +484,12 @@ fn lz4_messages_are_the_typescripts() {
 #[test]
 fn an_absurd_uncompressed_size_is_refused_not_allocated() {
     let err = open_block(&[], MAX_DECOMPRESSED + 1).expect_err("over the cap");
-    assert_eq!(err, DecodeError::Lz4(Lz4Error::Allocation { requested: MAX_DECOMPRESSED + 1 }));
+    assert_eq!(
+        err,
+        DecodeError::Lz4(Lz4Error::Allocation {
+            requested: MAX_DECOMPRESSED + 1
+        })
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +509,10 @@ fn an_empty_opaque_body_is_checked_before_anything_else() {
     assert_eq!(open_opaque("", UNFRAMED_NONCE, Some("27")), None);
     assert_eq!(open_opaque("   \n ", UNFRAMED_NONCE, Some("27")), None);
     // Same input, the other entry point, a different answer. [R58][R59]
-    assert_eq!(open_response("", &nonce(NONCE), 27), Err(DecodeError::MissingFrame));
+    assert_eq!(
+        open_response("", &nonce(NONCE), 27),
+        Err(DecodeError::MissingFrame)
+    );
 }
 
 /// **[R59]** — an unframed body is decoded whole. No eight-byte skip, and the
@@ -433,9 +522,18 @@ fn an_empty_opaque_body_is_checked_before_anything_else() {
 fn an_unframed_body_decodes_whole_and_ignores_the_size_header() {
     let expected = Some("Unauthorized: token expired".to_owned());
     assert_eq!(open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, None), expected);
-    assert_eq!(open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("not a number")), expected);
-    assert_eq!(open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("0")), expected);
-    assert_eq!(open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("")), expected);
+    assert_eq!(
+        open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("not a number")),
+        expected
+    );
+    assert_eq!(
+        open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("0")),
+        expected
+    );
+    assert_eq!(
+        open_opaque(UNFRAMED_BODY, UNFRAMED_NONCE, Some("")),
+        expected
+    );
 }
 
 /// A framed error body takes the full LZ4 path, and *there* the size header
@@ -450,7 +548,10 @@ fn a_framed_opaque_body_needs_the_size_header() {
     assert_eq!(open_opaque(JAMESON_BODY, NONCE, Some("0")), None);
     assert_eq!(open_opaque(JAMESON_BODY, NONCE, Some("-1")), None);
     assert_eq!(open_opaque(JAMESON_BODY, NONCE, Some("27.5")), None);
-    assert_eq!(open_opaque(JAMESON_BODY, NONCE, Some("9007199254740993")), None);
+    assert_eq!(
+        open_opaque(JAMESON_BODY, NONCE, Some("9007199254740993")),
+        None
+    );
 }
 
 /// The size header goes through `Number()`, not a decimal parser. **[R10]**
@@ -461,7 +562,10 @@ fn the_size_header_uses_javascript_number_coercion() {
         open_opaque(JAMESON_BODY, NONCE, Some(" 0x1b ")),
         Some(JAMESON_TEXT.to_owned()),
     );
-    assert_eq!(open_opaque(JAMESON_BODY, NONCE, Some("2.7e1")), Some(JAMESON_TEXT.to_owned()));
+    assert_eq!(
+        open_opaque(JAMESON_BODY, NONCE, Some("2.7e1")),
+        Some(JAMESON_TEXT.to_owned())
+    );
 }
 
 /// The response-header nonce rule, applied at the opaque entry point (ts:2830).
@@ -469,18 +573,43 @@ fn the_size_header_uses_javascript_number_coercion() {
 fn an_opaque_nonce_is_case_preserving_and_gated() {
     // Sealed under the upper-case nonce and read back with it.
     const UPPER: &str = "7IEQXw==";
-    assert_eq!(open_opaque(UPPER, "AABBCCDDEEFF", None), Some("nope".to_owned()));
-    assert_eq!(open_opaque(UPPER, "aabbccddeeff", None), None, "case must not be folded");
+    assert_eq!(
+        open_opaque(UPPER, "AABBCCDDEEFF", None),
+        Some("nope".to_owned())
+    );
+    assert_eq!(
+        open_opaque(UPPER, "aabbccddeeff", None),
+        None,
+        "case must not be folded"
+    );
 
-    for bad in ["", "zzzzzzzzzzzz", "aabbccddeef", "aabbccddeeff0", "aabbccddee ff"] {
-        assert_eq!(open_opaque(UNFRAMED_BODY, bad, None), None, "{bad:?} is not a nonce");
+    for bad in [
+        "",
+        "zzzzzzzzzzzz",
+        "aabbccddeef",
+        "aabbccddeeff0",
+        "aabbccddee ff",
+    ] {
+        assert_eq!(
+            open_opaque(UNFRAMED_BODY, bad, None),
+            None,
+            "{bad:?} is not a nonce"
+        );
     }
 }
 
 #[test]
 fn opaque_swallows_every_other_failure() {
-    assert_eq!(open_opaque("!!!!", UNFRAMED_NONCE, None), None, "gate failure");
-    assert_eq!(open_opaque("QUJ", UNFRAMED_NONCE, None), None, "length failure");
+    assert_eq!(
+        open_opaque("!!!!", UNFRAMED_NONCE, None),
+        None,
+        "gate failure"
+    );
+    assert_eq!(
+        open_opaque("QUJ", UNFRAMED_NONCE, None),
+        None,
+        "length failure"
+    );
     // Four bytes that decrypt to 0xff 0xfe 0xfd 0xfc — not UTF-8, and not an
     // error the user is told about.
     let invalid_utf8 = seal_query(&[0xff, 0xfe, 0xfd, 0xfc], &nonce(UNFRAMED_NONCE));
@@ -507,7 +636,9 @@ fn the_base64_gate_matches_the_regular_expression() {
     for good in ["", "QUJD", "QUI=", "QQ==", "+/+/", "QUJDQUJD"] {
         assert!(is_wire_base64(good), "{good:?} should pass");
     }
-    for bad in ["QUJ", "Q===", "====", "=QUJ", "QU==QUJD", "QU-_", "QU J=", "QUJ\n", "QUJD "] {
+    for bad in [
+        "QUJ", "Q===", "====", "=QUJ", "QU==QUJD", "QU-_", "QU J=", "QUJ\n", "QUJD ",
+    ] {
         assert!(!is_wire_base64(bad), "{bad:?} should fail");
     }
 }

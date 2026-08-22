@@ -4,10 +4,10 @@ pub mod batch;
 pub mod commander;
 pub mod digest;
 pub mod eddn;
-pub mod marketdata;
-pub mod resources;
 pub mod id64;
+pub mod marketdata;
 pub mod read;
+pub mod resources;
 pub mod starsystem;
 pub mod trade;
 pub mod vendor;
@@ -47,9 +47,14 @@ fn to_commodity<'a>(key: &'a str, source: &'a JsObject) -> Commodity<'a> {
     Commodity {
         // Three fallbacks, and the last one exists only to turn NaN into 0.
         // `readMarketPoints` has the same shape with two. R16.
-        id: read::or_else(source.num("id"), || read::or_else(js::to_number(key), || 0.0)),
+        id: read::or_else(source.num("id"), || {
+            read::or_else(js::to_number(key), || 0.0)
+        }),
         name: read::or_else_str(source.string("name"), key),
-        category: read::or_else_str(read::trimmed(source.string("categoryname")), "Uncategorised"),
+        category: read::or_else_str(
+            read::trimmed(source.string("categoryname")),
+            "Uncategorised",
+        ),
         stock: source.num("stock"),
         stock_bracket: source.num("stockBracket"),
         buy_price: source.num("buyPrice"),
@@ -99,7 +104,11 @@ pub fn parse_market_snapshot(document: &JsValue) -> Option<MarketSnapshot<'_>> {
         return None;
     }
 
-    Some(MarketSnapshot { payload, commodities, inventory: payload.list("inventory") })
+    Some(MarketSnapshot {
+        payload,
+        commodities,
+        inventory: payload.list("inventory"),
+    })
 }
 
 impl<'a> MarketSnapshot<'a> {
@@ -119,7 +128,9 @@ impl<'a> MarketSnapshot<'a> {
     /// have. R18.
     #[must_use]
     pub fn credits(&self) -> Option<f64> {
-        self.payload.present("credits").then(|| self.payload.num("credits"))
+        self.payload
+            .present("credits")
+            .then(|| self.payload.num("credits"))
     }
 }
 
@@ -176,14 +187,18 @@ pub fn find_commodity<'a, 'b>(
         .collect::<String>()
         .to_lowercase();
 
-    let exact: Vec<&Commodity<'a>> =
-        commodities.iter().filter(|c| c.name.to_lowercase() == needle).collect();
+    let exact: Vec<&Commodity<'a>> = commodities
+        .iter()
+        .filter(|c| c.name.to_lowercase() == needle)
+        .collect();
     if exact.len() == 1 {
         return Ok(exact[0]);
     }
 
-    let partial: Vec<&Commodity<'a>> =
-        commodities.iter().filter(|c| c.name.to_lowercase().contains(&needle)).collect();
+    let partial: Vec<&Commodity<'a>> = commodities
+        .iter()
+        .filter(|c| c.name.to_lowercase().contains(&needle))
+        .collect();
     match partial.len() {
         1 => Ok(partial[0]),
         0 => Err(format!("No commodity matching \"{token}\" at this market")),

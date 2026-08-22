@@ -78,7 +78,10 @@ impl Relayed {
     /// questions about the same market and expire on different clocks.
     #[must_use]
     pub fn new(cache_root: &Path, window_minutes: f64) -> Self {
-        Self { root: cache_root.join("eddn"), window_ms: window_minutes * 60_000.0 }
+        Self {
+            root: cache_root.join("eddn"),
+            window_ms: window_minutes * 60_000.0,
+        }
     }
 
     fn path(&self, market_id: f64) -> PathBuf {
@@ -111,7 +114,10 @@ impl Relayed {
             ("relayedAt".into(), JsValue::Num(now_ms)),
             ("version".into(), JsValue::Num(f64::from(FORMAT_VERSION))),
         ]);
-        let _ = fs.write(&self.path(market_id), &JsValue::Obj(entry).stringify_compact());
+        let _ = fs.write(
+            &self.path(market_id),
+            &JsValue::Obj(entry).stringify_compact(),
+        );
     }
 }
 
@@ -154,7 +160,10 @@ mod tests {
         log.record(&fs, 1.0, 0.0);
 
         assert!(!log.may_relay(&fs, 1.0, 29.0 * MINUTE));
-        assert!(log.may_relay(&fs, 1.0, 30.0 * MINUTE), "and the window is inclusive at its edge");
+        assert!(
+            log.may_relay(&fs, 1.0, 30.0 * MINUTE),
+            "and the window is inclusive at its edge"
+        );
     }
 
     /// One market's record says nothing about another's.
@@ -175,7 +184,8 @@ mod tests {
     fn an_unreadable_record_fails_towards_relaying() {
         let fs = RecordingFs::default();
         let log = log();
-        fs.write(&log.path(9.0), "{\"marketId\":9,\"relayed").expect("in memory");
+        fs.write(&log.path(9.0), "{\"marketId\":9,\"relayed")
+            .expect("in memory");
 
         assert!(log.may_relay(&fs, 9.0, 0.0));
     }
@@ -186,8 +196,11 @@ mod tests {
     fn a_nonfinite_instant_does_not_suppress_forever() {
         let fs = RecordingFs::default();
         let log = log();
-        fs.write(&log.path(9.0), "{\"marketId\":9,\"relayedAt\":null,\"version\":1}")
-            .expect("in memory");
+        fs.write(
+            &log.path(9.0),
+            "{\"marketId\":9,\"relayedAt\":null,\"version\":1}",
+        )
+        .expect("in memory");
 
         assert!(log.may_relay(&fs, 9.0, 1e12));
     }

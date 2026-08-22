@@ -23,8 +23,7 @@ use super::parse::{Args, Value};
 /// message. The parenthetical is `JavaScriptCore` diagnostic detail and could
 /// move on a Bun upgrade, so tests compare against this constant rather than
 /// against a literal.
-pub const POISON_TYPE_ERROR: &str =
-    "value.toLowerCase is not a function. (In 'value.toLowerCase()', 'value.toLowerCase' is undefined)";
+pub const POISON_TYPE_ERROR: &str = "value.toLowerCase is not a function. (In 'value.toLowerCase()', 'value.toLowerCase' is undefined)";
 
 /// An error thrown while *reading* an option, as opposed to while parsing one.
 ///
@@ -88,7 +87,10 @@ impl EnvSnapshot {
     /// `process.env[name]`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.0.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
+        self.0
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
     }
 }
 
@@ -137,7 +139,10 @@ impl<'a> Cli<'a> {
     /// with [`Flag::takes_value`], and only those flags can hold text \[C18\].
     #[must_use]
     pub fn optional_value(&self, flag: Flag, environment: Option<&str>) -> Option<&'a str> {
-        debug_assert!(flag.takes_value(), "C18: optionalValue is only ever called on a VALUE_FLAG");
+        debug_assert!(
+            flag.takes_value(),
+            "C18: optionalValue is only ever called on a VALUE_FLAG"
+        );
 
         if let Some(Value::Text(raw)) = self.args.get(flag) {
             let trimmed = js::text::js_trim(raw);
@@ -156,7 +161,11 @@ impl<'a> Cli<'a> {
     ///
     /// The two messages differ by whether the option has an environment
     /// fallback to mention.
-    pub fn require_value(&self, flag: Flag, environment: Option<&str>) -> Result<&'a str, CliError> {
+    pub fn require_value(
+        &self,
+        flag: Flag,
+        environment: Option<&str>,
+    ) -> Result<&'a str, CliError> {
         if let Some(value) = self.optional_value(flag, environment) {
             return Ok(value);
         }
@@ -178,7 +187,9 @@ impl<'a> Cli<'a> {
         match self.optional_value(flag, None) {
             // The complaint names the canonical spelling, not the alias the
             // user typed \[R46\].
-            Some(value) => js::parse_unsigned_integer(flag.display(), value).map(Some).map_err(CliError::from),
+            Some(value) => js::parse_unsigned_integer(flag.display(), value)
+                .map(Some)
+                .map_err(CliError::from),
             None => Ok(None),
         }
     }
@@ -207,7 +218,10 @@ impl<'a> Cli<'a> {
     /// reason: the slot was poisoned by a token that resolved through
     /// `Object.prototype` \[R47\].
     pub fn optional_switch(&self, flag: Flag) -> Result<Option<bool>, CliError> {
-        debug_assert!(!flag.takes_value(), "C18: optionalSwitch is only ever called on a BOOLEAN_FLAG");
+        debug_assert!(
+            !flag.takes_value(),
+            "C18: optionalSwitch is only ever called on a BOOLEAN_FLAG"
+        );
 
         #[expect(
             clippy::match_same_arms,

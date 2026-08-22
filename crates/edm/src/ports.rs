@@ -62,7 +62,10 @@ pub trait Fs {
 /// test assert the **sequence of delays** a scenario produces rather than
 /// sitting through them, which is both faster and a stronger statement than a
 /// wall-clock measurement.
-#[allow(async_fn_in_trait, reason = "single-threaded runtime; see HttpTransport")]
+#[allow(
+    async_fn_in_trait,
+    reason = "single-threaded runtime; see HttpTransport"
+)]
 pub trait Timer {
     async fn sleep_ms(&self, millis: f64);
 }
@@ -178,7 +181,11 @@ pub struct Ports<C, E, F> {
 impl Ports<SystemClock, OsEntropy, RealFs> {
     #[must_use]
     pub fn real() -> Self {
-        Self { clock: SystemClock, entropy: OsEntropy, fs: RealFs }
+        Self {
+            clock: SystemClock,
+            entropy: OsEntropy,
+            fs: RealFs,
+        }
     }
 }
 
@@ -228,13 +235,20 @@ pub struct RecordingFs(pub std::cell::RefCell<Vec<(std::path::PathBuf, String)>>
 
 impl RecordingFs {
     fn find(&self, path: &Path) -> Option<String> {
-        self.0.borrow().iter().rev().find(|(at, _)| at == path).map(|(_, body)| body.clone())
+        self.0
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(at, _)| at == path)
+            .map(|(_, body)| body.clone())
     }
 }
 
 impl Fs for RecordingFs {
     fn write(&self, path: &Path, contents: &str) -> std::io::Result<()> {
-        self.0.borrow_mut().push((path.to_path_buf(), contents.to_owned()));
+        self.0
+            .borrow_mut()
+            .push((path.to_path_buf(), contents.to_owned()));
         Ok(())
     }
 
@@ -296,7 +310,10 @@ mod tests {
 
     #[test]
     fn frontier_time_truncates_to_whole_seconds() {
-        let clock = FixedClock { now_ms: 1_700_000_000_999.0, uptime_seconds: 42.0 };
+        let clock = FixedClock {
+            now_ms: 1_700_000_000_999.0,
+            uptime_seconds: 42.0,
+        };
         assert_eq!(clock.frontier_time(), 1_700_000_000.0);
     }
 

@@ -51,7 +51,10 @@ pub(crate) struct Table {
 
 impl Table {
     pub(crate) fn get(&self, key: &str) -> Option<&Value> {
-        self.pairs.iter().find(|(name, _)| name == key).map(|(_, value)| value)
+        self.pairs
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value)
     }
 
     /// Every `[[key]]` entry, in file order.
@@ -103,7 +106,9 @@ impl Table {
     }
 
     pub(crate) fn str_array(&self, key: &str) -> Result<Vec<String>> {
-        let Some(value) = self.get(key) else { return Ok(Vec::new()) };
+        let Some(value) = self.get(key) else {
+            return Ok(Vec::new());
+        };
         let Value::Array(items) = value else {
             bail!("`{key}` must be an array, not a {}", value.type_name());
         };
@@ -119,14 +124,19 @@ impl Table {
     /// `key = [["a", "b"], ["c", "d"]]` — used for header lists, where order and
     /// duplicates both matter and a table would destroy both.
     pub(crate) fn pair_array(&self, key: &str) -> Result<Vec<(String, String)>> {
-        let Some(value) = self.get(key) else { return Ok(Vec::new()) };
+        let Some(value) = self.get(key) else {
+            return Ok(Vec::new());
+        };
         let Value::Array(rows) = value else {
             bail!("`{key}` must be an array, not a {}", value.type_name());
         };
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let Value::Array(cells) = row else {
-                bail!("`{key}` must hold two-element arrays, found a {}", row.type_name());
+                bail!(
+                    "`{key}` must hold two-element arrays, found a {}",
+                    row.type_name()
+                );
             };
             match cells.as_slice() {
                 [Value::Str(name), Value::Str(v)] => out.push((name.clone(), v.clone())),
@@ -180,7 +190,10 @@ struct Parser<'a> {
 }
 
 pub(crate) fn parse(text: &str) -> Result<Table> {
-    let mut parser = Parser { src: text.as_bytes(), pos: 0 };
+    let mut parser = Parser {
+        src: text.as_bytes(),
+        pos: 0,
+    };
     let mut root = Table::default();
     let mut cursor = Cursor::Root;
 
@@ -267,7 +280,9 @@ impl Parser<'_> {
     fn line(&self) -> usize {
         // Segments, not separators: an empty prefix is one segment, which is
         // line 1.
-        self.src[..self.pos.min(self.src.len())].split(|&byte| byte == b'\n').count()
+        self.src[..self.pos.min(self.src.len())]
+            .split(|&byte| byte == b'\n')
+            .count()
     }
 
     fn at(&self, message: &str) -> String {
@@ -306,7 +321,9 @@ impl Parser<'_> {
         if self.peek() != b']' {
             bail!("{}", self.at("unterminated table header"));
         }
-        let path = std::str::from_utf8(&self.src[start..self.pos])?.trim_matches(' ').to_owned();
+        let path = std::str::from_utf8(&self.src[start..self.pos])?
+            .trim_matches(' ')
+            .to_owned();
         self.pos += 1;
         if array {
             if self.peek() != b']' {
@@ -317,7 +334,12 @@ impl Parser<'_> {
         if path.is_empty() {
             bail!("{}", self.at("empty table header"));
         }
-        Ok((path.split('.').map(|part| part.trim_matches(' ').to_owned()).collect(), array))
+        Ok((
+            path.split('.')
+                .map(|part| part.trim_matches(' ').to_owned())
+                .collect(),
+            array,
+        ))
     }
 
     fn key(&mut self) -> Result<String> {
@@ -326,7 +348,10 @@ impl Parser<'_> {
             self.pos += 1;
         }
         if self.pos == start {
-            bail!("{}", self.at(&format!("expected a key, found {:?}", self.peek() as char)));
+            bail!(
+                "{}",
+                self.at(&format!("expected a key, found {:?}", self.peek() as char))
+            );
         }
         Ok(String::from_utf8(self.src[start..self.pos].to_vec())?)
     }
@@ -425,9 +450,8 @@ impl Parser<'_> {
             b'"' => out.push(b'"'),
             b'\\' => out.push(b'\\'),
             b'u' => {
-                let hex = std::str::from_utf8(
-                    self.src.get(self.pos..self.pos + 4).unwrap_or_default(),
-                )?;
+                let hex =
+                    std::str::from_utf8(self.src.get(self.pos..self.pos + 4).unwrap_or_default())?;
                 let scalar = u32::from_str_radix(hex, 16)?;
                 self.pos += 4;
                 let ch = char::from_u32(scalar)
@@ -435,7 +459,10 @@ impl Parser<'_> {
                 let mut buffer = [0u8; 4];
                 out.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
             }
-            other => bail!("{}", self.at(&format!("unknown escape \\{}", other as char))),
+            other => bail!(
+                "{}",
+                self.at(&format!("unknown escape \\{}", other as char))
+            ),
         }
         Ok(())
     }

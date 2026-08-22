@@ -46,7 +46,12 @@ struct Parts {
 /// disagreement points at the field rather than at the whole struct.
 fn render(parts: &id64::AddressParts) -> String {
     let c = |v: &Coordinates| {
-        format!("{}/{}/{}", js::js_number(v.x), js::js_number(v.y), js::js_number(v.z))
+        format!(
+            "{}/{}/{}",
+            js::js_number(v.x),
+            js::js_number(v.y),
+            js::js_number(v.z)
+        )
     };
     format!(
         "mass={} letter={} size={} sector={} boxel={} index={} origin={}",
@@ -61,7 +66,14 @@ fn render(parts: &id64::AddressParts) -> String {
 }
 
 fn render_fixture(p: &Parts) -> String {
-    let c = |v: &Coord| format!("{}/{}/{}", js::js_number(v.x), js::js_number(v.y), js::js_number(v.z));
+    let c = |v: &Coord| {
+        format!(
+            "{}/{}/{}",
+            js::js_number(v.x),
+            js::js_number(v.y),
+            js::js_number(v.z)
+        )
+    };
     format!(
         "mass={} letter={} size={} sector={} boxel={} index={} origin={}",
         p.mass_code,
@@ -103,7 +115,11 @@ fn decode_matches_the_original() {
         checked += 1;
     }
 
-    assert!(mismatches.is_empty(), "{checked} rows checked:\n{}", mismatches.join("\n"));
+    assert!(
+        mismatches.is_empty(),
+        "{checked} rows checked:\n{}",
+        mismatches.join("\n")
+    );
 }
 
 #[test]
@@ -147,7 +163,11 @@ fn encode_and_containment_match_the_original() {
         checked += 1;
     }
 
-    assert!(mismatches.is_empty(), "{checked} rows checked:\n{}", mismatches.join("\n"));
+    assert!(
+        mismatches.is_empty(),
+        "{checked} rows checked:\n{}",
+        mismatches.join("\n")
+    );
 }
 
 /// The documented anchor, stated outright: `systemAddr=5378909424384` is
@@ -160,9 +180,18 @@ fn hyades_sector_anchor() {
     assert_eq!(parts.mass_code_letter, 'a');
     assert_eq!(parts.boxel_size, 10.0);
     assert_eq!(parts.index, 0.0);
-    assert_eq!((parts.sector.x, parts.sector.y, parts.sector.z), (39.0, 31.0, 18.0));
-    assert_eq!((parts.boxel.x, parts.boxel.y, parts.boxel.z), (17.0, 126.0, 96.0));
-    assert_eq!((parts.origin.x, parts.origin.y, parts.origin.z), (105.0, -45.0, -105.0));
+    assert_eq!(
+        (parts.sector.x, parts.sector.y, parts.sector.z),
+        (39.0, 31.0, 18.0)
+    );
+    assert_eq!(
+        (parts.boxel.x, parts.boxel.y, parts.boxel.z),
+        (17.0, 126.0, 96.0)
+    );
+    assert_eq!(
+        (parts.origin.x, parts.origin.y, parts.origin.z),
+        (105.0, -45.0, -105.0)
+    );
 }
 
 /// Every address that decodes must re-encode to itself from its own boxel
@@ -174,7 +203,9 @@ fn round_trip_from_the_boxel_origin() {
     // code, rather than a proptest, so failures are reproducible by address.
     let mut state = 0x243f_6a88_85a3_08d3u64;
     for _ in 0..20_000 {
-        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let address = ((state >> 11) as f64).floor();
         if !js::safe_int(address) {
             continue;
@@ -183,13 +214,20 @@ fn round_trip_from_the_boxel_origin() {
         let packed = id64::encode(parts.origin, f64::from(parts.mass_code), parts.index)
             .expect("an address decodes into coordinates that re-encode");
         assert_eq!(
-            packed, address,
+            packed,
+            address,
             "address {} did not round-trip (mass code {})",
             js::js_number(address),
             parts.mass_code
         );
-        assert!(id64::contains(&parts, parts.origin), "the origin is inside its own boxel");
+        assert!(
+            id64::contains(&parts, parts.origin),
+            "the origin is inside its own boxel"
+        );
         checked += 1;
     }
-    assert!(checked > 15_000, "expected most samples to be usable, got {checked}");
+    assert!(
+        checked > 15_000,
+        "expected most samples to be usable, got {checked}"
+    );
 }

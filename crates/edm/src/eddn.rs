@@ -49,7 +49,11 @@ pub async fn submit<H: HttpTransport>(
                 detail: if ok {
                     "OK".to_owned()
                 } else {
-                    format!("{} {}", response.status, text::clamp(body, 120, Metric::Utf16))
+                    format!(
+                        "{} {}",
+                        response.status,
+                        text::clamp(body, 120, Metric::Utf16)
+                    )
                 },
                 commodities: count,
             }
