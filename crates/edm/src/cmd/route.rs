@@ -32,6 +32,7 @@ use edm_route::report::RouteKind;
 use edm_route::time::TimeModel;
 use edm_route::view;
 
+use crate::route::access;
 use crate::route::acquire;
 use crate::route::cache::Cache;
 use crate::route::discover::{self, DEFAULT_ANCHOR_BUDGET};
@@ -372,10 +373,23 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
 
     let mut selection = select::select(stations, config, &centre.coordinates);
 
+    let cache = cache_for(app, config);
+    // Before the plan is priced, so a door that will not open never appears in
+    // a request count the user is asked to approve \[C36\]. Free of the
+    // game-internal API's budget: this is Spansh, and it is two requests per
+    // five hundred carriers.
+    let carrier_access = filter_by_docking_access(app, config, &cache, &mut selection, &note)
+        .await
+        .map_err(|error| {
+            format!("{error}\n   pass --carrier-access any to rank carriers without checking")
+        })?;
+    if let Some((cost, removed)) = carrier_access {
+        note(access_note(cost, removed));
+    }
+
     // Before the gate, not after it: the cache decides how many requests the
     // sweep will actually send, and a plan that priced twenty-two and then
     // sent none is a plan nobody can check. A few file reads.
-    let cache = cache_for(app, config);
     if config.cache && selection.keep.len() >= CACHE_NOTE_THRESHOLD {
         note(format!(
             "checking the cache for {} markets...",
@@ -544,6 +558,21 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         if let Some(topology) = &official_topology {
             stations = official_stations(topology, &official.systems);
             selection = select::select(stations, config, &centre.coordinates);
+            // The re-selection replaces `keep` wholesale, so the filter applied
+            // above is gone with it. Warm ids cost nothing — the cache is keyed
+            // per market, not per batch — so this is a repeat of the decision,
+            // not of the requests.
+            if let Some((cost, removed)) =
+                filter_by_docking_access(app, config, &cache, &mut selection, &note)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "{error}\n   pass --carrier-access any to rank carriers without checking"
+                        )
+                    })?
+            {
+                note(access_note(cost, removed));
+            }
         }
         let removed = apply_official_enrichment(
             &mut selection,
@@ -1293,6 +1322,92 @@ fn pacing(config: &RouteConfig) -> Pacing {
 /// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
 /// harness* \[R55\]. Reading the process environment directly here would give
 /// the cache a home the rest of the program cannot see.
+/// The one line a docking-access pass prints.
+///
+/// It names the source, because this is the only fact in the run that does not
+/// come from Frontier or Ardent, and it names what was *kept* unproven, because
+/// that number is the size of the claim the filter is deliberately not making.
+fn access_note(cost: access::Cost, removed: access::Removed) -> String {
+    use std::fmt::Write as _;
+
+    let n = |value: usize| edm_core::js::format_integer(value as f64);
+    let mut text = format!(
+        "carrier access: {} checked against Spansh",
+        n(cost.carriers)
+    );
+    if cost.cache_hits > 0 {
+        let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
+    }
+    let _ = write!(text, ", {} restrict docking", n(removed.restricted));
+    if removed.unproven > 0 {
+        let _ = write!(text, ", {} unproven and dropped", n(removed.unproven));
+    } else if removed.unproven_kept > 0 {
+        let _ = write!(text, ", {} unproven and kept", n(removed.unproven_kept));
+    }
+    text
+}
+
+/// Resolve docking access for the carriers in `selection`, then drop the ones
+/// this run will not admit.
+///
+/// Called wherever a `select::select` produces a candidate set, and always
+/// *before* that set is priced — a carrier the commander cannot enter must
+/// never reach the plan, let alone the spend gate. Returns what it removed so
+/// the caller can say so out loud.
+///
+/// A Spansh failure ends the run. The alternative is a filter that quietly
+/// covers less than it claims, and an unfiltered answer that looks filtered is
+/// worse than no filter at all: it is exactly the state this feature exists to
+/// leave behind.
+async fn filter_by_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+    app: &App<'_, H, C, E, F>,
+    config: &RouteConfig,
+    cache: &Cache,
+    selection: &mut edm_core::select::Selection,
+    note: &dyn Fn(String),
+) -> Result<Option<(access::Cost, access::Removed)>, String> {
+    if !config.carrier_access.queries_spansh() {
+        return Ok(None);
+    }
+    let carriers: Vec<f64> = selection
+        .keep
+        .iter()
+        .filter(|station| edm_core::ardent::is_carrier(station.station_type.as_deref()))
+        .map(|station| station.market_id)
+        .collect();
+    if carriers.is_empty() {
+        return Ok(None);
+    }
+
+    note(format!(
+        "checking docking access for {} fleet {} against Spansh...",
+        edm_core::js::format_integer(carriers.len() as f64),
+        if carriers.len() == 1 {
+            "carrier"
+        } else {
+            "carriers"
+        },
+    ));
+
+    let client = crate::spansh::SpanshClient::new(app.http, &app.overrides.spansh_base);
+    let (index, cost) = access::resolve(
+        &client,
+        &app.ports.fs,
+        cache.root(),
+        &carriers,
+        app.ports.clock.now_ms(),
+        access::CachePolicy {
+            enabled: config.cache,
+            refresh: config.refresh,
+        },
+        None,
+    )
+    .await?;
+
+    let removed = access::apply(selection, &index, config.carrier_access);
+    Ok(Some((cost, removed)))
+}
+
 fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
     let root = Cache::locate(
         app.cli.env("XDG_CACHE_HOME"),

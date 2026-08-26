@@ -13,6 +13,7 @@
 //! and running the paced two-stage sweep that fills the market table the
 //! optimiser is handed.
 
+pub mod access;
 pub mod acquire;
 pub mod atlas;
 pub mod cache;

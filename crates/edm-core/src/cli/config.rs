@@ -25,6 +25,7 @@ use crate::domain::eddn::EddnOptions;
 use crate::domain::trade::{self, Kind, Space, TradePlan};
 use crate::domain::{self, Commodity, MarketSnapshot};
 use crate::js::{self, text};
+use crate::spansh::Policy;
 use crate::wire::Nonce;
 
 use super::access::{Cli, CliError};
@@ -1161,6 +1162,12 @@ pub struct RouteConfig {
     pub pad: Pad,
     pub station_types: Option<Vec<String>>,
     pub include_carriers: bool,
+    /// Which carriers survive, by the docking access Spansh publishes \[C36\].
+    ///
+    /// Always [`Policy::Any`] unless `include_carriers` is set, because without
+    /// it no carrier reaches the filter at all and a policy would only buy
+    /// requests to answer a question nobody asked.
+    pub carrier_access: Policy,
     pub include_settlements: bool,
     pub max_star_distance_ls: Option<f64>,
 
@@ -1284,6 +1291,43 @@ pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 /// expand to commodities, and `--qty` names an optional common volume. Those
 /// spellings already mean exactly those things on `trade` and on a regional
 /// route survey, so callers do not have to learn a parallel vocabulary.
+/// `--carrier-access`, and the default a `--carriers` run gets without it.
+///
+/// **Defaulting to `open` rather than `any` is the point of the feature.** A
+/// carrier that limits docking to its owner's squadron is not a route, it is a
+/// wasted flight, and a commander who asked for carriers asked for carriers
+/// they can enter. The cost is bounded and paid before the spend gate: two
+/// Spansh requests per five hundred candidates, none of them against the
+/// game-internal API's budget.
+///
+/// Without `--carriers` there is nothing to filter, so the flag is **refused**
+/// rather than accepted and ignored: silently honouring a constraint that
+/// cannot bind is how a user comes to believe a run was filtered when it was
+/// not.
+fn carrier_access(cli: &Cli<'_>, include_carriers: bool) -> Result<Policy, CliError> {
+    let Some(raw) = cli.optional_value(Flag::CarrierAccess, None) else {
+        return Ok(if include_carriers {
+            Policy::Open
+        } else {
+            Policy::Any
+        });
+    };
+    if !include_carriers {
+        return Err(
+            "--carrier-access needs --carriers; without it no fleet carrier is ranked at all"
+                .to_owned()
+                .into(),
+        );
+    }
+    Policy::parse(raw).ok_or_else(|| {
+        format!(
+            "--carrier-access \"{raw}\" is not an access policy (known: {})",
+            Policy::NAMES.join(", "),
+        )
+        .into()
+    })
+}
+
 fn quick_lookup(cli: &Cli<'_>) -> Result<Option<QuickLookup>, CliError> {
     let Some(markets) = cli.optional_number(Flag::Quick)? else {
         return Ok(None);
@@ -1441,6 +1485,12 @@ pub fn route_config_with_reference(
     let cargo = cli.optional_number(Flag::Cargo)?;
     let top = cli.optional_number(Flag::Top)?.unwrap_or(DEFAULT_TOP) as usize;
     let quick = quick_lookup(cli)?;
+    // Carriers jump without warning and price idiosyncratically, so a route
+    // through one can evaporate between planning and flying. They are also
+    // over a third of the priced markets in range, so excluding them is most
+    // of the request budget too.
+    let include_carriers = cli.switch_value(Flag::Carriers, false)?;
+    let carrier_access = carrier_access(cli, include_carriers)?;
     let shape = requested_shape.unwrap_or_else(|| {
         if quick.is_some() {
             // `--quick` answers "where do I buy and sell these now?". That is a
@@ -1465,11 +1515,8 @@ pub fn route_config_with_reference(
                 .filter(|kind| !kind.is_empty())
                 .collect()
         }),
-        // Carriers jump without warning and price idiosyncratically, so a route
-        // through one can evaporate between planning and flying. They are also
-        // over a third of the priced markets in range, so excluding them is
-        // most of the request budget too.
-        include_carriers: cli.switch_value(Flag::Carriers, false)?,
+        include_carriers,
+        carrier_access,
         // Odyssey settlements are 63% of what Ardent calls a station near Sol
         // and cannot berth a large ship at all, so excluding them is not a cost
         // saving, it is correctness.

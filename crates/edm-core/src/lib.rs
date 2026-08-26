@@ -24,5 +24,6 @@ pub mod js;
 pub mod pace;
 pub mod render;
 pub mod select;
+pub mod spansh;
 pub mod spend;
 pub mod wire;

@@ -92,6 +92,10 @@ pub const DEFAULT_USER_AGENT: &str = "EDGame/11.0/Win64";
 /// Ardent is the only route that maps a market id back to its names.
 pub const ARDENT_BASE_URL: &str = "https://api.ardent-insight.com/v2";
 
+/// Spansh is the only index that publishes fleet-carrier docking access
+/// \[C36\]. Ardent ingests the same EDDN messages and drops the field.
+pub const SPANSH_BASE_URL: &str = "https://spansh.co.uk/api";
+
 /// The credential field widths the game-internal API expects.
 pub const MACHINE_TOKEN_LENGTH: usize = 80;
 /// The shortest `authToken` that is plausibly a token rather than a truncated

@@ -95,6 +95,10 @@ pub enum Flag {
     /// market in the region. `--item` and/or `--category` supply the commodity list
     /// and `n` is the number of highest-rate hops kept per commodity.
     Quick,
+    /// `--carrier-access <any|open|proven>`: which fleet carriers survive, by
+    /// the docking access Spansh publishes for them \[C36\]. Route-only, and
+    /// meaningless without `--carriers`, which is refused rather than ignored.
+    CarrierAccess,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -154,7 +158,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 86] = [
+    pub const ALL: [Self; 87] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -214,6 +218,7 @@ impl Flag {
         Self::EddnRps,
         Self::MinLevel,
         Self::Quick,
+        Self::CarrierAccess,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -319,6 +324,7 @@ impl Flag {
             "verifysystems" => Self::VerifySystems,
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
+            "carrieraccess" => Self::CarrierAccess,
             _ => return None,
         })
     }
@@ -383,6 +389,7 @@ impl Flag {
             Self::EddnRps => "--eddn-rps",
             Self::MinLevel => "--min-level",
             Self::Quick => "--quick",
+            Self::CarrierAccess => "--carrier-access",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

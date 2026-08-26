@@ -14,6 +14,7 @@
 //! would have won on rate.
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use futures_util::StreamExt as _;
 
@@ -31,6 +32,7 @@ use crate::ardent::ArdentClient;
 use crate::cmd::{App, CmdResult};
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs, Timer};
+use crate::route::access::{self, AccessIndex};
 use crate::route::acquire::{self, Prepared};
 use crate::route::cache::{Cache, Hits};
 use crate::route::pacer::Pacer;
@@ -198,12 +200,24 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         .collect::<Vec<_>>()
         .await;
 
+    // Hoisted out of the loop so the first Ardent error still ends the run
+    // before a single Spansh request is spent on candidates that will not be
+    // used. `collect` on a `Result` yields the first `Err` in iteration order,
+    // which is exactly what the `?` inside the loop used to do.
+    let answers = answers.into_iter().collect::<Result<Vec<_>, String>>()?;
+
+    // One resolution for the whole lookup, before any side is selected: every
+    // commodity's price pages draw on the same regional pool of carriers, so
+    // resolving per commodity would ask Spansh the same question once per
+    // --item \[C36\].
+    let docking = quick_docking_access(app, config, &configured_cache, &answers, &note).await?;
+
     let mut candidates = Vec::new();
     let mut considered = 0usize;
     let mut exclusions = Vec::new();
     let mut barren = Vec::new();
     for answer in answers {
-        let (commodity, exports, imports, local_exports, local_imports) = answer?;
+        let (commodity, exports, imports, local_exports, local_imports) = answer;
         // Whether Ardent's index holds this name at all, before any floor or
         // filter of ours has run. A misspelt --item and a commodity nobody
         // trades nearby both end with no candidates, and they call for
@@ -223,6 +237,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             config,
             &centre.coordinates,
             assumed_cargo,
+            &docking,
         );
         considered += selected.considered;
         merge_exclusions(&mut exclusions, selected.exclusions);
@@ -697,6 +712,104 @@ fn resolve_items(
     Ok(wanted)
 }
 
+/// One commodity's five Ardent price pages: the name, the two nearby sides,
+/// and the two reference-system sides.
+type CommodityAnswer = (
+    String,
+    Vec<CommodityPrice>,
+    Vec<CommodityPrice>,
+    Vec<CommodityPrice>,
+    Vec<CommodityPrice>,
+);
+
+/// Resolve docking access for every fleet carrier anywhere in the Ardent price
+/// pages, once \[C36\].
+///
+/// `--quick` never builds the region-wide station list the full sweep filters,
+/// so there is no single `Selection` to hang this off. What it has instead is
+/// four price-ranked row vectors per commodity, and the same carrier routinely
+/// appears in several of them — a carrier that sells Gold and buys Silver is
+/// two rows and one door. Deduplicating across the whole lookup before asking
+/// is the difference between one batch and one batch per commodity.
+async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+    app: &App<'_, H, C, E, F>,
+    config: &RouteConfig,
+    cache: &Cache,
+    answers: &[CommodityAnswer],
+    note: &dyn Fn(String),
+) -> Result<AccessIndex, String> {
+    if !config.carrier_access.queries_spansh() {
+        return Ok(AccessIndex::default());
+    }
+
+    let mut seen = HashSet::new();
+    let mut carriers = Vec::new();
+    for (_, exports, imports, local_exports, local_imports) in answers {
+        for row in exports
+            .iter()
+            .chain(imports)
+            .chain(local_exports)
+            .chain(local_imports)
+        {
+            if !ardent::is_carrier(row.station.station_type.as_deref()) {
+                continue;
+            }
+            if seen.insert(row.station.market_id.to_bits()) {
+                carriers.push(row.station.market_id);
+            }
+        }
+    }
+    if carriers.is_empty() {
+        return Ok(AccessIndex::default());
+    }
+
+    note(format!(
+        "checking docking access for {} fleet {} against Spansh...",
+        edm_core::js::format_integer(carriers.len() as f64),
+        plural(carriers.len(), "carrier", "carriers"),
+    ));
+
+    let client = crate::spansh::SpanshClient::new(app.http, &app.overrides.spansh_base);
+    let (index, cost) = access::resolve(
+        &client,
+        &app.ports.fs,
+        cache.root(),
+        &carriers,
+        app.ports.clock.now_ms(),
+        access::CachePolicy {
+            enabled: config.cache,
+            refresh: config.refresh,
+        },
+        None,
+    )
+    .await
+    .map_err(|error| {
+        format!("{error}\n   pass --carrier-access any to rank carriers without checking")
+    })?;
+
+    let n = |value: usize| edm_core::js::format_integer(value as f64);
+    let mut text = format!("carrier access: {} checked against Spansh", n(cost.carriers));
+    if cost.cache_hits > 0 {
+        let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
+    }
+    let _ = write!(text, ", {} restrict docking", n(cost.restricted));
+    if cost.unknown > 0 {
+        let _ = write!(
+            text,
+            ", {} unproven and {}",
+            n(cost.unknown),
+            if config.carrier_access == edm_core::spansh::Policy::Proven {
+                "dropped"
+            } else {
+                "kept"
+            },
+        );
+    }
+    note(text);
+
+    Ok(index)
+}
+
 /// English agreement for a count this module prints.
 ///
 /// `--quick 1` is the common case, and "1 sellers" would announce a bug that is
@@ -706,6 +819,10 @@ const fn plural(count: usize, one: &'static str, many: &'static str) -> &'static
 }
 
 /// Filter, apply ordinary route access rules, and retain a price-optimal side.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the rows, what they must match, the ranking bound, the ship's access rules and the docking index; a struct would hide which of them is the filter"
+)]
 fn select_side(
     rows: Vec<CommodityPrice>,
     wanted: &str,
@@ -714,6 +831,7 @@ fn select_side(
     count: usize,
     config: &RouteConfig,
     centre: &edm_core::domain::id64::Coordinates,
+    docking: &AccessIndex,
 ) -> SideSelection {
     let mut eligible = rows
         .into_iter()
@@ -728,7 +846,7 @@ fn select_side(
     // here, and a row Ardent repeats is one market, not two candidates.
     let mut seen = HashSet::new();
     eligible.retain(|row| seen.insert(row.station.market_id.to_bits()));
-    let station_selection = select::select(
+    let mut station_selection = select::select(
         eligible
             .iter()
             .map(|row| row.station.clone())
@@ -736,6 +854,10 @@ fn select_side(
         config,
         centre,
     );
+    // Here rather than after the price sort, so a carrier that cannot be
+    // entered gives its slot back: the hop it would have taken is re-filled by
+    // the next best one instead of being silently lost from the answer.
+    access::apply(&mut station_selection, docking, config.carrier_access);
     let keep = station_selection
         .keep
         .iter()
@@ -795,6 +917,7 @@ fn select_commodity(
     config: &RouteConfig,
     centre: &edm_core::domain::id64::Coordinates,
     cargo: f64,
+    docking: &AccessIndex,
 ) -> SideSelection {
     let sell = select_side(
         exports,
@@ -804,6 +927,7 @@ fn select_commodity(
         usize::MAX,
         config,
         centre,
+        docking,
     );
     let buy = select_side(
         imports,
@@ -813,6 +937,7 @@ fn select_commodity(
         usize::MAX,
         config,
         centre,
+        docking,
     );
     let mut exclusions = Vec::new();
     merge_exclusions(&mut exclusions, sell.exclusions);
@@ -1367,6 +1492,7 @@ mod tests {
                 y: 0.0,
                 z: 0.0,
             },
+            &AccessIndex::default(),
         );
         assert_eq!(side.candidates.len(), 2);
         assert_eq!(side.candidates[0].price.price, 7.0);
@@ -1395,6 +1521,7 @@ mod tests {
                 y: 0.0,
                 z: 0.0,
             },
+            &AccessIndex::default(),
         );
         assert_eq!(
             side.considered, 3,
@@ -1635,6 +1762,7 @@ mod tests {
                 y: 0.0,
                 z: 0.0,
             },
+            &AccessIndex::default(),
         );
         assert_eq!(side.candidates.len(), 1);
         assert!(has_unpublished_import_demand(&side.candidates[0].price));
@@ -1687,6 +1815,7 @@ mod tests {
                 z: 0.0,
             },
             1_232.0,
+            &AccessIndex::default(),
         );
         let sellers: Vec<f64> = selected
             .candidates
@@ -1727,6 +1856,7 @@ mod tests {
                 z: 0.0,
             },
             1_232.0,
+            &AccessIndex::default(),
         );
         let buyers: Vec<f64> = selected
             .candidates

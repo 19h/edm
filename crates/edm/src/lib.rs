@@ -16,5 +16,6 @@ pub mod out;
 pub mod ports;
 pub mod route;
 pub mod secret;
+pub mod spansh;
 pub mod sweep;
 pub mod sys;
