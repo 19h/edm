@@ -82,7 +82,13 @@ Which markets (all of these prune before anything is sent)
                            asks nothing and ranks them all. Both filtered
                            policies refuse the run if Spansh cannot be reached,
                            rather than report a region as more dockable than it
-                           was checked to be
+                           was checked to be.
+                           Your own journal overrides all of it: a carrier that
+                           answered this ship DockingDenied/RestrictedAccess is
+                           dropped however open Spansh calls it, and one you
+                           have actually docked at is kept however closed —
+                           which is the only way a squadron carrier you are in
+                           the squadron of survives `open`
   --settlements            consider Odyssey settlements; requires --pad small
                            because they cannot berth a large ship
   --min-supply <n>         default 1        --min-demand <n>   default 1

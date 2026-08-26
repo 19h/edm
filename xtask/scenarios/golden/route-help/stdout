@@ -49,6 +49,25 @@ Which markets (all of these prune before anything is sent)
   --include-carriers       fleet carriers are excluded by default: they jump
                            without warning, so a route through one can evaporate
                            between planning and flying
+  --carrier-access <p>     any | open | proven   default open, with --carriers.
+                           Frontier publishes no docking access anywhere this
+                           program can read it, so `open` and `proven` ask
+                           Spansh — two requests per 500 carriers, before the
+                           spend gate, so a carrier you cannot enter never costs
+                           a market read. `open` drops the ones Spansh reports
+                           as squadron-, friends- or owner-only and keeps the
+                           roughly one third it publishes nothing about;
+                           `proven` keeps only carriers it calls open; `any`
+                           asks nothing and ranks them all. Both filtered
+                           policies refuse the run if Spansh cannot be reached,
+                           rather than report a region as more dockable than it
+                           was checked to be.
+                           Your own journal overrides all of it: a carrier that
+                           answered this ship DockingDenied/RestrictedAccess is
+                           dropped however open Spansh calls it, and one you
+                           have actually docked at is kept however closed —
+                           which is the only way a squadron carrier you are in
+                           the squadron of survives `open`
   --settlements            consider Odyssey settlements; requires --pad small
                            because they cannot berth a large ship
   --min-supply <n>         default 1        --min-demand <n>   default 1

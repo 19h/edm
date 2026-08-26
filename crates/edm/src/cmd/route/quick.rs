@@ -72,6 +72,7 @@ struct SideSelection {
 pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
     timer: &T,
 ) -> CmdResult {
     let quick = config
@@ -210,7 +211,17 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     // commodity's price pages draw on the same regional pool of carriers, so
     // resolving per commodity would ask Spansh the same question once per
     // --item \[C36\].
-    let docking = quick_docking_access(app, config, &configured_cache, &answers, &note).await?;
+    let (docking, docking_report) =
+        quick_docking_access(
+            app,
+            config,
+            &configured_cache,
+            &answers,
+            &centre.coordinates,
+            commander,
+            &note,
+        )
+        .await?;
 
     let mut candidates = Vec::new();
     let mut considered = 0usize;
@@ -485,6 +496,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         &coverage,
         super::SpecialOpportunities::default(),
         Some(&provenance),
+        docking_report,
         watch,
     );
 
@@ -736,14 +748,16 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     config: &RouteConfig,
     cache: &Cache,
     answers: &[CommodityAnswer],
+    centre: &edm_core::domain::id64::Coordinates,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
     note: &dyn Fn(String),
-) -> Result<AccessIndex, String> {
+) -> Result<(AccessIndex, Option<access::Report>), String> {
     if !config.carrier_access.queries_spansh() {
-        return Ok(AccessIndex::default());
+        return Ok((AccessIndex::default(), None));
     }
 
     let mut seen = HashSet::new();
-    let mut carriers = Vec::new();
+    let mut stations = Vec::new();
     for (_, exports, imports, local_exports, local_imports) in answers {
         for row in exports
             .iter()
@@ -755,12 +769,25 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                 continue;
             }
             if seen.insert(row.station.market_id.to_bits()) {
-                carriers.push(row.station.market_id);
+                stations.push(row.station.clone());
             }
         }
     }
+
+    // Through the ordinary filters first. Ardent's price pages are capped at a
+    // thousand rows a side and are not bounded by `--pad` or
+    // `--max-star-distance`, so a wide lookup carries carriers that
+    // `select_side` is about to drop for reasons that cost nothing to check —
+    // and asking Spansh about those would be requests spent to refine an answer
+    // that has already been discarded. The rules applied here are the same ones
+    // applied there, so this can only remove carriers that were leaving anyway.
+    let carriers: Vec<f64> = select::select(stations, config, centre)
+        .keep
+        .iter()
+        .map(|station| station.market_id)
+        .collect();
     if carriers.is_empty() {
-        return Ok(AccessIndex::default());
+        return Ok((AccessIndex::default(), None));
     }
 
     note(format!(
@@ -780,6 +807,7 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             enabled: config.cache,
             refresh: config.refresh,
         },
+        commander,
         None,
     )
     .await
@@ -793,6 +821,13 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
     }
     let _ = write!(text, ", {} restrict docking", n(cost.restricted));
+    if cost.journal_corrections > 0 {
+        let _ = write!(
+            text,
+            " ({} corrected by your own journal)",
+            n(cost.journal_corrections)
+        );
+    }
     if cost.unknown > 0 {
         let _ = write!(
             text,
@@ -807,7 +842,19 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     }
     note(text);
 
-    Ok(index)
+    // Counted over *distinct* carriers rather than by summing the per-side
+    // `apply` calls: one carrier appears in as many price pages as it trades
+    // commodities, and it is still one door.
+    let proven = config.carrier_access == edm_core::spansh::Policy::Proven;
+    let report = access::Report {
+        cost,
+        removed: access::Removed {
+            restricted: cost.restricted,
+            unproven: if proven { cost.unknown } else { 0 },
+            unproven_kept: if proven { 0 } else { cost.unknown },
+        },
+    };
+    Ok((index, Some(report)))
 }
 
 /// English agreement for a count this module prints.

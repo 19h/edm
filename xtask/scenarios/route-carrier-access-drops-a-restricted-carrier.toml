@@ -1,0 +1,107 @@
+# route-carrier-access-drops-a-restricted-carrier
+why = "C36, and the defect it was written for: `--carriers` used to rank fleet carriers the commander cannot dock at, and a private carrier's prices are the *best* in a region precisely because nobody is arbitraging them — so the restricted one wins every hop and the whole answer is a flight to a door that will not open. Neither source `route` already reads publishes docking access: the market payload's keys are exactly `allowsDumping`, `commodities` and `inventory`, and Ardent's station record has none either. Spansh does. Three gold sellers here: a carrier Spansh reports as `Squadron Friends` and which is far and away the cheapest, a carrier Spansh reports as `All`, and a starport. `--carriers` alone defaults the policy to `open`, so the restricted carrier is dropped *before the spend gate* and never costs a game-internal API request; the open carrier survives and is polled. Two Spansh POSTs answer for the whole batch, discriminated here by which access set each one asks for. The mock never serves market 3229009401, so if the filter regresses the scenario fails on an unscripted request rather than on a diff nobody reads."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--rps", "8", "--no-cache", "--concurrency", "1", "--carriers"]
+oracle = "none"
+expect-frontier-requests = 2
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"}]
+"""
+
+# Silent Running is the cheapest gold in the region by a wide margin and is the
+# hop the ranker would take. It is also squadron-and-friends only.
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009401,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3229009402,"stationName":"Open Door","stationType":"FleetCarrier","distanceToArrival":20,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9000,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3229009403,"stationName":"Pricier Dock","stationType":"Orbis","distanceToArrival":150,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9400,"stock":6000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":19000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""
+
+# The restricted query. `body-contains` discriminates it from the open one:
+# both POST the same path with the same batch of ids, and only the access set
+# differs. A carrier in neither reply would be `unknown` and would survive.
+[[route]]
+path = "/api/stations/search"
+body-contains = "Squadron Friends"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+{"count":1,"size":2,"results":[{"market_id":3229009401,"carrier_docking_access":"Squadron Friends"}]}
+"""
+
+[[route]]
+path = "/api/stations/search"
+body-contains = "[\"All\"]"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+{"count":1,"size":2,"results":[{"market_id":3229009402,"carrier_docking_access":"All"}]}
+"""
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009402&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-source.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009405&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-sink.json"

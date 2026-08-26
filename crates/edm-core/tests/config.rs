@@ -2045,6 +2045,73 @@ fn route_reuses_the_concurrency_flag_and_its_clamp() {
 /// `--quick` used to demand `--item` even when `--category` had already named
 /// the cargo. A class is a commodity source; a missing `--item` is not a
 /// missing question.
+/// The default is the whole point of the feature: a commander who asks for
+/// carriers is asking for carriers they can enter, so `--carriers` alone
+/// filters.
+#[test]
+fn carriers_default_to_dropping_the_ones_that_restrict_docking() {
+    use edm_core::spansh::Policy;
+
+    // No carriers at all: nothing to filter, and nothing to ask Spansh.
+    let plain = route(&["route", "Sol"]).unwrap();
+    assert_eq!(plain.carrier_access, Policy::Any);
+    assert!(!plain.carrier_access.queries_spansh());
+
+    let carriers = route(&["route", "Sol", "--carriers"]).unwrap();
+    assert_eq!(carriers.carrier_access, Policy::Open);
+    assert!(carriers.carrier_access.queries_spansh());
+}
+
+#[test]
+fn carrier_access_accepts_its_three_policies_in_any_casing() {
+    use edm_core::spansh::Policy;
+
+    for (spelling, expected) in [
+        ("any", Policy::Any),
+        ("open", Policy::Open),
+        ("proven", Policy::Proven),
+        ("PROVEN", Policy::Proven),
+        ("Open", Policy::Open),
+    ] {
+        let config = route(&["route", "Sol", "--carriers", "--carrier-access", spelling]).unwrap();
+        assert_eq!(config.carrier_access, expected, "{spelling}");
+    }
+}
+
+#[test]
+fn an_unknown_carrier_access_names_the_ones_that_exist() {
+    let error = route(&["route", "Sol", "--carriers", "--carrier-access", "friendly"]).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "--carrier-access \"friendly\" is not an access policy (known: any, open, proven)"
+    );
+}
+
+/// Accepting a constraint that cannot bind is how a user comes to believe a
+/// run was filtered when it was not.
+#[test]
+fn carrier_access_without_carriers_is_refused_rather_than_ignored() {
+    let error = route(&["route", "Sol", "--carrier-access", "open"]).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "--carrier-access needs --carriers; without it no fleet carrier is ranked at all"
+    );
+}
+
+/// `--carrier-access` is a route name, so it must not resolve for a ported
+/// command \[C26\].
+#[test]
+fn carrier_access_does_not_exist_outside_route() {
+    let owned: Vec<String> = ["market", "--carrier-access", "open"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    assert!(
+        parse_with(&owned, Table::Base).is_err(),
+        "the base table must not know --carrier-access"
+    );
+}
+
 #[test]
 fn quick_accepts_category_as_a_commodity_source() {
     let error = route(&["route", "Sol", "--quick", "1"]).unwrap_err();

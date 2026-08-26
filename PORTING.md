@@ -20,7 +20,7 @@ so renumbering them is a breaking change to the test suite.
 | 6 | `edm_core::domain` | done — including the batch state machine |
 | 7-10 | `edm` I/O layer | done — sys/secret/ports/net/game_api/exchange/ardent/eddn/out |
 | 11-12 | sweep and commands | done |
-| 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 8 `route` scenarios diffed against goldens (C25)** |
+| 13 | `cargo xtask parity` | **green — 65 of 65 differential scenarios byte-identical, plus 15 `route` scenarios diffed against goldens (C25)** |
 | 14 | `edm_core::pace` / `edm::route` | done — pacer, two-stage pool, spend gate, resumable cache |
 | 15 | `edm-route` | done — the optimiser: exact-integer arithmetic, Dinkelbach max-ratio cycle, brute-force oracles |
 | 16 | first live run | done — `route Sol --radius 10`: 22 markets, 22 requests, 7.5 s against a 6 s estimate |
@@ -85,6 +85,50 @@ gets an `XDG_CACHE_HOME` under its own scenario directory.
   stronger test anyway. And every market returns the same 391-entry commodity
   map, most rows priced but with zero stock and zero demand, so a commodity
   count is not a proxy for how much a market actually trades.
+
+## Measured facts about Spansh
+
+Third-party, and recorded separately from Frontier's own endpoints for that
+reason. Measured 2026-08-26.
+
+- **`carrier_docking_access` exists there and nowhere else this program can
+  reach.** Values are exact and case-sensitive: `All`, `Squadron`, `Friends`,
+  `Squadron Friends`, `None` — or the key is **absent**, which is a third state
+  and not a default. `["SquadronFriends"]` and `["squadron friends"]` both match
+  nothing, and matching nothing is spelled the same way as "nothing is
+  restricted", which is why the five strings are `const` and pinned by a test.
+
+- **Roughly a third of carriers publish nothing.** Over the population
+  `route --carriers` actually ranks — every carrier Ardent lists in the radius,
+  because `select::reject` applies no freshness test — 528 carriers across 12
+  systems in 3 regions gave 70.6% published / 13.8% provably restricted / 29.4%
+  unpublished; an independent 240-carrier set across 12 other systems gave
+  65.0% / 8.8% / 35.0%. The shape is stable and the exact fractions are not.
+  Restricted and open carriers have statistically indistinguishable staleness,
+  so absence is not recoverable by heuristic.
+
+- **`POST /api/stations/search` answers HTTP 200 to several malformed
+  requests**, and none of them is visible from the status:
+  - `size` above 500 is silently replaced by **25**, and 25 rows come back;
+  - a **misspelled filter key** is ignored rather than refused — the reply is
+    the whole unfiltered id set, and the server echoes the misspelling back
+    under `search`, so the echo validates nothing;
+  - `from + size > 10000` is HTTP 500, which is why a batch never pages.
+
+  Every one of these would read downstream as "fewer carriers are restricted
+  than really are". Each has a guard in `edm_core::spansh`.
+
+- **`market_id` filters accept a batch as an array of id strings**, and the
+  reply carries `market_id` as a JSON *number*. Only that field and
+  `carrier_docking_access` are read: Spansh's `system_name` disagreed with
+  Ardent's for 99 of 528 carriers (18.8%) because carriers jump, and its
+  `distance` is measured from Spansh's own default reference rather than the
+  run's centre, so admitting either would silently mix two reference frames.
+
+- **No rate limiting was observable** across roughly 60 requests from two
+  independent measurements — no 429, no `Retry-After`, no `RateLimit-*`
+  headers. Absence of an enforced limit is not permission; the concurrency is 4
+  and the realistic worst case is a handful of requests.
 
 ## Measured deviations from the design
 
@@ -410,12 +454,12 @@ differs is a bug.
 | C16 | `writeFileSync` I/O error text is Rust's, not Node's. | Engine-internal. The *ordering* is preserved: the dump happens before `JSON.parse`, and `--json --dump f` writes nothing. |
 | C17 | `edm --help constructor` prints the exact JSC message and exits 1, but no stack trace. | The TS throw is outside `main`'s try/catch so Bun adds an unhandled-rejection trace. Exit code and message match; the trace does not. |
 | C18 | The two unreachable TS strings (lines 986, 1021) have no `ArgError` variant. | Proved unconstructible by the disjointness of `VALUE_FLAGS`/`BOOLEAN_FLAGS` plus the slot-type proptest. Recorded in `PORTING.md`; dead variants would be worse. |
-| C19 | `User-Agent: edm/1.0.0` on Ardent and EDDN. | Bun would send `Bun/x.y`; EDDN asks senders to identify themselves. Frontier requests always carry their own per-request UA. |
+| C19 | `User-Agent: edm/1.0.0` on Ardent, EDDN and Spansh. | Bun would send `Bun/x.y`; EDDN asks senders to identify themselves, and so should anything querying a third-party index. Frontier requests always carry their own per-request UA. |
 | C20 | Wire header **order** and the `Accept-Encoding` value differ. | `HeaderMap` is hash-ordered; reqwest picks its own encoding list. Normalised in the wire diff; no server depends on either. |
 | C21 | No 0–25 ms requeue latency floor; excess workers park in `recv()` instead of spinning 40 Hz timers. | This is the busy-wait removal. Observable only as line *ordering* when the queue empties while jobs are outstanding; those scenarios are compared as a multiset and must be justified in the scenario file. |
 | C22 | `--timeout` above `INT32_MAX` clamps to 1 ms without Node's `TimeoutOverflowWarning`. | The clamp itself is preserved; the warning is `process.emitWarning`. |
 | C23 | `--method connect/trace/track` and a non-ASCII `--user-agent` rejected with our message. | `fetch` forbids them before any socket; matching the *behaviour* matters more than the `TypeError` text. |
-| C24 | `EDM_ORIGIN_OVERRIDE`, `EDM_ARDENT_BASE`, `EDM_EDDN_URL` added. | Harness plumbing. Unset, behaviour is byte-identical. |
+| C24 | `EDM_ORIGIN_OVERRIDE`, `EDM_ARDENT_BASE`, `EDM_EDDN_URL`, `EDM_SPANSH_BASE` added. | Harness plumbing. Unset, behaviour is byte-identical. |
 | C25 | `edm route` exists. Bun answers `Unknown command "route"` and exits 2. | A new command, not a port of one. `KNOWN_COMMANDS` is untouched and `route` dispatches from a disjoint `EXTENDED_COMMANDS`, so R48's ordering is unaffected. Confined to argv beginning with `route`. |
 | C26 | Route-only flag names resolve **only** when the command is `route` (a two-pass parse against `Table::Base` / `Table::Extended`). | Widening `Flag::resolve` globally would make `edm market Colonia --pad L` succeed where the TypeScript exits 2 — a fidelity regression on argv the harness never runs, and so one no scenario would catch. The `parity-isolation` gate proves the two tables agree over every committed scenario's argv. |
 | C27 | `route` paces its requests, backs off on `Retry-After`, trips a breaker and bounds retries by wall clock. | R84 and R98 continue to describe `edm market` exactly. The original has no pacer at all: `game-internal-api.ts:2988` is a `// Request pacing` header with an empty body, and a 429 is requeued immediately with no delay and no header read — affordable for a seven-market system sweep and not for a thousand-market region. |
@@ -427,6 +471,7 @@ differs is a bug.
 | C32 | **EDDN quantities and prices are truncated to integers.** | The game-internal API sends fractional quantities — `Water` with a demand of `113.47560000000001` is a real row — and EDDN's schema types `demand`, `stock`, `meanPrice`, `buyPrice` and `sellPrice` as `integer`. Measured 2026-08-06 over 29,152 cached markets: 29,370 fractional values, and **29.7% of markets carry at least one**, so nearly a third of all uploads were answered `400 FAIL: Schema Validation`. Truncation rather than rounding, matching `EDMarketConnector/plugins/eddn.py:624-629` — EDDN is a shared dataset whose value depends on senders agreeing, and a rounding rule of our own would put this program's rows subtly out of step with every other uploader's for the same market. Brackets are **not** coerced: `levelType` is the enum `[0, 1, 2, 3, ""]` and no observed value falls outside it, so truncating one would turn an unexpected value into a plausible wrong one. |
 | C31 | **`authToken` is checked against a floor of 512 characters, not the original's exact 2024.** | A live token measured 2026-08-06 is **2022** characters, so 2024 is one observation written down as a law — and it made the program refuse a credential the game itself was using, on every command. The check is kept because a half-pasted token is a real mistake with a confusing failure; the exact length is not, for a value this program does not issue. `machineToken` keeps its exact check at 80, which every observed value has matched. |
 | C29 | `EDM_JITTER` pins backoff jitter to a fixed fraction of the window. | Backoff jitter is the one random quantity a recorded run cannot reproduce, and it decides how many attempts fit inside a wall-clock budget. It delegates `nonce_bytes` untouched: a pinned nonce is a separate decision with a separate flag. |
+| C36 | **`route --carrier-access <any\|open\|proven>` filters fleet carriers on the docking access Spansh publishes.** `--carriers` defaults it to `open`; without `--carriers` it is `any`, sends nothing, and the flag itself is refused. `open` drops the four restricted values and keeps carriers with none published; `proven` drops those too. | The defect: `--carriers` ranked carriers the commander cannot dock at, and a private carrier's prices are the *best* in a region precisely because nobody is arbitraging them — so it wins every hop and the whole answer is a flight to a door that will not open. Frontier publishes docking access nowhere this program can reach. The market payload's top-level keys are exactly `allowsDumping`, `commodities`, `inventory`; Ardent's station record has thirty-five fields and no access; the `starsystem` document models none. EDDN's `commodity/3` schema carries `carrierDockingAccess`, renamed from the journal's `CarrierDockingAccess`, and Spansh is the index that keeps it where Ardent drops it — the two were measured ingesting the same EDDN message one second apart, so this is the same observation with one more column, not a second opinion. **Unknown is a first-class third state**, roughly a third of carriers, kept by `open` and counted on screen: dropping a station on a missing field would silently narrow the search on something unmeasured, the rule `select.rs` already states for a missing arrival distance. `Squadron`, `Friends` and `Squadron Friends` are all dropped by `open` because nothing this program can read — the journal included — knows the commander's squadron or friend list; the value is spelled `open`, and those are not. Two id-filtered POSTs per 500 candidates at concurrency 4, server-side filtered, applied before the spend gate so a refused door never costs a market read, and cached per market id for six hours because access is an owner-mutable setting only republished when somebody docks. Four response guards refuse rather than trust a reply, because Spansh answers HTTP 200 to each: a `size` over 500 comes back as 25 rows, a misspelled filter key is ignored and returns the whole unfiltered set (caught as a carrier reported both restricted and open), the summed counts, and any id outside the batch. **A Spansh failure refuses the run.** `ardent.rs` will not let an outage read as an empty region because that is indistinguishable from a sparse one; here an outage would read as a *fuller* answer — "no carrier is restricted" — the same lie pointed the other way, silently restoring the defect this exists to remove. **The commander's own journal overrides Spansh in both directions.** Spansh reported market 3712438528 (`1GOT`, Nessa) as `All`, having last heard from it on 2026-08-25 06:57Z; this commander's ship was answered `DockingDenied` / `Reason: "RestrictedAccess"` by that carrier at 2026-08-26 07:18:31Z and the route still recommended it as the top hop twelve times over. A crowd-sourced index cannot be fresher than its last reporter and cannot know which squadron the reader is in, so where the two disagree the one that was actually there wins. `Docked` at a `FleetCarrier` records `Admitted` and `DockingDenied`/`RestrictedAccess` records `Refused`, newest timestamp winning; no other denial reason is read, because `NoSpace` is a full pad, `Distance` is a bad approach and `TooLarge` is a fact about the ship, and none of the three is a statement about who the door opens for. The `Admitted` direction is the more valuable half: it is the only thing that can rescue a squadron- or friends-only carrier the commander is genuinely admitted to, which `open` would otherwise drop because nothing else this program reads knows their squadron or friend list. `CommanderState::carrier_doors` is therefore **exempt from `reset_for_load_game`**, alone among its fields: everything else there is a session value whose staleness would produce a confidently wrong route, and a door is not — a carrier that refused this commander last week is still refusing them after they quit to the main menu. |
 | C30 | `--deadline` bounds the loop search as well as the sweep, and a search it stops reports `Heuristic { SearchBudgetExhausted }` rather than an optimum. | The search is part of the run, so "how long this may take" already covers it; a second wall-clock flag would let two limits contradict each other and would leave the default answer to "how long may the search take" at *forever*. Measured 2026-08-06: 78 s to build the graph and 205 s per improving Dinkelbach round at 5,000 markets. `edm-route` is pure and has no clock, so the budget arrives as a predicate the caller answers — never as a step count, which does not convert to seconds at any fixed rate. |
 
 **Opt-in fixes, all off by default, each an allowlist row only when set:**

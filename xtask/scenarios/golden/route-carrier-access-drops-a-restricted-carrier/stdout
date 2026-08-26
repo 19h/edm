@@ -1,0 +1,72 @@
+resolving "Sol" through Ardent for quick lookup...
+scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 1 best hop of at least 100 t to buy and 100 published t of demand, for 1 commodity...
+checking docking access for 2 fleet carriers against Spansh...
+carrier access: 2 checked against Spansh, 1 restrict docking
+== QUICK LOOKUP  2 hop-ranked candidates (up to 1 best hop per commodity; 100 t seller / 100 t published-buyer minimum) 
++------------+--------+--------+--------+------------+--------------+----------------+
+| Commodity  | Market |  Price |   Tons |  Market ID | Station      | System         |
++============+========+========+========+============+==============+================+
+| gold       | sells  |  9,000 | 40,000 | 3229009402 | Open Door    | Alpha Centauri |
+| gold       | buys   | 19,000 |  9,000 | 3229009405 | Modest Reach | Alpha Centauri |
++------------+--------+--------+--------+------------+--------------+----------------+
+   Ardent returns a price-index prefix, not a complete regional survey; hops are scored by estimated
+   credits per hour (spread × cargo / travel time) after local station filters, and Ardent's
+   1,000-row per-side page cap still applies before that
+== ROUTE PLAN ======================================================================================
++--------------------------------+----------------------------------------------------+
+| Field                          | Value                                              |
++================================+====================================================+
+| reference                      | Sol                                                |
+| radius                         | 20 Ly price index (4 Ardent queries; not regional) |
+| systems                        | not enumerated (commodity price index)             |
+| price rows considered          | 4 (Ardent)                                         |
+|   - carriers that restrict do~ | -1   (--carrier-access any to keep)                |
+|   - beyond the --quick prefix  | -1   (a larger --quick to keep)                    |
+| markets to poll                | 2                                                  |
+| game-internal API requests     | 2  (one per market)                                |
+| estimated transfer             | 28-52 KB  (prior: 500 KB/system, 20 KB/market)     |
+| pacing                         | 8 req/s                                            |
+| estimated wall clock           | 1s                                                 |
+| ceiling                        | 2 of 2,000   (--max-requests to raise)             |
++--------------------------------+----------------------------------------------------+
+[1/2] Open Door (Alpha Centauri)  HTTP 200  2 tradable
+[2/2] Modest Reach (Alpha Centauri)  HTTP 200  2 tradable
+== ROUTE COVERAGE ==================================================================================
++----------------+--------------+
+| Field          | Value        |
++================+==============+
+| markets polled | 2 of 2       |
+| markets priced | 2            |
+| requests sent  | 2            |
+| elapsed        | <ELAPSED>    |
++----------------+--------------+
+   every price below was read live from the game-internal API during this run
+   2 priced listings have no underlying market timestamp; retrieval time was not substituted
+== BEST LIVE PRICES  where to buy and sell each commodity, read live this run ======================
++------------+--------+--------+-------+--------+--------------+----------------+-----+
+| Commodity  | Market |  Price |  Tons |  Index | Station      | System         |  Ly |
++============+========+========+=======+========+==============+================+=====+
+| Gold       | sells  |  9,000 | 5,000 |  9,000 | Open Door    | Alpha Centauri | 4.4 |
+| Gold       | buys   | 11,500 | 7,000 | 19,000 | Modest Reach | Alpha Centauri | 4.4 |
++------------+--------+--------+-------+--------+--------------+----------------+-----+
+   best among the markets this run polled, which Ardent's price index chose: a market its index does
+   not carry cannot appear here, however good its price
+== BEST SINGLE HOPS ================================================================================
++---+------------------------------+----------------+-----+--------------+--------+----------------+
+| # | Route                        | Cargo          |  Ly |         Cr/h |    Lap | Claim          |
++===+==============================+================+=====+==============+========+================+
+| 1 | Open Door (Alpha Centauri) ~ | Gold           | 0.0 | 30,421,660/h | 1m 56s | proved optimal |
++---+------------------------------+----------------+-----+--------------+--------+----------------+
+   columns hidden to fit 100 cols: Profit
+   market observations are ageing independently; another commander may have traded them since
+   distances are straight lines; the real jump graph may be longer
+   a single hop has no steady rate: flying it repeatedly means returning empty
+   permits, allegiance and landing-pad availability are not modelled
+   times come from a calibrated model, not from your ship
+   legs below --min-profit were excluded; the result is optimal for what remained
+== TRADE COMMANDS ==================================================================================
+   run each where it says; --top controls how many routes are listed here
+
+  1  Open Door (Alpha Centauri) > Modest Reach
+       at Open Door                    edm trade --market-id 3229009402 --type buy --item Gold --fill --cargo 784
+       at Modest Reach                 edm trade --market-id 3229009405 --type sell --item Gold --qty 784

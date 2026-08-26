@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 
 use edm_core::js;
 use edm_core::js::json::{JsObject, JsValue};
+use edm_core::domain::commander::{CarrierDoor, CommanderState};
 use edm_core::select::Selection;
 use edm_core::spansh::{self, Access, Policy};
 use edm_core::spend::Exclusion;
@@ -96,6 +97,16 @@ impl AccessIndex {
             .unwrap_or(Access::Unknown)
     }
 
+    /// Whether this index has a verdict for this market at all.
+    ///
+    /// The journal overlay uses it so a door the commander happens to know
+    /// about, but which is not a candidate on this run, does not silently
+    /// enlarge the index and inflate the counts.
+    #[must_use]
+    pub fn knows(&self, market_id: f64) -> bool {
+        self.verdicts.contains_key(&market_id.to_bits())
+    }
+
     fn set(&mut self, market_id: f64, access: Access) {
         self.verdicts.insert(market_id.to_bits(), access);
     }
@@ -119,6 +130,12 @@ pub struct Cost {
     pub cache_hits: usize,
     pub restricted: usize,
     pub unknown: usize,
+    /// Verdicts this commander's own journal set, overriding Spansh.
+    pub from_journal: usize,
+    /// Of those, the ones where the journal and Spansh disagreed. Worth its own
+    /// counter: a non-zero value is the crowd index being measurably wrong
+    /// about a door this ship has stood in front of.
+    pub journal_corrections: usize,
 }
 
 /// What the filter removed, for the plan table.
@@ -137,6 +154,17 @@ impl Removed {
     pub const fn total(self) -> usize {
         self.restricted + self.unproven
     }
+}
+
+/// What one docking-access pass cost and what it did, together.
+///
+/// Carried to the `--json` document so a filtered run's output states the
+/// filter: a consumer that cannot tell a region with no restricted carriers
+/// from a region nobody checked is back where this feature started.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Report {
+    pub cost: Cost,
+    pub removed: Removed,
 }
 
 /// One batch's two filtered replies: which index it came from, the restricted
@@ -233,6 +261,43 @@ fn bank<F: Fs>(
     );
 }
 
+/// Overlay what this commander's own ship has learned onto a resolved index.
+///
+/// **The journal always wins, and it is not a tie-break.** Spansh reported
+/// market 3712438528 ("1GOT", Nessa) as `All`, having last heard from it the
+/// previous day; this commander's ship was answered `DockingDenied` /
+/// `RestrictedAccess` by that carrier the next morning. A crowd-sourced index
+/// cannot be better than its last reporter, and it cannot know which squadron
+/// the reader belongs to at all — so where the two disagree, the one that was
+/// actually there is right.
+///
+/// It cuts both ways, and the `Admitted` direction is the more valuable half:
+/// `Policy::Open` drops every squadron- and friends-only carrier because
+/// nothing else this program reads knows the commander's squadron or friend
+/// list — but a `Docked` this ship completed is proof of membership, and
+/// restores a carrier the published policy would have thrown away.
+fn overlay_journal(index: &mut AccessIndex, commander: Option<&CommanderState>, cost: &mut Cost) {
+    let Some(state) = commander else {
+        return;
+    };
+    for (market_id, observation) in &state.carrier_doors {
+        let id = *market_id as f64;
+        if !index.knows(id) {
+            continue;
+        }
+        let door = match observation.door {
+            CarrierDoor::Admitted => Access::Open,
+            CarrierDoor::Refused => Access::Restricted,
+        };
+        let published = index.get(id);
+        if published != door {
+            cost.journal_corrections += 1;
+        }
+        cost.from_journal += 1;
+        index.set(id, door);
+    }
+}
+
 /// Resolve every carrier's docking access.
 ///
 /// `market_ids` is the carriers only — a non-carrier has no access to publish
@@ -248,6 +313,7 @@ pub async fn resolve<H: HttpTransport, F: Fs>(
     market_ids: &[f64],
     now_ms: f64,
     cache_policy: CachePolicy,
+    commander: Option<&CommanderState>,
     report: Option<&dyn Fn(usize, usize)>,
 ) -> Result<(AccessIndex, Cost), String> {
     use futures_util::StreamExt as _;
@@ -341,6 +407,11 @@ pub async fn resolve<H: HttpTransport, F: Fs>(
             bank(fs, cache_root, *id, access, now_ms, cache_policy);
         }
     }
+
+    // After Spansh and after the cache, because it overrides both — and before
+    // the tally, so the counts the user reads describe the verdicts actually
+    // used.
+    overlay_journal(&mut index, commander, &mut cost);
 
     for id in market_ids {
         match index.get(*id) {
@@ -662,6 +733,92 @@ mod tests {
         assert_eq!(claimed, removed.total());
         assert_eq!(selection.keep.len() + claimed, before);
         assert_eq!(selection.considered, before, "considered is not moved");
+    }
+
+    fn commander_with(doors: &[(u64, CarrierDoor, &str)]) -> CommanderState {
+        let mut state = CommanderState::default();
+        for (id, door, at) in doors {
+            state.carrier_doors.push((
+                *id,
+                edm_core::domain::commander::DoorObservation {
+                    door: *door,
+                    observed_at: Some((*at).to_owned()),
+                },
+            ));
+        }
+        state
+    }
+
+    /// The 1GOT case, exactly. Spansh said `All`, having last heard from the
+    /// carrier the day before; this ship was refused by it the next morning.
+    #[test]
+    fn a_journal_refusal_overrides_a_published_all() {
+        let mut index = index_of(&[(3_712_438_528.0, Access::Open)]);
+        let mut cost = Cost::default();
+        let state = commander_with(&[(
+            3_712_438_528,
+            CarrierDoor::Refused,
+            "2026-08-26T07:18:31Z",
+        )]);
+        overlay_journal(&mut index, Some(&state), &mut cost);
+
+        assert_eq!(index.get(3_712_438_528.0), Access::Restricted);
+        assert_eq!(cost.from_journal, 1);
+        assert_eq!(cost.journal_corrections, 1);
+    }
+
+    /// The other half, and the reason the overlay is not simply a denylist:
+    /// nothing else this program reads knows the commander's squadron, but a
+    /// `Docked` this ship completed proves the door opens for them.
+    #[test]
+    fn a_journal_docking_rescues_a_carrier_the_policy_would_drop() {
+        let mut index = index_of(&[(7.0, Access::Restricted)]);
+        let mut cost = Cost::default();
+        let state = commander_with(&[(7, CarrierDoor::Admitted, "2026-08-26T07:00:00Z")]);
+        overlay_journal(&mut index, Some(&state), &mut cost);
+
+        assert_eq!(index.get(7.0), Access::Open);
+        assert_eq!(cost.journal_corrections, 1);
+
+        let mut selection = selection_of(vec![station(7.0, "FleetCarrier")]);
+        let removed = apply(&mut selection, &index, Policy::Open);
+        assert_eq!(removed.restricted, 0, "the commander is in that squadron");
+        assert_eq!(selection.keep.len(), 1);
+    }
+
+    /// An agreement is still an override, and must not be counted as a
+    /// correction — the counter exists to say how often the crowd index was
+    /// measurably wrong.
+    #[test]
+    fn a_journal_observation_that_agrees_is_not_a_correction() {
+        let mut index = index_of(&[(7.0, Access::Restricted)]);
+        let mut cost = Cost::default();
+        let state = commander_with(&[(7, CarrierDoor::Refused, "2026-08-26T07:00:00Z")]);
+        overlay_journal(&mut index, Some(&state), &mut cost);
+        assert_eq!(cost.from_journal, 1);
+        assert_eq!(cost.journal_corrections, 0);
+    }
+
+    /// A door the commander knows about but which is not a candidate this run
+    /// must not enlarge the index or inflate the counts.
+    #[test]
+    fn a_journal_door_outside_this_run_is_ignored() {
+        let mut index = index_of(&[(7.0, Access::Open)]);
+        let mut cost = Cost::default();
+        let state = commander_with(&[(999, CarrierDoor::Refused, "2026-08-26T07:00:00Z")]);
+        overlay_journal(&mut index, Some(&state), &mut cost);
+        assert_eq!(index.len(), 1);
+        assert_eq!(cost.from_journal, 0);
+        assert!(!index.knows(999.0));
+    }
+
+    #[test]
+    fn no_commander_state_changes_nothing() {
+        let mut index = index_of(&[(7.0, Access::Open)]);
+        let mut cost = Cost::default();
+        overlay_journal(&mut index, None, &mut cost);
+        assert_eq!(index.get(7.0), Access::Open);
+        assert_eq!(cost, Cost::default());
     }
 
     #[test]

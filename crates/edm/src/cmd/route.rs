@@ -120,6 +120,7 @@ const SOLVE_LINE_MS: f64 = 500.0;
 pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
     timer: &T,
 ) -> CmdResult {
     let out = app.out;
@@ -166,7 +167,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         );
     }
     if config.quick.is_some() {
-        return quick::run(app, config, timer).await;
+        return quick::run(app, config, commander, timer).await;
     }
     if config.verify_systems && config.radius_ly > edm_core::consts::MARKETDATA_DISTANCE_LY_FALLBACK
     {
@@ -378,7 +379,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // a request count the user is asked to approve \[C36\]. Free of the
     // game-internal API's budget: this is Spansh, and it is two requests per
     // five hundred carriers.
-    let carrier_access = filter_by_docking_access(app, config, &cache, &mut selection, &note)
+    let carrier_access = filter_by_docking_access(app, config, &cache, &mut selection, commander, &note)
         .await
         .map_err(|error| {
             format!("{error}\n   pass --carrier-access any to rank carriers without checking")
@@ -563,7 +564,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             // per market, not per batch — so this is a repeat of the decision,
             // not of the requests.
             if let Some((cost, removed)) =
-                filter_by_docking_access(app, config, &cache, &mut selection, &note)
+                filter_by_docking_access(app, config, &cache, &mut selection, commander, &note)
                     .await
                     .map_err(|error| {
                         format!(
@@ -851,6 +852,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         &coverage,
         opportunities,
         None,
+        carrier_access.map(|(cost, removed)| access::Report { cost, removed }),
         watch,
     );
 
@@ -968,6 +970,7 @@ fn rank(
     coverage: &RouteCoverage,
     opportunities: SpecialOpportunities,
     quick: Option<&QuickProvenance>,
+    carrier_access: Option<access::Report>,
     watch: edm_route::watch::Watch<'_>,
 ) {
     // By value: `ingest::markets` drops each payload as it builds its `Market`,
@@ -1038,7 +1041,7 @@ fn rank(
             &solution,
             &markets,
             &commodities,
-            coverage_json(coverage, &crossing, opportunities, quick),
+            coverage_json(coverage, &crossing, opportunities, quick, carrier_access),
         );
         out.document(&document.stringify(2));
         return;
@@ -1072,6 +1075,7 @@ fn coverage_json(
     crossing: &ingest::Crossing,
     opportunities: SpecialOpportunities,
     quick: Option<&QuickProvenance>,
+    carrier_access: Option<access::Report>,
 ) -> edm_core::js::json::JsValue {
     use edm_core::js::json::{JsObject, JsValue};
     let n = |value: usize| JsValue::Num(value as f64);
@@ -1142,6 +1146,11 @@ fn coverage_json(
     if let Some(quick) = quick {
         fields.push(("quickLookup".into(), quick_lookup_json(quick)));
     }
+    // Absent when no policy was in force, so a run that asked Spansh nothing
+    // says nothing rather than reporting a zero that reads as "none found".
+    if let Some(report) = carrier_access {
+        fields.push(("carrierAccess".into(), carrier_access_json(report)));
+    }
     fields.push((
         "notes".into(),
         JsValue::Arr(
@@ -1153,6 +1162,31 @@ fn coverage_json(
         ),
     ));
     JsValue::Obj(JsObject::from_document_order(fields))
+}
+
+/// What the docking-access filter checked, removed, and deliberately did not
+/// prove.
+///
+/// `unprovenKept` is the important one: it is the size of the claim this run is
+/// *not* making, and a consumer that treats the filtered set as "every carrier
+/// here is dockable" is wrong by exactly that many rows.
+fn carrier_access_json(report: access::Report) -> edm_core::js::json::JsValue {
+    use edm_core::js::json::{JsObject, JsValue};
+    let n = |value: usize| JsValue::Num(value as f64);
+    JsValue::Obj(JsObject::from_document_order(vec![
+        ("source".into(), JsValue::Str("spansh".into())),
+        ("carriersChecked".into(), n(report.cost.carriers)),
+        ("requests".into(), n(report.cost.requests)),
+        ("cacheHits".into(), n(report.cost.cache_hits)),
+        ("restrictedRemoved".into(), n(report.removed.restricted)),
+        ("unprovenRemoved".into(), n(report.removed.unproven)),
+        ("unprovenKept".into(), n(report.removed.unproven_kept)),
+        ("fromJournal".into(), n(report.cost.from_journal)),
+        (
+            "journalCorrections".into(),
+            n(report.cost.journal_corrections),
+        ),
+    ]))
 }
 
 /// The provenance block for `--quick`, split out because it is a document of
@@ -1339,6 +1373,13 @@ fn access_note(cost: access::Cost, removed: access::Removed) -> String {
         let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
     }
     let _ = write!(text, ", {} restrict docking", n(removed.restricted));
+    if cost.journal_corrections > 0 {
+        let _ = write!(
+            text,
+            " ({} corrected by your own journal)",
+            n(cost.journal_corrections)
+        );
+    }
     if removed.unproven > 0 {
         let _ = write!(text, ", {} unproven and dropped", n(removed.unproven));
     } else if removed.unproven_kept > 0 {
@@ -1364,6 +1405,7 @@ async fn filter_by_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>
     config: &RouteConfig,
     cache: &Cache,
     selection: &mut edm_core::select::Selection,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
     note: &dyn Fn(String),
 ) -> Result<Option<(access::Cost, access::Removed)>, String> {
     if !config.carrier_access.queries_spansh() {
@@ -1400,6 +1442,7 @@ async fn filter_by_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>
             enabled: config.cache,
             refresh: config.refresh,
         },
+        commander,
         None,
     )
     .await?;
@@ -1760,6 +1803,7 @@ mod tests {
             &RouteCoverage::default(),
             &ingest::Crossing::default(),
             opportunities,
+            None,
             None,
         ) else {
             panic!("coverage object")

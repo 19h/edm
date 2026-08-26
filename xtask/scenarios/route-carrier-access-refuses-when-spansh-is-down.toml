@@ -1,0 +1,70 @@
+# route-carrier-access-refuses-when-spansh-is-down
+why = "The failure policy for C36, which is the opposite of the one Ardent's enumeration takes and for a reason worth pinning. `ardent.rs` refuses to swallow an outage because an empty region and a sparse one are indistinguishable — an outage there reads as a *smaller* answer. A Spansh outage reads as a **larger** one: 'no carrier is restricted' is what an unanswered filter looks like, and it silently restores the exact defect the filter exists to remove. So the run stops, names Spansh, and names the one flag that proceeds without it. Nothing is polled: the refusal happens before the spend gate, so a commander who does not want to wait for Spansh has not already paid for anything."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--rps", "8", "--no-cache", "--concurrency", "1", "--carriers"]
+oracle = "none"
+expect-frontier-requests = 0
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"}]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009401,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":19000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""
+
+[[route]]
+path = "/api/stations/search"
+
+[[route.reply]]
+status = 503
+headers = [["Content-Type", "text/plain"]]
+payload = """
+maintenance
+"""

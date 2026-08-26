@@ -205,6 +205,38 @@ pub struct CommanderWarning {
     pub source: Option<ObservationSource>,
 }
 
+/// What this commander's own ship learned about one fleet carrier's door.
+///
+/// This is the only docking-access evidence in the program that is about *this*
+/// commander rather than about the galaxy. A crowd-sourced index can say a
+/// carrier admits "All" and be a day out of date, or say "Squadron" without
+/// knowing which squadron the reader is in. A `DockingDenied` addressed to this
+/// ship, or a `Docked` this ship completed, is neither guess nor average: it is
+/// the door answering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CarrierDoor {
+    /// A `Docked` at this carrier succeeded — whatever its published policy, it
+    /// admits this commander. This is what rescues a squadron carrier the
+    /// commander is actually in the squadron of.
+    Admitted,
+    /// `DockingDenied` with `Reason: "RestrictedAccess"`. Only that reason:
+    /// `NoSpace` is a full pad, `Distance` is a bad approach and `TooLarge` is a
+    /// fact about the ship, and none of the three is a statement about who the
+    /// door opens for.
+    Refused,
+}
+
+/// One observation of a carrier's door, and when it was made.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DoorObservation {
+    pub door: CarrierDoor,
+    /// The journal timestamp, kept as written so the newest observation wins
+    /// without this module needing a clock or a date parser — ISO-8601 UTC
+    /// sorts correctly as text, which is the whole reason Frontier writes it
+    /// that way.
+    pub observed_at: Option<String>,
+}
+
 /// State reconstructed from one selected play session.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CommanderState {
@@ -217,6 +249,23 @@ pub struct CommanderState {
     pub market: Option<Observed<MarketState>>,
     pub executed_trades: Vec<Observed<TradeExecution>>,
     pub warnings: Vec<CommanderWarning>,
+    /// Every fleet carrier this commander has been admitted to or refused by,
+    /// sorted by market id.
+    ///
+    /// A sorted `Vec` rather than a map: `BTreeMap` is banned here because
+    /// lexicographic key order is never what this crate wants \[F1/R5\], a
+    /// `HashMap` would iterate nondeterministically, and this collection is
+    /// small, read far more often than written, and wants a stable order for
+    /// exactly the reasons the ban exists.
+    ///
+    /// **Deliberately not cleared by `LoadGame`.** Everything else here is a
+    /// session value — where the ship is, what is in the hold — and stale
+    /// session state would produce a confidently wrong route. A door is not a
+    /// session value: a carrier that refused this commander last Tuesday is
+    /// still refusing them today unless its owner changed something, and
+    /// forgetting that on every game start would throw away the only
+    /// commander-specific evidence the program has.
+    pub carrier_doors: Vec<(u64, DoorObservation)>,
     #[serde(skip)]
     next_ordinal: u64,
 }
@@ -347,9 +396,12 @@ impl CommanderState {
     /// discarded.  Identity fields in the event are intentionally never read.
     fn reset_for_load_game(&mut self) {
         let warnings = std::mem::take(&mut self.warnings);
+        let doors = std::mem::take(&mut self.carrier_doors);
         let next_ordinal = self.next_ordinal;
         *self = Self::default();
         self.warnings = warnings;
+        // See the field: a door is not a session value.
+        self.carrier_doors = doors;
         self.next_ordinal = next_ordinal;
     }
 
@@ -380,7 +432,15 @@ impl CommanderState {
             "Location" | "FSDJump" | "CarrierJump" => {
                 self.apply_location(object, event, source, timestamp, line);
             }
-            "Docked" => self.apply_docked(object, source, timestamp, line),
+            "Docked" => {
+                self.note_carrier_door(object, CarrierDoor::Admitted, timestamp);
+                self.apply_docked(object, source, timestamp, line);
+            }
+            "DockingDenied" if source == ObservationSource::Journal => {
+                if string_field(object, "Reason") == Some("RestrictedAccess") {
+                    self.note_carrier_door(object, CarrierDoor::Refused, timestamp);
+                }
+            }
             "Undocked" => self.apply_undocked(source, timestamp, line),
             "Cargo" => self.apply_cargo_event(object, source, timestamp, line),
             "Loadout" => self.apply_loadout(object, source, timestamp, line),
@@ -472,6 +532,43 @@ impl CommanderState {
             self.set_docked_from_object(object, source, timestamp, line);
         } else {
             self.set_undocked(source, timestamp, line);
+        }
+    }
+
+    /// Record what a carrier's door just did, newest observation winning.
+    ///
+    /// Only fleet carriers: an ordinary starport's docking permission is a
+    /// function of allegiance and bounties rather than an owner's setting, and
+    /// nothing downstream would use it.
+    fn note_carrier_door(
+        &mut self,
+        object: &Map<String, Value>,
+        door: CarrierDoor,
+        timestamp: Option<&str>,
+    ) {
+        if string_field(object, "StationType") != Some("FleetCarrier") {
+            return;
+        }
+        let Some(market_id) = read_u64_field(object, "MarketID") else {
+            return;
+        };
+        let observation = DoorObservation {
+            door,
+            observed_at: timestamp.map(ToOwned::to_owned),
+        };
+        match self
+            .carrier_doors
+            .binary_search_by_key(&market_id, |(id, _)| *id)
+        {
+            // Timestamps are ISO-8601 UTC, so text order is time order. An
+            // observation with no timestamp never displaces one that has a
+            // timestamp, and never loses to one that does not.
+            Ok(at) => {
+                if self.carrier_doors[at].1.observed_at <= observation.observed_at {
+                    self.carrier_doors[at].1 = observation;
+                }
+            }
+            Err(at) => self.carrier_doors.insert(at, (market_id, observation)),
         }
     }
 
@@ -1616,5 +1713,132 @@ mod tests {
         let state = replay_json_lines(input, SessionSelection::Number(0));
         assert_eq!(state.current_system.unwrap().value.name, "First");
         assert_eq!(state.credits.unwrap().value, 1);
+    }
+}
+
+#[cfg(test)]
+mod carrier_door_tests {
+    use super::*;
+
+    fn door_of(state: &CommanderState, market_id: u64) -> Option<&DoorObservation> {
+        state
+            .carrier_doors
+            .iter()
+            .find(|(id, _)| *id == market_id)
+            .map(|(_, observation)| observation)
+    }
+
+    fn replay(lines: &[&str]) -> CommanderState {
+        let mut state = CommanderState::default();
+        for (n, line) in lines.iter().enumerate() {
+            state.apply_journal_json(line, n + 1);
+        }
+        state
+    }
+
+    /// The event that started this: a real line from a real journal.
+    #[test]
+    fn a_restricted_access_denial_is_recorded() {
+        let state = replay(&[
+            r#"{ "timestamp":"2026-08-26T07:18:31Z", "event":"DockingDenied", "Reason":"RestrictedAccess", "MarketID":3712438528, "StationName":"1GOT", "StationType":"FleetCarrier" }"#,
+        ]);
+        assert_eq!(
+            door_of(&state, 3_712_438_528).map(|o| o.clone()).as_ref(),
+            Some(&DoorObservation {
+                door: CarrierDoor::Refused,
+                observed_at: Some("2026-08-26T07:18:31Z".to_owned()),
+            })
+        );
+    }
+
+    /// `NoSpace` is a full pad and `Distance` is a bad approach. Neither says
+    /// anything about who the door opens for, and recording them would filter
+    /// carriers on a transient.
+    #[test]
+    fn other_denial_reasons_say_nothing_about_the_door() {
+        let state = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"DockingDenied","Reason":"NoSpace","MarketID":1,"StationName":"A","StationType":"FleetCarrier"}"#,
+            r#"{"timestamp":"2026-08-26T07:00:01Z","event":"DockingDenied","Reason":"Distance","MarketID":2,"StationName":"B","StationType":"FleetCarrier"}"#,
+            r#"{"timestamp":"2026-08-26T07:00:02Z","event":"DockingDenied","Reason":"TooLarge","MarketID":3,"StationName":"C","StationType":"FleetCarrier"}"#,
+        ]);
+        assert!(state.carrier_doors.is_empty());
+    }
+
+    #[test]
+    fn a_successful_docking_records_admission() {
+        let state = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"Docked","StationName":"ABC-123","StationType":"FleetCarrier","MarketID":42}"#,
+        ]);
+        assert_eq!(
+            door_of(&state, 42).map(|o| o.door),
+            Some(CarrierDoor::Admitted)
+        );
+    }
+
+    /// An owner can lock a carrier between two visits, and does. The newest
+    /// observation is the one that describes the door now.
+    #[test]
+    fn the_newest_observation_wins_in_both_directions() {
+        let opened = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"DockingDenied","Reason":"RestrictedAccess","MarketID":42,"StationName":"A","StationType":"FleetCarrier"}"#,
+            r#"{"timestamp":"2026-08-26T09:00:00Z","event":"Docked","StationName":"A","StationType":"FleetCarrier","MarketID":42}"#,
+        ]);
+        assert_eq!(
+            door_of(&opened, 42).map(|o| o.door),
+            Some(CarrierDoor::Admitted)
+        );
+
+        let closed = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"Docked","StationName":"A","StationType":"FleetCarrier","MarketID":42}"#,
+            r#"{"timestamp":"2026-08-26T09:00:00Z","event":"DockingDenied","Reason":"RestrictedAccess","MarketID":42,"StationName":"A","StationType":"FleetCarrier"}"#,
+        ]);
+        assert_eq!(
+            door_of(&closed, 42).map(|o| o.door),
+            Some(CarrierDoor::Refused)
+        );
+    }
+
+    /// An out-of-order line must not undo a later one. Journals are merged from
+    /// several files and the merge is by first-timestamp, not per line.
+    #[test]
+    fn an_older_line_arriving_late_does_not_win() {
+        let state = replay(&[
+            r#"{"timestamp":"2026-08-26T09:00:00Z","event":"DockingDenied","Reason":"RestrictedAccess","MarketID":42,"StationName":"A","StationType":"FleetCarrier"}"#,
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"Docked","StationName":"A","StationType":"FleetCarrier","MarketID":42}"#,
+        ]);
+        assert_eq!(
+            door_of(&state, 42).map(|o| o.door),
+            Some(CarrierDoor::Refused)
+        );
+    }
+
+    /// An ordinary starport's docking permission is a function of allegiance
+    /// and bounties, not an owner's setting, and nothing reads it.
+    #[test]
+    fn only_fleet_carriers_are_recorded() {
+        let state = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"Docked","StationName":"Jameson Memorial","StationType":"Coriolis","MarketID":128666762}"#,
+            r#"{"timestamp":"2026-08-26T07:00:01Z","event":"DockingDenied","Reason":"RestrictedAccess","MarketID":128666763,"StationName":"Somewhere","StationType":"Orbis"}"#,
+        ]);
+        assert!(state.carrier_doors.is_empty());
+    }
+
+    /// Everything else here is a session value and is cleared. A door is not:
+    /// a carrier that refused this commander is still refusing them after they
+    /// quit to the main menu, and forgetting it would throw away the only
+    /// commander-specific evidence the program has.
+    #[test]
+    fn doors_survive_a_new_session_when_everything_else_does_not() {
+        let state = replay(&[
+            r#"{"timestamp":"2026-08-26T07:00:00Z","event":"DockingDenied","Reason":"RestrictedAccess","MarketID":42,"StationName":"A","StationType":"FleetCarrier"}"#,
+            r#"{"timestamp":"2026-08-26T07:00:01Z","event":"Docked","StationName":"Jameson Memorial","StationType":"Coriolis","MarketID":128666762}"#,
+            r#"{"timestamp":"2026-08-26T08:00:00Z","event":"LoadGame","Commander":"Jameson"}"#,
+        ]);
+        assert!(state.docking.is_none(), "session state is cleared");
+        assert_eq!(
+            door_of(&state, 42).map(|o| o.door),
+            Some(CarrierDoor::Refused),
+            "the door is not"
+        );
     }
 }

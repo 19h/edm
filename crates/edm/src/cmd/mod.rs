@@ -878,7 +878,9 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // `RealTimer` here rather than a fourth port: `route::run` is generic over
     // the timer, so a test can still pin the delay sequence, and no ported
     // command grows a type parameter for a seam only this one uses.
-    if let Err(error) = route::run(&app, &config, &crate::ports::RealTimer).await {
+    if let Err(error) =
+        route::run(&app, &config, commander.as_ref(), &crate::ports::RealTimer).await
+    {
         out.error(&error);
         out.set_exit(EXIT_FAILURE);
     }
