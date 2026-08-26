@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ardent;
+pub mod carrier;
 pub mod cli;
 pub mod consts;
 pub mod domain;
@@ -24,6 +25,5 @@ pub mod js;
 pub mod pace;
 pub mod render;
 pub mod select;
-pub mod spansh;
 pub mod spend;
 pub mod wire;

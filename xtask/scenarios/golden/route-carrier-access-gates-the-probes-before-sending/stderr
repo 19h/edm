@@ -1,0 +1,6 @@
+Estimated 2 game-internal API requests, above the 1 ceiling.
+2 of them read fleet-carrier docking access; --carrier-access any skips
+all of those. Or narrow the sweep (--radius, --pad, --max-star-distance),
+or raise the ceiling with --max-requests 3. Nothing has been sent.
+
+

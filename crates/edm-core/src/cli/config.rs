@@ -25,7 +25,7 @@ use crate::domain::eddn::EddnOptions;
 use crate::domain::trade::{self, Kind, Space, TradePlan};
 use crate::domain::{self, Commodity, MarketSnapshot};
 use crate::js::{self, text};
-use crate::spansh::Policy;
+use crate::carrier::Policy;
 use crate::wire::Nonce;
 
 use super::access::{Cli, CliError};

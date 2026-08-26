@@ -1,4 +1,4 @@
-//! Which fleet carriers a commander can actually enter \[C36\].
+//! Which fleet carriers a commander can actually enter \[C37\].
 //!
 //! `edm route --carriers` used to rank every carrier in the region, and a
 //! carrier that limits docking to its owner's squadron ranks exactly as well as
@@ -6,70 +6,88 @@
 //! not being arbitraged by anybody. The result was a top-twenty built entirely
 //! out of one carrier nobody could dock at.
 //!
-//! Nothing Frontier publishes says which is which. This module asks Spansh,
-//! folds the answer into a per-market verdict, and applies it to the selection
-//! **before the spend gate** — so a door that will not open never costs a
-//! market read, and the plan the user is asked to approve is a plan they can
-//! fly.
+//! C36 answered that with Spansh, and Spansh was wrong in the way a
+//! crowd-sourced index is always wrong: it is only ever refreshed when somebody
+//! docks and opens the market screen, so the carrier whose owner closed the
+//! door yesterday still reads as open, and the commander who finds out is the
+//! one who flew there. This module asks Frontier instead —
+//! `2.0/elite/fleetcarrier/info`, one carrier per request, live.
 //!
-//! Three things here are load-bearing and none is obvious:
+//! Four things here are load-bearing:
 //!
-//! - **Two queries per batch, not one.** Spansh is asked for the restricted
-//!   carriers and, separately, for the open ones. A carrier in neither reply is
-//!   [`Access::Unknown`] — a real third state, not a default. Asking only for
-//!   the restricted set would make "Spansh has never heard of this carrier"
-//!   indistinguishable from "Spansh says it is open", which is the conflation
-//!   this whole feature exists to prevent.
-//! - **The two replies must not overlap.** A misspelled filter key is *ignored*
-//!   by Spansh rather than refused, and the reply is then the whole unfiltered
-//!   batch — with HTTP 200. Under two queries that shows up as a carrier
-//!   reported both restricted and open, which cannot happen and is therefore a
-//!   perfect detector.
-//! - **`Unknown` is cached like any other verdict.** It is a recorded
-//!   measurement — "asked, and nobody has reported this door" — not an absent
-//!   file. Treating it as a miss would re-query a third of every region on
-//!   every run, forever.
+//! - **The probes are priced and gated before any of them is sent.** They are
+//!   metered requests out of the same budget as the prices, so the caller runs
+//!   [`prepare`] — free, file reads only — takes its cold count through a gate
+//!   of its own, and only then calls [`probe`]. Spansh was two free requests
+//!   and could sit ahead of the plan; this cannot, and pretending otherwise
+//!   would make `--max-requests` say "nothing has been sent" after two hundred
+//!   requests had gone.
+//! - **The cache stores what Frontier said, not what this program concluded.**
+//!   A verdict folds in the commander's own notoriety, and caching that would
+//!   mean clearing your notoriety left dropped carriers on disk for the rest of
+//!   the TTL. The derivation is one function call at read time.
+//! - **A failed probe is [`Access::Unknown`] and is not banked**, so the next
+//!   run retries instead of caching a hole. The run only *ends* when nothing
+//!   succeeded at all — which is indistinguishable from a broken endpoint, and
+//!   ranking two hundred unread carriers under `open` would hand back exactly
+//!   the unfiltered list the user asked not to have.
+//! - **The journal still overrides, but narrowly.** Under Spansh it always won,
+//!   because a crowd index cannot be fresher than its last reporter. Against a
+//!   live read that argument is gone: see [`overlay_journal`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use edm_core::carrier::{self, Access, AccessLevel, Closed, Docking, Policy};
+use edm_core::consts::FLEETCARRIER_INFO;
+use edm_core::domain::commander::{CarrierDoor, CommanderState};
 use edm_core::js;
 use edm_core::js::json::{JsObject, JsValue};
-use edm_core::domain::commander::{CarrierDoor, CommanderState};
 use edm_core::select::Selection;
-use edm_core::spansh::{self, Access, Policy};
 use edm_core::spend::Exclusion;
 
+use crate::game_api::{self, Credentials, HeaderConfig, Stamp};
 use crate::net::HttpTransport;
-use crate::ports::Fs;
-use crate::spansh::SpanshClient;
+use crate::out::Out;
+use crate::ports::{Clock, Entropy, Fs, Timer};
+use crate::route::pacer::Pacer;
 
-/// Cache namespace. Provider *and* fact, following `frontier-market-list`, so a
-/// later Spansh feature gets its own root and cannot read this one's entries.
-const PROVIDER_NAMESPACE: &str = "spansh-carrier-access";
+/// Cache namespace. Provider *and* fact, following `frontier-market-list`.
+///
+/// A new directory rather than a format-version bump, because the old one is
+/// named after a provider that no longer answers here: leaving Frontier
+/// verdicts in a directory called `spansh-carrier-access` would be a name that
+/// lies. The old directory simply goes unread; nothing sweeps it.
+const PROVIDER_NAMESPACE: &str = "frontier-carrier-access";
 
 /// Bumped whenever the stored shape changes; an older entry is a miss.
 const FORMAT_VERSION: u32 = 1;
 
 /// How long a verdict is reused, in minutes.
 ///
-/// Six hours: a quarter of the market-list lifetime, and far longer than a
-/// price. Docking access is an owner-mutable setting so it ages faster than a
-/// station list — but it is only ever *republished* when somebody docks and
-/// opens the market screen, so our view can never be fresher than that anyway.
-/// Six hours makes repeated runs inside one play session free and self-corrects
-/// a flipped setting within one.
-pub const LIFETIME_MINUTES: f64 = 360.0;
-
-/// How many Spansh requests are in flight at once.
+/// **Fifteen, where the Spansh reader used three hundred and sixty.** That six
+/// hours was justified entirely by a fact about Spansh — its view could never
+/// be fresher than the last commander to dock — and against a live read the
+/// reasoning is void. Fifteen minutes because:
 ///
-/// Four, not the sixteen the Ardent gather uses: Spansh rows are two orders of
-/// magnitude larger, the server closes the connection after every reply so each
-/// request pays a fresh handshake, and four matches the auxiliary client's own
-/// idle-connection pool. No throttling was observable in measurement, but the
-/// entire realistic worst case is a handful of requests, so there is nothing to
-/// buy by pressing harder.
-const CONCURRENCY: usize = 4;
+/// - it is shorter than the flight it informs, so the answer is at least as
+///   fresh as the decision it feeds, which six hours is not;
+/// - it is long enough that the expensive thing is paid once across the four
+///   or five runs a user makes while adjusting `--pad` and `--radius`;
+/// - the game itself caches this **not at all** — it was measured re-fetching
+///   the same carrier ninety-one seconds apart. Fifteen minutes is already
+///   more conservative than the real client, and by one order of magnitude
+///   rather than three.
+pub const LIFETIME_MINUTES: f64 = 15.0;
+
+/// How many probes are in flight at once.
+///
+/// The pacer, not this, is what bounds the request rate; this only decides how
+/// much of the latency hides behind itself. Eight is the game's own order of
+/// magnitude — it was observed firing 37 concurrent `/info` requests and 401 KB
+/// in under three seconds, with no throttling and `Fdev-Retry: 0/2` throughout
+/// — so anything here is quieter than the real client.
+const CONCURRENCY: usize = 8;
 
 /// The label the plan table uses for a carrier that will not admit us.
 const RESTRICTED_LABEL: &str = "carriers that restrict docking";
@@ -80,6 +98,10 @@ const UNPROVEN_LABEL: &str = "carriers with no published access";
 #[derive(Clone, Debug, Default)]
 pub struct AccessIndex {
     verdicts: HashMap<u64, Access>,
+    /// Ids whose verdict came from a probe issued during *this* run, as
+    /// opposed to one read out of the cache. The journal overlay turns on the
+    /// distinction and nothing else does.
+    fresh: HashSet<u64>,
 }
 
 impl AccessIndex {
@@ -111,6 +133,17 @@ impl AccessIndex {
         self.verdicts.insert(market_id.to_bits(), access);
     }
 
+    fn set_fresh(&mut self, market_id: f64, access: Access) {
+        self.set(market_id, access);
+        self.fresh.insert(market_id.to_bits());
+    }
+
+    /// Whether this verdict was read from Frontier during this run.
+    #[must_use]
+    pub fn is_fresh(&self, market_id: f64) -> bool {
+        self.fresh.contains(&market_id.to_bits())
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.verdicts.len()
@@ -130,12 +163,38 @@ pub struct Cost {
     pub cache_hits: usize,
     pub restricted: usize,
     pub unknown: usize,
-    /// Verdicts this commander's own journal set, overriding Spansh.
+    /// Verdicts this commander's own journal set, overriding Frontier.
     pub from_journal: usize,
-    /// Of those, the ones where the journal and Spansh disagreed. Worth its own
-    /// counter: a non-zero value is the crowd index being measurably wrong
-    /// about a door this ship has stood in front of.
+    /// Of those, the ones where the two disagreed.
+    ///
+    /// No longer "the crowd index being measurably wrong". Against a live read
+    /// it is the rarer and more interesting fact of Frontier and this ship's
+    /// own experience not matching — most often a squadron carrier that admits
+    /// us and could not have said so.
     pub journal_corrections: usize,
+    /// Refusals this ship recorded that a *fresher* live answer overrode.
+    pub journal_disagreements: usize,
+    /// Carriers closed to this commander only because of notoriety.
+    ///
+    /// Its own counter and its own exclusion row: eleven of the thirty-one
+    /// carriers Frontier calls `all` refuse a notorious commander, and burying
+    /// those under "restrict docking" would hide a filter the commander can
+    /// actually do something about.
+    pub notoriety_blocked: usize,
+    /// Carriers Frontier says no longer exist.
+    pub gone: usize,
+    /// Probes that were sent and did not produce a verdict.
+    pub probe_failures: usize,
+    /// Carriers whose market id is not congruent to a `fleetCarrierId`.
+    ///
+    /// Ardent called it a carrier and the arithmetic disagrees. Never silently
+    /// kept or silently dropped — it means the two sources disagree about what
+    /// a fleet carrier is, which is the class of quiet wrongness this feature
+    /// exists to surface.
+    pub unprobeable: usize,
+    /// Carriers that reached the filter after the priced phase had run, so were
+    /// never probed at all.
+    pub unprobed: usize,
 }
 
 /// What the filter removed, for the plan table.
@@ -167,31 +226,10 @@ pub struct Report {
     pub removed: Removed,
 }
 
-/// One batch's two filtered replies: which index it came from, the restricted
-/// ids and the open ones.
-type BatchAnswer = (usize, Vec<f64>, Vec<f64>);
-
 /// Where one market's verdict is cached.
 fn path(root: &Path, market_id: f64) -> PathBuf {
     root.join(PROVIDER_NAMESPACE)
         .join(format!("{}.json", js::js_number(market_id)))
-}
-
-fn encode(access: Access) -> &'static str {
-    match access {
-        Access::Open => "open",
-        Access::Restricted => "restricted",
-        Access::Unknown => "unknown",
-    }
-}
-
-fn decode(name: &str) -> Option<Access> {
-    match name {
-        "open" => Some(Access::Open),
-        "restricted" => Some(Access::Restricted),
-        "unknown" => Some(Access::Unknown),
-        _ => None,
-    }
 }
 
 /// How the cache is allowed to be used on this run.
@@ -201,21 +239,46 @@ pub struct CachePolicy {
     pub enabled: bool,
     /// `--refresh` sets this: write, but never read.
     pub refresh: bool,
+    /// `--max-age`, when it is tighter than [`LIFETIME_MINUTES`].
+    ///
+    /// It can only tighten. It is the flag a user reaches for when they suspect
+    /// staleness, and given what this feature is about, leaving it unable to
+    /// reach this cache would be a poor joke.
+    pub max_age_minutes: Option<f64>,
 }
 
+impl CachePolicy {
+    fn lifetime_ms(self) -> f64 {
+        let minutes = self
+            .max_age_minutes
+            .map_or(LIFETIME_MINUTES, |asked| js::js_min(LIFETIME_MINUTES, asked));
+        minutes * 60_000.0
+    }
+}
+
+/// Read one banked answer, if there is a fresh one from *this* provider.
+///
+/// The `provider` check is not decoration. `bank` has always written the field
+/// and the Spansh reader never read it back, which made it a comment with extra
+/// steps. Reading it catches a hand-copied or symlinked entry that the
+/// namespace alone does not — and a Spansh verdict served as a Frontier one is
+/// exactly the failure this whole change exists to end.
 fn cached<F: Fs>(
     fs: &F,
     root: &Path,
     market_id: f64,
     now_ms: f64,
     policy: CachePolicy,
-) -> Option<Access> {
+) -> Option<carrier::Owned> {
     if !policy.enabled || policy.refresh {
         return None;
     }
     let text = fs.read_to_string(&path(root, market_id)).ok()?;
     let document = JsValue::parse(&text).ok()?;
     let record = document.as_record()?;
+    if record.get("provider").and_then(JsValue::as_str)? != PROVIDER_NAMESPACE {
+        return None;
+    }
     if record.get("version").and_then(JsValue::as_f64)? != f64::from(FORMAT_VERSION) {
         return None;
     }
@@ -225,17 +288,35 @@ fn cached<F: Fs>(
     // corrupt or a clock moved, and honouring it would extend the lifetime
     // past the bound the flag set. `contains` is false for `NaN` too, which is
     // the answer a corrupt `readAt` deserves.
-    if !(0.0..=LIFETIME_MINUTES * 60_000.0).contains(&age_ms) {
+    if !(0.0..=policy.lifetime_ms()).contains(&age_ms) {
         return None;
     }
-    decode(record.get("access").and_then(JsValue::as_str)?)
+    let level = AccessLevel::parse(record.get("accessLevel").and_then(JsValue::as_str)?)?;
+    let notorious_ok = match record.get("notoriousAccess") {
+        Some(JsValue::Bool(flag)) => *flag,
+        _ => return None,
+    };
+    Some(carrier::Owned {
+        docking: Docking {
+            level,
+            notorious_ok,
+        },
+        owner_squadron_id: record.get("ownerSquadronId").and_then(JsValue::as_f64),
+        owner_user_id: record.get("ownerUserId").and_then(JsValue::as_f64),
+    })
 }
 
+/// Bank what Frontier said — never what this program concluded from it.
+///
+/// The distinction is the reason this function takes an [`carrier::Owned`] and
+/// not an [`Access`]: a verdict folds in the commander's notoriety, and a
+/// commander who pays off their notoriety would otherwise keep reading dropped
+/// carriers out of cache until the entry aged out.
 fn bank<F: Fs>(
     fs: &F,
     root: &Path,
     market_id: f64,
-    access: Access,
+    owned: carrier::Owned,
     now_ms: f64,
     policy: CachePolicy,
 ) {
@@ -246,12 +327,29 @@ fn bank<F: Fs>(
     if fs.create_dir_all(&provider_root).is_err() {
         return;
     }
+    let optional = |value: Option<f64>| value.map_or(JsValue::Null, JsValue::Num);
     let entry = JsObject::from_document_order(vec![
         ("provider".into(), JsValue::Str(PROVIDER_NAMESPACE.into())),
         ("marketId".into(), JsValue::Num(market_id)),
+        (
+            "fleetCarrierId".into(),
+            optional(carrier::carrier_id(market_id)),
+        ),
         ("readAt".into(), JsValue::Num(now_ms)),
         ("version".into(), JsValue::Num(f64::from(FORMAT_VERSION))),
-        ("access".into(), JsValue::Str(encode(access).into())),
+        (
+            "accessLevel".into(),
+            JsValue::Str(owned.docking.level.name().into()),
+        ),
+        (
+            "notoriousAccess".into(),
+            JsValue::Bool(owned.docking.notorious_ok),
+        ),
+        // Carried for a squadron or friends match that is not implemented yet.
+        // Eight bytes each, against re-probing every carrier on the day it
+        // lands.
+        ("ownerSquadronId".into(), optional(owned.owner_squadron_id)),
+        ("ownerUserId".into(), optional(owned.owner_user_id)),
     ]);
     // Silent on failure, like every other cache here: a cache that cannot be
     // written is a lost optimisation, not a lost run.
@@ -261,22 +359,33 @@ fn bank<F: Fs>(
     );
 }
 
-/// Overlay what this commander's own ship has learned onto a resolved index.
+/// Overlay what this commander's own ship has learned.
 ///
-/// **The journal always wins, and it is not a tie-break.** Spansh reported
-/// market 3712438528 ("1GOT", Nessa) as `All`, having last heard from it the
-/// previous day; this commander's ship was answered `DockingDenied` /
-/// `RestrictedAccess` by that carrier the next morning. A crowd-sourced index
-/// cannot be better than its last reporter, and it cannot know which squadron
-/// the reader belongs to at all — so where the two disagree, the one that was
-/// actually there is right.
+/// Under Spansh the journal always won, and the argument was that a crowd index
+/// cannot be better than its last reporter. Against a live read that argument
+/// is gone — a `DockingDenied` from three days ago would otherwise override an
+/// `accessLevel` fetched four seconds ago — so the rule is now split:
 ///
-/// It cuts both ways, and the `Admitted` direction is the more valuable half:
-/// `Policy::Open` drops every squadron- and friends-only carrier because
-/// nothing else this program reads knows the commander's squadron or friend
-/// list — but a `Docked` this ship completed is proof of membership, and
-/// restores a carrier the published policy would have thrown away.
-fn overlay_journal(index: &mut AccessIndex, commander: Option<&CommanderState>, cost: &mut Cost) {
+/// - **`Admitted` always wins.** It is the one question Frontier cannot answer.
+///   `accessLevel: squadron` says the door opens for the owner's squadron; it
+///   does not say whether *this* commander is in it, and nothing else this
+///   program reads knows either. A `Docked` this ship completed is proof of
+///   membership, and it restores a carrier the published policy would throw
+///   away.
+/// - **`Refused` beats a *cached* verdict and loses to a *fresh* one.** A probe
+///   issued during this run is by construction newer than a journal line read
+///   from disk at startup; a cached entry may not be. That resolves the contest
+///   on a fact the resolver already knows, with no date parsing — the
+///   observation deliberately keeps its timestamp exactly as written.
+///
+/// Where the fresh answer wins, the disagreement is still counted and still
+/// worth a line: an `all` carrier that refused this ship recently is either an
+/// owner who changed their mind back, or a notoriety refusal.
+fn overlay_journal(
+    index: &mut AccessIndex,
+    commander: Option<&CommanderState>,
+    cost: &mut Cost,
+) {
     let Some(state) = commander else {
         return;
     };
@@ -285,143 +394,404 @@ fn overlay_journal(index: &mut AccessIndex, commander: Option<&CommanderState>, 
         if !index.knows(id) {
             continue;
         }
-        let door = match observation.door {
-            CarrierDoor::Admitted => Access::Open,
-            CarrierDoor::Refused => Access::Restricted,
-        };
         let published = index.get(id);
-        if published != door {
-            cost.journal_corrections += 1;
+        match observation.door {
+            CarrierDoor::Admitted => {
+                if published != Access::Open {
+                    cost.journal_corrections += 1;
+                }
+                cost.from_journal += 1;
+                index.set(id, Access::Open);
+            }
+            CarrierDoor::Refused => {
+                if index.is_fresh(id) {
+                    // The live answer is newer than the journal line. Keep it,
+                    // and say that the two disagree.
+                    if published != Access::Restricted {
+                        cost.journal_disagreements += 1;
+                    }
+                    continue;
+                }
+                if published != Access::Restricted {
+                    cost.journal_corrections += 1;
+                }
+                cost.from_journal += 1;
+                index.set(id, Access::Restricted);
+            }
         }
-        cost.from_journal += 1;
-        index.set(id, door);
     }
 }
 
-/// Resolve every carrier's docking access.
+/// What the free pass established, and what it costs to finish.
+#[derive(Clone, Debug, Default)]
+pub struct Prepared {
+    /// Verdicts already known, from the cache.
+    pub index: AccessIndex,
+    /// Market ids that still need a live read. **This is the priced number.**
+    pub cold: Vec<f64>,
+    pub cost: Cost,
+}
+
+/// Drain the cache and apply the id arithmetic. Costs file reads and nothing
+/// else.
 ///
-/// `market_ids` is the carriers only — a non-carrier has no access to publish
-/// and asking about one would spend a slot in a batch to be told nothing.
-///
-/// Fails loudly. A partial answer is not accepted either: a filter enforced
-/// over some of the candidates is a filter that lies about the rest, and the
-/// lie is in the safe-looking direction.
-pub async fn resolve<H: HttpTransport, F: Fs>(
-    client: &SpanshClient<'_, H>,
+/// Split out of the probe so the caller can price [`Prepared::cold`] and put it
+/// through a gate before a single request is built. `acquire::prepare` gives
+/// the reason in as many words: a plan that priced twenty-two requests and then
+/// sent none is a plan nobody can check — and its inverse, a plan that priced
+/// none and then sent two hundred, is worse.
+pub fn prepare<F: Fs>(
     fs: &F,
     cache_root: &Path,
     market_ids: &[f64],
     now_ms: f64,
     cache_policy: CachePolicy,
-    commander: Option<&CommanderState>,
-    report: Option<&dyn Fn(usize, usize)>,
-) -> Result<(AccessIndex, Cost), String> {
-    use futures_util::StreamExt as _;
-
-    let mut index = AccessIndex::default();
-    let mut cost = Cost {
-        carriers: market_ids.len(),
-        ..Cost::default()
+    notoriety: f64,
+) -> Prepared {
+    let mut prepared = Prepared {
+        cost: Cost {
+            carriers: market_ids.len(),
+            ..Cost::default()
+        },
+        ..Prepared::default()
     };
 
-    // Deduplicated, and the cache drained first so a warm session sends
-    // nothing at all.
-    let mut wanted: Vec<f64> = Vec::new();
     let mut seen: HashSet<u64> = HashSet::new();
-    for id in market_ids {
-        if !seen.insert(id.to_bits()) {
+    for market_id in market_ids {
+        if !seen.insert(market_id.to_bits()) {
             continue;
         }
-        match cached(fs, cache_root, *id, now_ms, cache_policy) {
-            Some(access) => {
-                cost.cache_hits += 1;
-                index.set(*id, access);
+        // Ardent says this is a carrier and Frontier's own id space says it is
+        // not. Neither keep it quietly nor drop it quietly.
+        if carrier::carrier_id(*market_id).is_none() {
+            prepared.cost.unprobeable += 1;
+            prepared.index.set(*market_id, Access::Unknown);
+            continue;
+        }
+        match cached(fs, cache_root, *market_id, now_ms, cache_policy) {
+            Some(owned) => {
+                prepared.cost.cache_hits += 1;
+                let (access, why) = carrier::verdict(owned.docking, notoriety);
+                if why == Some(Closed::Notoriety) {
+                    prepared.cost.notoriety_blocked += 1;
+                }
+                prepared.index.set(*market_id, access);
             }
-            None => wanted.push(*id),
+            None => prepared.cold.push(*market_id),
         }
     }
+    prepared
+}
 
-    let batches: Vec<&[f64]> = wanted.chunks(spansh::BATCH_IDS).collect();
-    let total_requests = batches.len() * 2;
+/// Everything one probe needs that this module cannot compute for itself.
+///
+/// Mirrors the sweep's own context struct, and for the same reason: the
+/// alternative is nine positional parameters of which four are `Option`s.
+pub struct ProbeCx<'a, H, C, E> {
+    pub http: &'a H,
+    pub out: &'a Out,
+    /// `EDM_ORIGIN_OVERRIDE`, or the game-internal API's own origin.
+    pub origin: &'a str,
+    pub clock: &'a C,
+    pub entropy: &'a E,
+    pub credentials: &'a Credentials,
+    pub headers: &'a HeaderConfig,
+    pub language: &'a str,
+    pub method_override: Option<&'a str>,
+    pub dry_run: bool,
+    pub nonce_override: Option<edm_core::wire::Nonce>,
+    pub frontier_time_override: Option<f64>,
+    pub request_time_override: Option<u32>,
+}
+
+impl<H, C, E> std::fmt::Debug for ProbeCx<'_, H, C, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProbeCx")
+            .field("origin", &self.origin)
+            .field("dry_run", &self.dry_run)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What one probe produced.
+enum Probed {
+    Verdict(carrier::Owned),
+    /// HTTP 204: Frontier has no such carrier. Measured, not assumed.
+    Gone,
+    /// Anything else. The message is for the caller's warning, not for a table.
+    Failed(String),
+}
+
+/// Read the cold set live, banking and indexing as the answers land.
+///
+/// Every request goes through `pacer.acquire()`, which is what keeps the probes
+/// inside the run's own rate limit, breaker window and `--deadline`, and — the
+/// part that is easy to miss — what makes them appear in `spent.requests`, so
+/// the coverage table's arithmetic closes without anything being added back by
+/// hand.
+///
+/// Returns `Err` only when the cold set was non-empty and **nothing** answered.
+/// That is indistinguishable from a broken endpoint or a dead credential, and
+/// ranking two hundred unread carriers under `open` would hand back precisely
+/// the unfiltered list the user asked not to have. Any lesser failure count
+/// lets the run finish, with the gaps counted and named.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the transport context, the pacer, the cache, the work, and the commander fact that turns an answer into a verdict"
+)]
+pub async fn probe<H, C, E, J, T, F>(
+    cx: &ProbeCx<'_, H, C, E>,
+    pacer: &Pacer<'_, C, T, J>,
+    fs: &F,
+    cache_root: &Path,
+    cold: &[f64],
+    now_ms: f64,
+    cache_policy: CachePolicy,
+    notoriety: f64,
+    index: &mut AccessIndex,
+    cost: &mut Cost,
+    report: Option<&dyn Fn(usize, usize)>,
+) -> Result<(), String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    J: Entropy,
+    T: Timer,
+    F: Fs,
+{
+    use futures_util::StreamExt as _;
+
+    if cold.is_empty() {
+        return Ok(());
+    }
+    let total = cold.len();
     let done = std::cell::Cell::new(0usize);
 
-    let answers: Vec<Result<BatchAnswer, String>> =
-        futures_util::stream::iter(batches.iter().enumerate().map(|(nth, batch)| {
-            let done = &done;
-            async move {
-                let restricted = client
-                    .carriers_with_access(batch, &spansh::RESTRICTED_ACCESS)
-                    .await?;
-                done.set(done.get() + 1);
-                if let Some(report) = report {
-                    report(done.get(), total_requests);
-                }
-                let open = client
-                    .carriers_with_access(batch, &[spansh::OPEN_ACCESS])
-                    .await?;
-                done.set(done.get() + 1);
-                if let Some(report) = report {
-                    report(done.get(), total_requests);
-                }
-                Ok((nth, restricted, open))
+    let answers: Vec<(f64, Probed)> = futures_util::stream::iter(cold.iter().map(|market_id| {
+        let done = &done;
+        async move {
+            let outcome = probe_one(cx, pacer, *market_id).await;
+            done.set(done.get() + 1);
+            if let Some(report) = report {
+                report(done.get(), total);
             }
-        }))
-        .buffer_unordered(CONCURRENCY)
-        .collect()
-        .await;
-
-    for answer in answers {
-        let (nth, restricted, open) = answer?;
-        let batch = batches[nth];
-        cost.requests += 2;
-
-        // The overlap guard. A filter key Spansh does not recognise is ignored
-        // rather than refused, and the reply is the whole unfiltered batch with
-        // HTTP 200 — which lands here as a carrier that is both restricted and
-        // open. Nothing else in the protocol can distinguish that reply from a
-        // real one.
-        if let Some(both) = restricted.iter().find(|id| open.contains(id)) {
-            return Err(format!(
-                "Spansh reported market {} as both restricted and open, so a filter was ignored",
-                js::js_number(*both)
-            ));
+            (*market_id, outcome)
         }
-        if restricted.len() + open.len() > batch.len() {
-            return Err(format!(
-                "Spansh reported {} restricted and {} open carriers out of a batch of {}",
-                restricted.len(),
-                open.len(),
-                batch.len()
-            ));
-        }
+    }))
+    .buffer_unordered(CONCURRENCY)
+    .collect()
+    .await;
 
-        for id in batch {
-            let access = if restricted.contains(id) {
-                Access::Restricted
-            } else if open.contains(id) {
-                Access::Open
-            } else {
-                Access::Unknown
-            };
-            index.set(*id, access);
-            bank(fs, cache_root, *id, access, now_ms, cache_policy);
+    let mut answered = 0usize;
+    for (market_id, outcome) in answers {
+        cost.requests += 1;
+        match outcome {
+            Probed::Verdict(owned) => {
+                answered += 1;
+                let (access, why) = carrier::verdict(owned.docking, notoriety);
+                if why == Some(Closed::Notoriety) {
+                    cost.notoriety_blocked += 1;
+                }
+                index.set_fresh(market_id, access);
+                bank(fs, cache_root, market_id, owned, now_ms, cache_policy);
+            }
+            Probed::Gone => {
+                answered += 1;
+                cost.gone += 1;
+                // A carrier that does not exist cannot be docked at and cannot
+                // be traded with. Restricted under any reading, and not banked
+                // — the id may be reissued.
+                index.set_fresh(market_id, Access::Restricted);
+            }
+            Probed::Failed(message) => {
+                cost.probe_failures += 1;
+                // Not banked: the next run should retry rather than read back a
+                // hole this one dug.
+                index.set(market_id, Access::Unknown);
+                if !cx.out.is_json() {
+                    cx.out.line(&format!(
+                        "   could not read docking access for market {}: {message}",
+                        js::js_number(market_id)
+                    ));
+                }
+            }
         }
     }
 
-    // After Spansh and after the cache, because it overrides both — and before
-    // the tally, so the counts the user reads describe the verdicts actually
-    // used.
-    overlay_journal(&mut index, commander, &mut cost);
+    if answered == 0 {
+        return Err(format!(
+            "no fleet carrier answered: all {} docking-access reads failed",
+            js::format_integer(total as f64)
+        ));
+    }
+    Ok(())
+}
 
-    for id in market_ids {
-        match index.get(*id) {
+async fn probe_one<H, C, E, J, T>(
+    cx: &ProbeCx<'_, H, C, E>,
+    pacer: &Pacer<'_, C, T, J>,
+    market_id: f64,
+) -> Probed
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    J: Entropy,
+    T: Timer,
+{
+    let Some(fleet_carrier_id) = carrier::carrier_id(market_id) else {
+        return Probed::Failed("its market id is not a carrier's".to_owned());
+    };
+
+    let mut attempts = 0u32;
+    let first_attempt_ms = pacer.now_ms();
+    loop {
+        attempts += 1;
+        pacer.acquire().await;
+
+        let stamp: Stamp = crate::sweep::next_stamp(
+            cx.clock,
+            cx.entropy,
+            cx.nonce_override,
+            cx.frontier_time_override,
+            cx.request_time_override,
+        );
+        let request = game_api::prepare(
+            cx.origin,
+            FLEETCARRIER_INFO,
+            cx.method_override,
+            game_api::fleetcarrier_info_fields(
+                fleet_carrier_id,
+                cx.language,
+                cx.credentials,
+                stamp.frontier_time,
+            ),
+            stamp,
+            cx.headers,
+        );
+
+        let exchange = crate::exchange::send(
+            cx.http,
+            cx.out,
+            &request,
+            cx.dry_run,
+            crate::exchange::SendOptions {
+                quiet: true,
+                ignore_dry_run: false,
+                // Two hundred probes each able to print a table is a different
+                // thing from forty 410s inside a five-thousand-market sweep.
+                // The failures are reported as a count, a note and a JSON
+                // field.
+                quiet_failure: true,
+            },
+            |_| {},
+            |_| {},
+        )
+        .await;
+
+        let status = exchange.as_ref().map(|e| e.status);
+        let outcome = match &exchange {
+            // 204 is Frontier saying there is no such carrier. Measured
+            // against two synthetic ids; it is not a 4xx and not an error.
+            Some(e) if e.status == 204 => return Probed::Gone,
+            Some(e) if (200..300).contains(&e.status) => {
+                match e.decrypted.as_deref().map(JsValue::parse) {
+                    Some(Ok(document)) => match carrier::parse_info(&document, market_id) {
+                        Ok(owned) => return Probed::Verdict(owned),
+                        // A shape or identity refusal is not worth retrying:
+                        // the same request would produce the same reply.
+                        Err(refusal) => return Probed::Failed(refusal.to_string()),
+                    },
+                    Some(Err(error)) => Probed::Failed(error.to_string()),
+                    None => Probed::Failed("the reply could not be decrypted".to_owned()),
+                }
+            }
+            Some(e) => Probed::Failed(format!("HTTP {} {}", e.status, e.status_text)),
+            None => Probed::Failed("the request did not complete".to_owned()),
+        };
+
+        let transient = crate::sweep::is_transient_status(status);
+        if pacer
+            .retry_after_failure(transient, attempts, first_attempt_ms)
+            .await
+            .is_some()
+        {
+            return outcome;
+        }
+    }
+}
+
+/// Fold in the journal and tally what the index now says.
+///
+/// Separate from [`probe`] so the caller can run it after a pass that sent
+/// nothing — a warm cache, or the second selection on the `--verify-systems`
+/// path — and still get counts that describe the verdicts actually used.
+pub fn finish(
+    index: &mut AccessIndex,
+    market_ids: &[f64],
+    commander: Option<&CommanderState>,
+    cost: &mut Cost,
+) {
+    overlay_journal(index, commander, cost);
+    cost.restricted = 0;
+    cost.unknown = 0;
+    for market_id in market_ids {
+        match index.get(*market_id) {
             Access::Restricted => cost.restricted += 1,
             Access::Unknown => cost.unknown += 1,
             Access::Open => {}
         }
     }
+}
 
-    Ok((index, cost))
+/// The one line a docking-access pass prints.
+///
+/// It names the source, because this is the only fact in the run that does not
+/// come from Frontier or Ardent, and it names what was *kept* unproven, because
+/// that number is the size of the claim the filter is deliberately not making.
+#[must_use]
+pub fn note(cost: Cost, removed: Removed) -> String {
+    use std::fmt::Write as _;
+
+    let n = |value: usize| edm_core::js::format_integer(value as f64);
+    let mut text = format!(
+        "carrier access: {} {}",
+        n(cost.carriers),
+        if cost.carriers == 1 { "carrier" } else { "carriers" },
+    );
+    // Every clause is a number the reader might otherwise have to infer from
+    // the difference between two others.
+    if cost.requests > 0 {
+        let _ = write!(text, ", {} read live", n(cost.requests));
+    }
+    if cost.cache_hits > 0 {
+        let _ = write!(text, ", {} from cache", n(cost.cache_hits));
+    }
+    let _ = write!(text, ", {} restrict docking", n(removed.restricted));
+    if cost.notoriety_blocked > 0 {
+        let _ = write!(
+            text,
+            " ({} only because of your notoriety)",
+            n(cost.notoriety_blocked)
+        );
+    }
+    if cost.gone > 0 {
+        let _ = write!(text, " ({} no longer exist)", n(cost.gone));
+    }
+    if cost.journal_corrections > 0 {
+        let _ = write!(
+            text,
+            ", {} corrected by your own journal",
+            n(cost.journal_corrections)
+        );
+    }
+    if removed.unproven > 0 {
+        let _ = write!(text, ", {} unread and dropped", n(removed.unproven));
+    } else if removed.unproven_kept > 0 {
+        let _ = write!(text, ", {} unread and kept", n(removed.unproven_kept));
+    }
+    text
 }
 
 /// Drop the carriers this policy will not admit, and record why.
@@ -431,7 +801,7 @@ pub async fn resolve<H: HttpTransport, F: Fs>(
 /// so moving both would make the plan's arithmetic stop closing.
 pub fn apply(selection: &mut Selection, index: &AccessIndex, policy: Policy) -> Removed {
     let mut removed = Removed::default();
-    if !policy.queries_spansh() {
+    if !policy.filters() {
         return removed;
     }
 
@@ -517,7 +887,193 @@ mod tests {
     const LIVE: CachePolicy = CachePolicy {
         enabled: true,
         refresh: false,
+        max_age_minutes: None,
     };
+
+    fn owned(level: AccessLevel, notorious_ok: bool) -> carrier::Owned {
+        carrier::Owned {
+            docking: Docking {
+                level,
+                notorious_ok,
+            },
+            owner_squadron_id: Some(82472.0),
+            owner_user_id: Some(909_522.0),
+        }
+    }
+
+    /// Real carrier market ids, so the id arithmetic in `prepare` accepts them.
+    const OPEN_ID: f64 = 3_705_929_472.0;
+    const SHUT_ID: f64 = 3_711_014_400.0;
+    const THIRD_ID: f64 = 3_703_823_104.0;
+
+    #[test]
+    fn a_verdict_survives_a_cache_round_trip() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        for (id, level) in [
+            (OPEN_ID, AccessLevel::All),
+            (SHUT_ID, AccessLevel::SquadronFriends),
+            (THIRD_ID, AccessLevel::None),
+        ] {
+            bank(&fs, root, id, owned(level, true), 1_000.0, LIVE);
+            let back = cached(&fs, root, id, 1_000.0, LIVE).expect("banked");
+            assert_eq!(back.docking.level, level);
+            assert_eq!(back.owner_squadron_id, Some(82472.0));
+        }
+    }
+
+    /// The cache holds what Frontier said, never what this program concluded —
+    /// so clearing notoriety takes effect on the next read rather than on the
+    /// next TTL expiry.
+    #[test]
+    fn the_cache_stores_the_answer_and_not_the_verdict() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, false), 0.0, LIVE);
+
+        let clean = prepare(&fs, root, &[OPEN_ID], 0.0, LIVE, 0.0);
+        assert_eq!(clean.index.get(OPEN_ID), Access::Open);
+        assert_eq!(clean.cost.notoriety_blocked, 0);
+
+        let notorious = prepare(&fs, root, &[OPEN_ID], 0.0, LIVE, 3.0);
+        assert_eq!(notorious.index.get(OPEN_ID), Access::Restricted);
+        assert_eq!(notorious.cost.notoriety_blocked, 1);
+    }
+
+    #[test]
+    fn a_verdict_older_than_the_lifetime_is_a_miss() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, LIVE);
+        let just_inside = LIFETIME_MINUTES * 60_000.0;
+        assert!(cached(&fs, root, OPEN_ID, just_inside, LIVE).is_some());
+        assert!(cached(&fs, root, OPEN_ID, just_inside + 1.0, LIVE).is_none());
+    }
+
+    /// `--max-age` can only tighten, never extend.
+    #[test]
+    fn max_age_tightens_the_lifetime_and_cannot_extend_it() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, LIVE);
+        let tight = CachePolicy {
+            max_age_minutes: Some(1.0),
+            ..LIVE
+        };
+        assert!(cached(&fs, root, OPEN_ID, 60_000.0, tight).is_some());
+        assert!(cached(&fs, root, OPEN_ID, 60_001.0, tight).is_none());
+
+        let loose = CachePolicy {
+            max_age_minutes: Some(10_000.0),
+            ..LIVE
+        };
+        let past_lifetime = LIFETIME_MINUTES * 60_000.0 + 1.0;
+        assert!(cached(&fs, root, OPEN_ID, past_lifetime, loose).is_none());
+    }
+
+    #[test]
+    fn a_future_timestamp_is_a_miss_not_an_extended_lifetime() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 10_000.0, LIVE);
+        assert!(cached(&fs, root, OPEN_ID, 0.0, LIVE).is_none());
+    }
+
+    #[test]
+    fn a_corrupt_entry_is_a_miss_not_a_crash() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        fs.write(&path(root, OPEN_ID), "{not json").unwrap();
+        assert!(cached(&fs, root, OPEN_ID, 0.0, LIVE).is_none());
+        fs.write(
+            &path(root, SHUT_ID),
+            r#"{"provider":"frontier-carrier-access","version":99,"accessLevel":"all"}"#,
+        )
+        .unwrap();
+        assert!(cached(&fs, root, SHUT_ID, 0.0, LIVE).is_none());
+    }
+
+    /// The barrier that the Spansh reader wrote and never checked. A verdict
+    /// from another provider must not be readable here whatever its shape.
+    #[test]
+    fn an_entry_from_another_provider_is_unreadable() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        fs.write(
+            &path(root, OPEN_ID),
+            r#"{"provider":"spansh-carrier-access","marketId":3705929472,"readAt":0,
+                "version":1,"accessLevel":"all","notoriousAccess":true}"#,
+        )
+        .unwrap();
+        assert!(cached(&fs, root, OPEN_ID, 0.0, LIVE).is_none());
+    }
+
+    #[test]
+    fn no_cache_neither_reads_nor_writes() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        let off = CachePolicy {
+            enabled: false,
+            ..LIVE
+        };
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, off);
+        assert!(fs.files.borrow().is_empty());
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, LIVE);
+        assert!(cached(&fs, root, OPEN_ID, 0.0, off).is_none());
+    }
+
+    #[test]
+    fn refresh_writes_but_never_reads() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        let refresh = CachePolicy {
+            refresh: true,
+            ..LIVE
+        };
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, refresh);
+        assert!(cached(&fs, root, OPEN_ID, 0.0, refresh).is_none());
+        assert!(cached(&fs, root, OPEN_ID, 0.0, LIVE).is_some());
+    }
+
+    /// The warm/cold split is what the gate prices, so it has to be exact.
+    #[test]
+    fn prepare_partitions_warm_from_cold_and_prices_only_the_cold() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        bank(&fs, root, OPEN_ID, owned(AccessLevel::All, true), 0.0, LIVE);
+
+        let prepared = prepare(&fs, root, &[OPEN_ID, SHUT_ID, THIRD_ID], 0.0, LIVE, 0.0);
+        assert_eq!(prepared.cost.cache_hits, 1);
+        assert_eq!(prepared.cold, vec![SHUT_ID, THIRD_ID]);
+        assert_eq!(prepared.index.get(OPEN_ID), Access::Open);
+        assert_eq!(prepared.index.get(SHUT_ID), Access::Unknown);
+    }
+
+    /// Ardent called it a carrier and Frontier's id space disagrees. It costs
+    /// no request and it is not silently kept or silently dropped.
+    #[test]
+    fn a_market_id_that_is_not_a_carriers_is_unprobeable_and_unpriced() {
+        let fs = MemFs::default();
+        let root = Path::new("/cache");
+        let prepared = prepare(&fs, root, &[128_016_384.0, OPEN_ID], 0.0, LIVE, 0.0);
+        assert_eq!(prepared.cost.unprobeable, 1);
+        assert_eq!(prepared.cold, vec![OPEN_ID], "the bad id costs no request");
+        assert_eq!(prepared.index.get(128_016_384.0), Access::Unknown);
+    }
+
+    #[test]
+    fn prepare_deduplicates_before_pricing() {
+        let fs = MemFs::default();
+        let prepared = prepare(
+            &fs,
+            Path::new("/cache"),
+            &[OPEN_ID, OPEN_ID, SHUT_ID],
+            0.0,
+            LIVE,
+            0.0,
+        );
+        assert_eq!(prepared.cold, vec![OPEN_ID, SHUT_ID]);
+    }
 
     fn station(market_id: f64, kind: &str) -> ArdentStation {
         ArdentStation {
@@ -552,87 +1108,50 @@ mod tests {
         index
     }
 
+    /// `Admitted` is the one thing Frontier cannot tell us — whether *this*
+    /// commander is in the squadron the door opens for.
     #[test]
-    fn a_verdict_survives_a_cache_round_trip_including_unknown() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        for (id, access) in [
-            (1.0, Access::Open),
-            (2.0, Access::Restricted),
-            (3.0, Access::Unknown),
-        ] {
-            bank(&fs, root, id, access, 1_000.0, LIVE);
-            assert_eq!(cached(&fs, root, id, 1_000.0, LIVE), Some(access));
-        }
+    fn a_completed_docking_beats_even_a_fresh_restriction() {
+        let mut index = AccessIndex::default();
+        index.set_fresh(SHUT_ID, Access::Restricted);
+        let mut cost = Cost::default();
+        let state = state_with(SHUT_ID, CarrierDoor::Admitted);
+        overlay_journal(&mut index, Some(&state), &mut cost);
+        assert_eq!(index.get(SHUT_ID), Access::Open);
+        assert_eq!(cost.journal_corrections, 1);
     }
 
-    /// The reason `Unknown` is banked at all: otherwise a third of every region
-    /// is re-queried on every run, forever.
+    /// A refusal from the journal is older than a probe issued this run, and
+    /// loses to it — but still counts as a disagreement worth reporting.
     #[test]
-    fn an_unknown_verdict_is_a_cache_hit_not_a_miss() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        bank(&fs, root, 7.0, Access::Unknown, 0.0, LIVE);
-        assert_eq!(cached(&fs, root, 7.0, 0.0, LIVE), Some(Access::Unknown));
+    fn a_journal_refusal_loses_to_a_fresh_answer_and_beats_a_cached_one() {
+        let mut fresh = AccessIndex::default();
+        fresh.set_fresh(OPEN_ID, Access::Open);
+        let mut cost = Cost::default();
+        let state = state_with(OPEN_ID, CarrierDoor::Refused);
+        overlay_journal(&mut fresh, Some(&state), &mut cost);
+        assert_eq!(fresh.get(OPEN_ID), Access::Open, "the live answer is newer");
+        assert_eq!(cost.journal_disagreements, 1);
+        assert_eq!(cost.from_journal, 0);
+
+        let mut warm = AccessIndex::default();
+        warm.set(OPEN_ID, Access::Open);
+        let mut cost = Cost::default();
+        overlay_journal(&mut warm, Some(&state), &mut cost);
+        assert_eq!(warm.get(OPEN_ID), Access::Restricted, "the cache is older");
+        assert_eq!(cost.from_journal, 1);
     }
 
-    #[test]
-    fn a_verdict_older_than_the_lifetime_is_a_miss() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        bank(&fs, root, 1.0, Access::Open, 0.0, LIVE);
-        let just_inside = LIFETIME_MINUTES * 60_000.0;
-        assert_eq!(
-            cached(&fs, root, 1.0, just_inside, LIVE),
-            Some(Access::Open)
-        );
-        assert_eq!(cached(&fs, root, 1.0, just_inside + 1.0, LIVE), None);
-    }
-
-    #[test]
-    fn a_future_timestamp_is_a_miss_not_an_extended_lifetime() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        bank(&fs, root, 1.0, Access::Open, 10_000.0, LIVE);
-        assert_eq!(cached(&fs, root, 1.0, 0.0, LIVE), None);
-    }
-
-    #[test]
-    fn a_corrupt_entry_is_a_miss_not_a_crash() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        fs.write(&path(root, 1.0), "{not json").unwrap();
-        assert_eq!(cached(&fs, root, 1.0, 0.0, LIVE), None);
-        fs.write(&path(root, 2.0), r#"{"version":99,"access":"open"}"#)
-            .unwrap();
-        assert_eq!(cached(&fs, root, 2.0, 0.0, LIVE), None);
-    }
-
-    #[test]
-    fn no_cache_neither_reads_nor_writes() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        let off = CachePolicy {
-            enabled: false,
-            refresh: false,
-        };
-        bank(&fs, root, 1.0, Access::Open, 0.0, off);
-        assert!(fs.files.borrow().is_empty());
-        bank(&fs, root, 1.0, Access::Open, 0.0, LIVE);
-        assert_eq!(cached(&fs, root, 1.0, 0.0, off), None);
-    }
-
-    #[test]
-    fn refresh_writes_but_never_reads() {
-        let fs = MemFs::default();
-        let root = Path::new("/cache");
-        let refresh = CachePolicy {
-            enabled: true,
-            refresh: true,
-        };
-        bank(&fs, root, 1.0, Access::Open, 0.0, refresh);
-        assert_eq!(cached(&fs, root, 1.0, 0.0, refresh), None);
-        assert_eq!(cached(&fs, root, 1.0, 0.0, LIVE), Some(Access::Open));
+    fn state_with(market_id: f64, door: CarrierDoor) -> CommanderState {
+        let mut state = CommanderState::default();
+        state.carrier_doors.push((
+            market_id as u64,
+            edm_core::domain::commander::DoorObservation {
+                door,
+                observed_at: Some("2026-08-26T07:18:31Z".to_owned()),
+            },
+        ));
+        state
     }
 
     #[test]

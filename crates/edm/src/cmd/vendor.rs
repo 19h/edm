@@ -360,6 +360,7 @@ async fn visit<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             SendOptions {
                 quiet: true,
                 ignore_dry_run: false,
+                quiet_failure: false,
             },
         )
         .await;
@@ -464,6 +465,7 @@ async fn emit_dry_run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             .send(
                 &prepared[0].1,
                 SendOptions {
+                    quiet_failure: false,
                     quiet: false,
                     ignore_dry_run: false,
                 },

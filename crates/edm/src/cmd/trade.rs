@@ -200,6 +200,7 @@ async fn batch_trade<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                         SendOptions {
                             quiet: true,
                             ignore_dry_run: false,
+                            quiet_failure: false,
                         },
                     )
                     .await;

@@ -70,8 +70,26 @@ pub enum Decision {
     Sweep(Estimate),
     /// The plan was printed and that is all that was asked for.
     Stopped(Estimate),
+    /// This phase is skipped and the run continues \[C37\].
+    ///
+    /// Only ever returned for a [`Stage::Intermediate`] gate under
+    /// `--dry-run`. A run can now be gated more than once, and treating a
+    /// dry-run stop at the *first* gate as the end of the run would show the
+    /// carrier-access plan and hide the sweep plan behind it — strictly less
+    /// than `--dry-run` printed before, for a flag whose whole purpose is to
+    /// print what would happen.
+    Skipped(Estimate),
     /// Nothing was sent, and nothing will be.
     Refused(Refusal),
+}
+
+/// Whether this gate is the last one in the run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Another gate follows; a `--dry-run` should fall through to it.
+    Intermediate,
+    /// The last gate. `--dry-run` stops here.
+    Final,
 }
 
 impl Decision {
@@ -83,6 +101,15 @@ impl Decision {
     pub fn proceeds(&self) -> bool {
         matches!(self, Self::Sweep(_))
     }
+
+    /// Whether the run as a whole should stop here.
+    ///
+    /// [`Decision::Skipped`] is the one case that is neither permission nor an
+    /// ending: this phase sends nothing and the next one still gets its turn.
+    #[must_use]
+    pub fn ends_the_run(&self) -> bool {
+        matches!(self, Self::Stopped(_) | Self::Refused(_))
+    }
 }
 
 /// Price the sweep, show it, and decide.
@@ -91,6 +118,19 @@ impl Decision {
 /// **before** the verdict is announced, so a refusal always comes with the
 /// numbers that caused it rather than instead of them.
 pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) -> Decision {
+    gate_titled(out, config, survey, prior, "ROUTE PLAN", Stage::Final)
+}
+
+/// The same gate under a caller's own heading, for a phase that is not the
+/// last one.
+pub fn gate_titled(
+    out: &Out,
+    config: &RouteConfig,
+    survey: &Survey,
+    prior: SizePrior,
+    title: &str,
+    stage: Stage,
+) -> Decision {
     let estimate = Estimate::build(
         survey.counts,
         survey.exclusions.clone(),
@@ -129,6 +169,7 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
         rate_per_second: config.rate_per_second,
         max_requests: config.max_requests,
         prior,
+        title,
     }));
 
     match spend::verdict(
@@ -156,7 +197,10 @@ pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) 
             out.set_exit(1);
             Decision::Stopped(estimate)
         }
-        Verdict::Proceed if config.dry_run => Decision::Stopped(estimate),
+        Verdict::Proceed if config.dry_run => match stage {
+            Stage::Final => Decision::Stopped(estimate),
+            Stage::Intermediate => Decision::Skipped(estimate),
+        },
         Verdict::Proceed => Decision::Sweep(estimate),
     }
 }
@@ -186,6 +230,7 @@ mod tests {
             price_index: false,
             ardent_requests: 1,
             counts: spend::Counts {
+                carriers_to_probe: 0,
                 systems,
                 systems_to_read: systems,
                 stations_known: markets,

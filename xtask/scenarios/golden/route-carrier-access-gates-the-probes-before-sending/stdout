@@ -1,0 +1,18 @@
+resolving "Sol" through Ardent for quick lookup...
+scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 1 best hop of at least 100 t to buy and 100 published t of demand, for 1 commodity...
+== CARRIER ACCESS PLAN =============================================================================
++----------------------------+---------------------------------------------------------------+
+| Field                      | Value                                                         |
++============================+===============================================================+
+| reference                  | Sol                                                           |
+| radius                     | 20 Ly price index (1 Ardent query; not regional)              |
+| systems                    | not enumerated (commodity price index)                        |
+| price rows considered      | 2 (Ardent)                                                    |
+| carrier access to read     | 2  (one per carrier)                                          |
+| markets to poll            | 0                                                             |
+| game-internal API requests | 2  = 2 carrier access + 0 market                              |
+| estimated transfer         | 16-29 KB  (prior: 500 KB/system, 20 KB/market, 11 KB/carrier) |
+| pacing                     | 4 req/s                                                       |
+| estimated wall clock       | 1s                                                            |
+| ceiling                    | 2 of 1   (--max-requests to raise)                            |
++----------------------------+---------------------------------------------------------------+

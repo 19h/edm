@@ -14,7 +14,6 @@
 //! would have won on rate.
 
 use std::collections::HashSet;
-use std::fmt::Write as _;
 
 use futures_util::StreamExt as _;
 
@@ -207,6 +206,20 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     // which is exactly what the `?` inside the loop used to do.
     let answers = answers.into_iter().collect::<Result<Vec<_>, String>>()?;
 
+    // Hoisted: the carrier-access phase spends metered requests now, and
+    // everything metered belongs behind one pacer \[C37\].
+    let stamp_overrides = app.stamp_overrides()?;
+    let query = edm_core::cli::config::starsystem_query(
+        &app.cli,
+        edm_core::cli::config::CachedTimestamp::SweepZero,
+    )
+    .map_err(|error| error.message().to_owned())?;
+    let entropy = crate::ports::PinnedJitter {
+        inner: &app.ports.entropy,
+        unit: app.overrides.jitter.unwrap_or(f64::NAN),
+    };
+    let pacer = Pacer::new(super::pacing(config), &app.ports.clock, timer, &entropy);
+
     // One resolution for the whole lookup, before any side is selected: every
     // commodity's price pages draw on the same regional pool of carriers, so
     // resolving per commodity would ask Spansh the same question once per
@@ -216,8 +229,11 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             app,
             config,
             &configured_cache,
+            &pacer,
+            &stamp_overrides,
             &answers,
             &centre.coordinates,
+            wanted.len(),
             commander,
             &note,
         )
@@ -318,6 +334,9 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         // They are free Ardent reads, not paid Frontier work.
         ardent_requests: (wanted.len().saturating_mul(3) + usize::from(catalogue_fetched)) as u32,
         counts: Counts {
+            // Already spent. Folded forward so the ceiling stays cumulative
+            // across the run's two gates rather than resetting at each.
+            carriers_to_probe: docking_report.map_or(0, |report| report.cost.requests),
             systems: 0,
             systems_to_read: 0,
             stations_known: considered,
@@ -344,17 +363,6 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         true,
     );
     let started_ms = app.ports.clock.now_ms();
-    let stamp_overrides = app.stamp_overrides()?;
-    let query = edm_core::cli::config::starsystem_query(
-        &app.cli,
-        edm_core::cli::config::CachedTimestamp::SweepZero,
-    )
-    .map_err(|error| error.message().to_owned())?;
-    let entropy = crate::ports::PinnedJitter {
-        inner: &app.ports.entropy,
-        unit: app.overrides.jitter.unwrap_or(f64::NAN),
-    };
-    let pacer = Pacer::new(super::pacing(config), &app.ports.clock, timer, &entropy);
 
     let relayed_log = Relayed::new(cache.root(), config.eddn_max_age_minutes);
     let eddn_options = config
@@ -743,16 +751,35 @@ type CommodityAnswer = (
 /// appears in several of them — a carrier that sells Gold and buys Silver is
 /// two rows and one door. Deduplicating across the whole lookup before asking
 /// is the difference between one batch and one batch per commodity.
-async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a priced phase needs the app, its config, the cache, the pacer, the stamp pins, the price pages it draws carriers from, and the commander fact that turns an answer into a verdict"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same linear free-then-gate-then-spend sequence as the full sweep's phase, and the order is the safeguard"
+)]
+async fn quick_docking_access<H, C, E, F, J, T>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     cache: &Cache,
+    pacer: &Pacer<'_, C, T, J>,
+    stamp_overrides: &crate::cmd::StampOverrides,
     answers: &[CommodityAnswer],
     centre: &edm_core::domain::id64::Coordinates,
+    ardent_requests: usize,
     commander: Option<&edm_core::domain::commander::CommanderState>,
     note: &dyn Fn(String),
-) -> Result<(AccessIndex, Option<access::Report>), String> {
-    if !config.carrier_access.queries_spansh() {
+) -> Result<(AccessIndex, Option<access::Report>), String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    J: Entropy,
+    T: Timer,
+{
+    if !config.carrier_access.filters() {
         return Ok((AccessIndex::default(), None));
     }
 
@@ -777,10 +804,10 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // Through the ordinary filters first. Ardent's price pages are capped at a
     // thousand rows a side and are not bounded by `--pad` or
     // `--max-star-distance`, so a wide lookup carries carriers that
-    // `select_side` is about to drop for reasons that cost nothing to check —
-    // and asking Spansh about those would be requests spent to refine an answer
-    // that has already been discarded. The rules applied here are the same ones
-    // applied there, so this can only remove carriers that were leaving anyway.
+    // `select_side` is about to drop for reasons that cost nothing to check.
+    // Under Spansh that saved batch slots; now it saves metered requests, and
+    // the rules applied here are the same ones applied there, so this can only
+    // remove carriers that were leaving anyway.
     let carriers: Vec<f64> = select::select(stations, config, centre)
         .keep
         .iter()
@@ -790,71 +817,127 @@ async fn quick_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return Ok((AccessIndex::default(), None));
     }
 
-    note(format!(
-        "checking docking access for {} fleet {} against Spansh...",
-        edm_core::js::format_integer(carriers.len() as f64),
-        plural(carriers.len(), "carrier", "carriers"),
-    ));
-
-    let client = crate::spansh::SpanshClient::new(app.http, &app.overrides.spansh_base);
-    let (index, cost) = access::resolve(
-        &client,
+    let notoriety = commander.map_or(0.0, |state| state.notoriety);
+    let cache_policy = access::CachePolicy {
+        enabled: config.cache,
+        refresh: config.refresh,
+        max_age_minutes: Some(config.max_age_minutes),
+    };
+    let now_ms = app.ports.clock.now_ms();
+    let mut prepared = access::prepare(
         &app.ports.fs,
         cache.root(),
         &carriers,
-        app.ports.clock.now_ms(),
-        access::CachePolicy {
-            enabled: config.cache,
-            refresh: config.refresh,
-        },
-        commander,
-        None,
-    )
-    .await
-    .map_err(|error| {
-        format!("{error}\n   pass --carrier-access any to rank carriers without checking")
-    })?;
+        now_ms,
+        cache_policy,
+        notoriety,
+    );
 
-    let n = |value: usize| edm_core::js::format_integer(value as f64);
-    let mut text = format!("carrier access: {} checked against Spansh", n(cost.carriers));
-    if cost.cache_hits > 0 {
-        let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
-    }
-    let _ = write!(text, ", {} restrict docking", n(cost.restricted));
-    if cost.journal_corrections > 0 {
-        let _ = write!(
-            text,
-            " ({} corrected by your own journal)",
-            n(cost.journal_corrections)
-        );
-    }
-    if cost.unknown > 0 {
-        let _ = write!(
-            text,
-            ", {} unproven and {}",
-            n(cost.unknown),
-            if config.carrier_access == edm_core::spansh::Policy::Proven {
-                "dropped"
-            } else {
-                "kept"
+    if !prepared.cold.is_empty() {
+        // Gate A. `--quick` reaches its market gate at `super::plan::gate`
+        // further down; this one prices the probes alone, under its own
+        // heading, before any of them exists \[C37\].
+        let survey = super::plan::Survey {
+            complete_to_ly: config.radius_ly,
+            price_index: true,
+            ardent_requests: ardent_requests as u32,
+            counts: Counts {
+                systems: 0,
+                systems_to_read: 0,
+                stations_known: carriers.len(),
+                markets_to_poll: 0,
+                cached_fresh: 0,
+                carriers_to_probe: prepared.cold.len(),
             },
+            exclusions: Vec::new(),
+        };
+        let decision = super::plan::gate_titled(
+            app.out,
+            config,
+            &survey,
+            SizePrior::default(),
+            "CARRIER ACCESS PLAN",
+            super::plan::Stage::Intermediate,
         );
+        if decision.ends_the_run() {
+            return Err(String::new());
+        }
+        if decision.proceeds() {
+            note(format!(
+                "reading docking access for {} fleet {} from the game-internal API...",
+                edm_core::js::format_integer(prepared.cold.len() as f64),
+                plural(prepared.cold.len(), "carrier", "carriers"),
+            ));
+            // `--language` reaches the wire unvalidated, so a non-ASCII value
+            // changes the envelope's byte length \[R65\].
+            let language = edm_core::cli::config::starsystem_query(
+                &app.cli,
+                edm_core::cli::config::CachedTimestamp::SweepZero,
+            )
+            .map_err(|error| error.message().to_owned())?
+            .language;
+            let cx = access::ProbeCx {
+                http: app.http,
+                out: app.out,
+                origin: &app.overrides.origin,
+                clock: &app.ports.clock,
+                entropy: &app.ports.entropy,
+                credentials: &app.credentials,
+                headers: &app.headers,
+                language: &language,
+                method_override: app.session.method_override.as_deref(),
+                dry_run: config.dry_run,
+                nonce_override: stamp_overrides.nonce,
+                frontier_time_override: stamp_overrides.frontier_time,
+                request_time_override: stamp_overrides.request_time,
+            };
+            let cold = std::mem::take(&mut prepared.cold);
+            access::probe(
+                &cx,
+                pacer,
+                &app.ports.fs,
+                cache.root(),
+                &cold,
+                now_ms,
+                cache_policy,
+                notoriety,
+                &mut prepared.index,
+                &mut prepared.cost,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                format!("{error}\n   pass --carrier-access any to rank carriers without checking")
+            })?;
+        } else {
+            prepared.cost.unprobed += prepared.cold.len();
+            note(format!(
+                "docking access was not read; {} {} ranked unchecked",
+                edm_core::js::format_integer(prepared.cold.len() as f64),
+                plural(prepared.cold.len(), "carrier is", "carriers are"),
+            ));
+        }
     }
-    note(text);
+
+    access::finish(
+        &mut prepared.index,
+        &carriers,
+        commander,
+        &mut prepared.cost,
+    );
+    let cost = prepared.cost;
 
     // Counted over *distinct* carriers rather than by summing the per-side
     // `apply` calls: one carrier appears in as many price pages as it trades
     // commodities, and it is still one door.
-    let proven = config.carrier_access == edm_core::spansh::Policy::Proven;
-    let report = access::Report {
-        cost,
-        removed: access::Removed {
-            restricted: cost.restricted,
-            unproven: if proven { cost.unknown } else { 0 },
-            unproven_kept: if proven { 0 } else { cost.unknown },
-        },
+    let proven = config.carrier_access == edm_core::carrier::Policy::Proven;
+    let removed = access::Removed {
+        restricted: cost.restricted,
+        unproven: if proven { cost.unknown } else { 0 },
+        unproven_kept: if proven { 0 } else { cost.unknown },
     };
-    Ok((index, Some(report)))
+    note(access::note(cost, removed));
+    Ok((prepared.index, Some(access::Report { cost, removed })))
 }
 
 /// English agreement for a count this module prints.

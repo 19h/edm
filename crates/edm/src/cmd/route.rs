@@ -284,6 +284,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                 price_index: false,
                 ardent_requests: enumeration.ardent_requests,
                 counts: Counts {
+                    carriers_to_probe: 0,
                     systems: enumeration.systems.len(),
                     systems_to_read: crate::route::digest::PAGE_CAP,
                     stations_known: 0,
@@ -299,12 +300,14 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                 SizePrior {
                     // Live pages are roughly 1.5 MiB at the 4,000-row size.
                     system_bytes: 1.5 * 1024.0 * 1024.0,
-                    market_bytes: SizePrior::default().market_bytes,
-                    spread: SizePrior::default().spread,
+                    ..SizePrior::default()
                 },
             ) {
                 plan::Decision::Sweep(_) => {}
                 plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+                // `Stage::Final` never yields it; naming it is what makes that
+                // a compile-time fact rather than a comment.
+                plan::Decision::Skipped(_) => unreachable!("this gate is final"),
             }
             note("crawling Frontier's complete populated-system digest...".to_owned());
             let first = std::cell::Cell::new(true);
@@ -342,6 +345,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                                     crate::exchange::SendOptions {
                                         quiet: true,
                                         ignore_dry_run: false,
+                                        quiet_failure: false,
                                     },
                                 )
                                 .await
@@ -374,19 +378,44 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
 
     let mut selection = select::select(stations, config, &centre.coordinates);
 
+    // Hoisted above the carrier-access phase, because that phase now spends
+    // metered requests and everything metered belongs behind one pacer: one
+    // bucket, one breaker window, one `Spent`, and a `--deadline` that starts
+    // where the run's first paid request does rather than partway through
+    // \[C37\]. Validated here so a malformed `--nonce` fails before anything is
+    // sent, not on the hundredth probe.
+    let stamp_overrides = app.stamp_overrides()?;
+    // `EDM_JITTER` pins the backoff fraction so a retry scenario's attempt
+    // count is reproducible \[C29\]. Unset, this is the real entropy.
+    let entropy = crate::ports::PinnedJitter {
+        inner: &app.ports.entropy,
+        unit: app.overrides.jitter.unwrap_or(f64::NAN),
+    };
+    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
+
     let cache = cache_for(app, config);
-    // Before the plan is priced, so a door that will not open never appears in
-    // a request count the user is asked to approve \[C36\]. Free of the
-    // game-internal API's budget: this is Spansh, and it is two requests per
-    // five hundred carriers.
-    let carrier_access = filter_by_docking_access(app, config, &cache, &mut selection, commander, &note)
-        .await
-        .map_err(|error| {
-            format!("{error}\n   pass --carrier-access any to rank carriers without checking")
-        })?;
-    if let Some((cost, removed)) = carrier_access {
-        note(access_note(cost, removed));
-    }
+    // Its own priced phase, gated before a single probe is built \[C37\].
+    // Under Spansh this ran ahead of the plan because it was free; a live read
+    // is not, and slipping two hundred authenticated requests in ahead of a
+    // gate that then says "nothing has been sent" would be a lie by more than
+    // the number it quotes.
+    let carrier_access = match carrier_access_phase(
+        app,
+        config,
+        &cache,
+        &pacer,
+        &stamp_overrides,
+        &enumeration,
+        digest_requests,
+        &mut selection,
+        commander,
+        &note,
+    )
+    .await?
+    {
+        PhaseOutcome::Stop => return Ok(()),
+        PhaseOutcome::Went(report) => report,
+    };
 
     // Before the gate, not after it: the cache decides how many requests the
     // sweep will actually send, and a plan that priced twenty-two and then
@@ -445,6 +474,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             } else {
                 prepared.hits.fresh
             },
+            // Already spent, and folded forward so the ceiling stays
+            // cumulative over the whole run rather than resetting per phase.
+            carriers_to_probe: carrier_access.map_or(0, |report| report.cost.requests),
         },
         exclusions: selection.exclusions.clone(),
     };
@@ -514,6 +546,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                             crate::exchange::SendOptions {
                                 quiet: true,
                                 ignore_dry_run: false,
+                                quiet_failure: false,
                             },
                         )
                         .await
@@ -560,20 +593,15 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             stations = official_stations(topology, &official.systems);
             selection = select::select(stations, config, &centre.coordinates);
             // The re-selection replaces `keep` wholesale, so the filter applied
-            // above is gone with it. Warm ids cost nothing — the cache is keyed
-            // per market, not per batch — so this is a repeat of the decision,
-            // not of the requests.
-            if let Some((cost, removed)) =
-                filter_by_docking_access(app, config, &cache, &mut selection, commander, &note)
-                    .await
-                    .map_err(|error| {
-                        format!(
-                            "{error}\n   pass --carrier-access any to rank carriers without checking"
-                        )
-                    })?
-            {
-                note(access_note(cost, removed));
-            }
+            // above is gone with it — so the decision is re-applied here, but
+            // **never re-probed**. Any id this re-selection surfaces that the
+            // priced phase never saw would be a request spent between two
+            // gates, priced by neither, and that is the one thing this whole
+            // phase structure exists to prevent \[C37\]. Warm ids come back
+            // from the cache for free; anything else stays `Unknown`, is
+            // counted, and is named — `open` keeps it, `proven` drops it, and
+            // the note says which.
+            reapply_docking_access(app, config, &cache, &mut selection, commander, &note);
         }
         let removed = apply_official_enrichment(
             &mut selection,
@@ -606,6 +634,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             price_index: false,
             ardent_requests: enumeration.ardent_requests,
             counts: Counts {
+                carriers_to_probe: 0,
                 systems: official_addresses.len(),
                 systems_to_read: digest_requests + official_requests,
                 stations_known: selection.considered,
@@ -617,6 +646,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         match plan::gate(out, config, &exact_survey, prior) {
             plan::Decision::Sweep(_) => {}
             plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+            plan::Decision::Skipped(_) => unreachable!("this gate is final"),
         }
     }
 
@@ -624,7 +654,6 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // explicit gates; no candidate payload can cross this boundary as a listing.
     // Validated once, here, rather than per request: a malformed `--nonce`
     // must fail before a single market is polled, not on the hundredth.
-    let stamp_overrides = app.stamp_overrides()?;
     // `--language` reaches the wire unvalidated, so a non-ASCII value changes
     // the envelope's byte length \[R65\]. Read once, before the sweep, so that
     // is a single decision rather than one per system.
@@ -633,13 +662,6 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         edm_core::cli::config::CachedTimestamp::SweepZero,
     )
     .map_err(|error| error.message().to_owned())?;
-    // `EDM_JITTER` pins the backoff fraction so a retry scenario's attempt
-    // count is reproducible \[C29\]. Unset, this is the real entropy.
-    let entropy = crate::ports::PinnedJitter {
-        inner: &app.ports.entropy,
-        unit: app.overrides.jitter.unwrap_or(f64::NAN),
-    };
-    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
     // Built before `Cx` so the closures can borrow what they name. The report
     // needs the station list to say which system a market is in, because a
     // market id is not something anyone recognises.
@@ -852,7 +874,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         &coverage,
         opportunities,
         None,
-        carrier_access.map(|(cost, removed)| access::Report { cost, removed }),
+        carrier_access,
         watch,
     );
 
@@ -1350,66 +1372,60 @@ fn pacing(config: &RouteConfig) -> Pacing {
     }
 }
 
-/// Where this run's cache lives, and how it is used.
-///
-/// The two environment variables come from the run's own [`EnvSnapshot`], not
-/// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
-/// harness* \[R55\]. Reading the process environment directly here would give
-/// the cache a home the rest of the program cannot see.
-/// The one line a docking-access pass prints.
-///
-/// It names the source, because this is the only fact in the run that does not
-/// come from Frontier or Ardent, and it names what was *kept* unproven, because
-/// that number is the size of the claim the filter is deliberately not making.
-fn access_note(cost: access::Cost, removed: access::Removed) -> String {
-    use std::fmt::Write as _;
-
-    let n = |value: usize| edm_core::js::format_integer(value as f64);
-    let mut text = format!(
-        "carrier access: {} checked against Spansh",
-        n(cost.carriers)
-    );
-    if cost.cache_hits > 0 {
-        let _ = write!(text, " ({} from cache)", n(cost.cache_hits));
-    }
-    let _ = write!(text, ", {} restrict docking", n(removed.restricted));
-    if cost.journal_corrections > 0 {
-        let _ = write!(
-            text,
-            " ({} corrected by your own journal)",
-            n(cost.journal_corrections)
-        );
-    }
-    if removed.unproven > 0 {
-        let _ = write!(text, ", {} unproven and dropped", n(removed.unproven));
-    } else if removed.unproven_kept > 0 {
-        let _ = write!(text, ", {} unproven and kept", n(removed.unproven_kept));
-    }
-    text
+/// Whether the run continues after a gated phase.
+#[derive(Clone, Copy, Debug)]
+enum PhaseOutcome {
+    /// The gate refused, or asked for a confirmation that has not been given.
+    Stop,
+    /// Carry on. `Some` when the phase actually did something.
+    Went(Option<access::Report>),
 }
 
-/// Resolve docking access for the carriers in `selection`, then drop the ones
-/// this run will not admit.
+/// Read every candidate carrier's docking access from Frontier, then drop the
+/// ones this run will not admit \[C37\].
 ///
-/// Called wherever a `select::select` produces a candidate set, and always
-/// *before* that set is priced — a carrier the commander cannot enter must
-/// never reach the plan, let alone the spend gate. Returns what it removed so
-/// the caller can say so out loud.
+/// **Three steps, and the order is the whole design.** The free part runs
+/// first — draining the cache and applying the id arithmetic — so the number of
+/// requests is known before any is built. That number then goes through a gate
+/// of its own, under its own heading, and only a gate that says proceed lets a
+/// probe be sent. Finally the verdicts are applied to the selection, which
+/// pushes the exclusion rows that the *sweep's* gate will show.
 ///
-/// A Spansh failure ends the run. The alternative is a filter that quietly
-/// covers less than it claims, and an unfiltered answer that looks filtered is
-/// worse than no filter at all: it is exactly the state this feature exists to
-/// leave behind.
-async fn filter_by_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
+/// The failure rule is per-carrier, not per-run: one unreadable door out of two
+/// hundred is a counted gap, not a dead run. The run ends only when nothing
+/// answered at all — which is what a broken endpoint or a dead credential looks
+/// like, and ranking two hundred unread carriers under `open` would hand back
+/// exactly the unfiltered list the user asked not to have.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a phase needs the app, its config, the cache, the pacer, the stamp pins, what the enumeration already spent, and the selection it is about to narrow"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear sequence, and the order is the safeguard: free work, then the gate, then the requests. Splitting it would put the gate and the spend in different functions, which is exactly the arrangement that let an earlier version price one thing and send another"
+)]
+async fn carrier_access_phase<H, C, E, F, J, T>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     cache: &Cache,
+    pacer: &Pacer<'_, C, T, J>,
+    stamp_overrides: &crate::cmd::StampOverrides,
+    enumeration: &discover::Enumeration,
+    digest_requests: usize,
     selection: &mut edm_core::select::Selection,
     commander: Option<&edm_core::domain::commander::CommanderState>,
     note: &dyn Fn(String),
-) -> Result<Option<(access::Cost, access::Removed)>, String> {
-    if !config.carrier_access.queries_spansh() {
-        return Ok(None);
+) -> Result<PhaseOutcome, String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    J: Entropy,
+    T: Timer,
+{
+    if !config.carrier_access.filters() {
+        return Ok(PhaseOutcome::Went(None));
     }
     let carriers: Vec<f64> = selection
         .keep
@@ -1418,39 +1434,211 @@ async fn filter_by_docking_access<H: HttpTransport, C: Clock, E: Entropy, F: Fs>
         .map(|station| station.market_id)
         .collect();
     if carriers.is_empty() {
-        return Ok(None);
+        return Ok(PhaseOutcome::Went(None));
     }
 
-    note(format!(
-        "checking docking access for {} fleet {} against Spansh...",
-        edm_core::js::format_integer(carriers.len() as f64),
-        if carriers.len() == 1 {
-            "carrier"
-        } else {
-            "carriers"
-        },
-    ));
+    let notoriety = commander.map_or(0.0, |state| state.notoriety);
+    let cache_policy = access::CachePolicy {
+        enabled: config.cache,
+        refresh: config.refresh,
+        max_age_minutes: Some(config.max_age_minutes),
+    };
+    let now_ms = app.ports.clock.now_ms();
+    let mut prepared = access::prepare(
+        &app.ports.fs,
+        cache.root(),
+        &carriers,
+        now_ms,
+        cache_policy,
+        notoriety,
+    );
 
-    let client = crate::spansh::SpanshClient::new(app.http, &app.overrides.spansh_base);
-    let (index, cost) = access::resolve(
-        &client,
+    if !prepared.cold.is_empty() {
+        let survey = Survey {
+            complete_to_ly: enumeration.complete_to_ly,
+            price_index: false,
+            ardent_requests: enumeration.ardent_requests,
+            counts: Counts {
+                systems: enumeration.systems.len(),
+                systems_to_read: digest_requests,
+                stations_known: selection.considered,
+                markets_to_poll: 0,
+                cached_fresh: 0,
+                carriers_to_probe: prepared.cold.len(),
+            },
+            exclusions: selection.exclusions.clone(),
+        };
+        let decision = plan::gate_titled(
+            app.out,
+            config,
+            &survey,
+            edm_core::spend::SizePrior::default(),
+            "CARRIER ACCESS PLAN",
+            plan::Stage::Intermediate,
+        );
+        if decision.ends_the_run() {
+            return Ok(PhaseOutcome::Stop);
+        }
+        if decision.proceeds() {
+            note(format!(
+                "reading docking access for {} fleet {} from the game-internal API...",
+                edm_core::js::format_integer(prepared.cold.len() as f64),
+                if prepared.cold.len() == 1 {
+                    "carrier"
+                } else {
+                    "carriers"
+                },
+            ));
+            // `--language` reaches the wire unvalidated, so a non-ASCII value
+            // changes the envelope's byte length \[R65\].
+            let language = edm_core::cli::config::starsystem_query(
+                &app.cli,
+                edm_core::cli::config::CachedTimestamp::SweepZero,
+            )
+            .map_err(|error| error.message().to_owned())?
+            .language;
+            let cx = access::ProbeCx {
+                http: app.http,
+                out: app.out,
+                origin: &app.overrides.origin,
+                clock: &app.ports.clock,
+                entropy: &app.ports.entropy,
+                credentials: &app.credentials,
+                headers: &app.headers,
+                language: &language,
+                method_override: app.session.method_override.as_deref(),
+                dry_run: config.dry_run,
+                nonce_override: stamp_overrides.nonce,
+                frontier_time_override: stamp_overrides.frontier_time,
+                request_time_override: stamp_overrides.request_time,
+            };
+            let cold = std::mem::take(&mut prepared.cold);
+            access::probe(
+                &cx,
+                pacer,
+                &app.ports.fs,
+                cache.root(),
+                &cold,
+                now_ms,
+                cache_policy,
+                notoriety,
+                &mut prepared.index,
+                &mut prepared.cost,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                format!("{error}\n   pass --carrier-access any to rank carriers without checking")
+            })?;
+        } else {
+            // `--dry-run` at an intermediate gate: nothing is probed, and the
+            // sweep plan still gets shown. Every carrier stays `Unknown`.
+            prepared.cost.unprobed += prepared.cold.len();
+            note(format!(
+                "docking access was not read; {} {} ranked unchecked",
+                edm_core::js::format_integer(prepared.cold.len() as f64),
+                if prepared.cold.len() == 1 {
+                    "carrier is"
+                } else {
+                    "carriers are"
+                },
+            ));
+        }
+    }
+
+    access::finish(
+        &mut prepared.index,
+        &carriers,
+        commander,
+        &mut prepared.cost,
+    );
+    let removed = access::apply(selection, &prepared.index, config.carrier_access);
+    note(access::note(prepared.cost, removed));
+    Ok(PhaseOutcome::Went(Some(access::Report {
+        cost: prepared.cost,
+        removed,
+    })))
+}
+
+/// Re-apply docking access to a selection that was rebuilt after the priced
+/// phase, using only what the cache already holds \[C37\].
+///
+/// The `--verify-systems` path re-runs `select::select` from the official
+/// topology, which replaces `keep` wholesale. The filter has to run again or it
+/// is silently discarded — but it must not *probe* again: a request issued here
+/// falls between the carrier-access gate and the sweep gate and is priced by
+/// neither.
+fn reapply_docking_access<H, C, E, F>(
+    app: &App<'_, H, C, E, F>,
+    config: &RouteConfig,
+    cache: &Cache,
+    selection: &mut edm_core::select::Selection,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
+    note: &dyn Fn(String),
+) where
+    C: Clock,
+    F: Fs,
+{
+    if !config.carrier_access.filters() {
+        return;
+    }
+    let carriers: Vec<f64> = selection
+        .keep
+        .iter()
+        .filter(|station| edm_core::ardent::is_carrier(station.station_type.as_deref()))
+        .map(|station| station.market_id)
+        .collect();
+    if carriers.is_empty() {
+        return;
+    }
+    let notoriety = commander.map_or(0.0, |state| state.notoriety);
+    let mut prepared = access::prepare(
         &app.ports.fs,
         cache.root(),
         &carriers,
         app.ports.clock.now_ms(),
         access::CachePolicy {
             enabled: config.cache,
-            refresh: config.refresh,
+            refresh: false,
+            max_age_minutes: Some(config.max_age_minutes),
         },
+        notoriety,
+    );
+    prepared.cost.unprobed = prepared.cold.len();
+    access::finish(
+        &mut prepared.index,
+        &carriers,
         commander,
-        None,
-    )
-    .await?;
-
-    let removed = access::apply(selection, &index, config.carrier_access);
-    Ok(Some((cost, removed)))
+        &mut prepared.cost,
+    );
+    let removed = access::apply(selection, &prepared.index, config.carrier_access);
+    if prepared.cost.unprobed > 0 {
+        note(format!(
+            "{} official {} appeared after the docking-access phase and {} unchecked",
+            edm_core::js::format_integer(prepared.cost.unprobed as f64),
+            if prepared.cost.unprobed == 1 {
+                "carrier"
+            } else {
+                "carriers"
+            },
+            if config.carrier_access == edm_core::carrier::Policy::Proven {
+                "were dropped"
+            } else {
+                "are kept"
+            },
+        ));
+    }
+    if removed.total() > 0 {
+        note(access::note(prepared.cost, removed));
+    }
 }
 
+/// Where this run's cache lives, and how it is used.
+///
+/// The two environment variables come from the run's own [`EnvSnapshot`], not
+/// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
+/// harness* \[R55\]. Reading the process environment directly here would give
+/// the cache a home the rest of the program cannot see.
 fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
     let root = Cache::locate(
         app.cli.env("XDG_CACHE_HOME"),

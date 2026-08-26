@@ -14,7 +14,7 @@ use anyhow::{Context, Result, bail};
 use crate::codec::{self, Encoding};
 use crate::toml;
 
-/// Which of the four servers a path belongs to.
+/// Which of the three servers a path belongs to.
 ///
 /// One port serves them all; the path decides. `edm-mock` is one process
 /// because the clients are configured independently and a scenario has to be
@@ -24,9 +24,6 @@ pub(crate) enum Profile {
     Frontier,
     Ardent,
     Eddn,
-    /// The docking-access index \[C36\]. Only `route --carrier-access`
-    /// reaches it, so most scenarios never mention it.
-    Spansh,
 }
 
 impl Profile {
@@ -37,8 +34,6 @@ impl Profile {
             Some(Self::Ardent)
         } else if path.starts_with("/upload/") {
             Some(Self::Eddn)
-        } else if path.starts_with("/api/") {
-            Some(Self::Spansh)
         } else {
             None
         }
@@ -51,7 +46,6 @@ impl Profile {
             Self::Frontier => "https://api.orerve.net",
             Self::Ardent => "https://api.ardent-insight.com",
             Self::Eddn => "https://eddn.edcd.io:4430",
-            Self::Spansh => "https://spansh.co.uk",
         }
     }
 }
@@ -62,7 +56,6 @@ impl fmt::Display for Profile {
             Self::Frontier => "frontier",
             Self::Ardent => "ardent",
             Self::Eddn => "eddn",
-            Self::Spansh => "spansh",
         })
     }
 }
@@ -286,9 +279,7 @@ fn from_toml(text: &str, file: &Path) -> Result<Scenario> {
         table.reject_unknown(&["path", "envelope", "body-contains"], &["reply"])?;
         let path = table.required_string("path")?;
         if Profile::of_path(&path).is_none() {
-            bail!(
-                "`{path}` is not under /2.0/elite/, /v2/, /upload/ or /api/, so nothing routes to it"
-            );
+            bail!("`{path}` is not under /2.0/elite/, /v2/ or /upload/, so nothing routes to it");
         }
         let mut replies = Vec::new();
         for reply in table.tables("reply") {
@@ -566,7 +557,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_route_to_the_four_profiles() {
+    fn paths_route_to_the_three_profiles() {
         assert_eq!(
             Profile::of_path("/2.0/elite/market/list"),
             Some(Profile::Frontier)
@@ -576,10 +567,6 @@ mod tests {
             Some(Profile::Ardent)
         );
         assert_eq!(Profile::of_path("/upload/"), Some(Profile::Eddn));
-        assert_eq!(
-            Profile::of_path("/api/stations/search"),
-            Some(Profile::Spansh)
-        );
         assert_eq!(Profile::of_path("/favicon.ico"), None);
     }
 

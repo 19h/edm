@@ -1,0 +1,104 @@
+# route-carrier-access-keeps-going-when-one-carrier-fails
+why = "The failure rule is per carrier, not per run. C36's Spansh reader was two batch POSTs, so a failure meant the whole answer was missing and ending the run was right; per carrier that rule would end a two-thousand-market sweep because one door out of two hundred did not answer. Here one carrier exhausts its retries on 500s and the other answers `all`: the run finishes, the unread door is counted and named rather than quietly ranked as dockable, `open` keeps it, and the exit code stays 0. The run-ending rule is the complement of this one and is deliberately not exercised here — it fires only when *nothing* answered, which is what a dead credential looks like."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--rps", "8", "--no-cache", "--concurrency", "1", "--carriers"]
+oracle = "none"
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"}]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3711014400,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9200,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3705929472,"stationName":"Open Door","stationType":"FleetCarrier","distanceToArrival":20,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9000,"stock":40000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":19000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""
+
+# Silent Running never answers. A 4xx is not transient, so it gets one attempt
+# and no retry — the verdict stays unknown, `open` keeps it, and the note says
+# how many doors went unread. It then loses the hop on price anyway, which is
+# the point: an unread door is ranked on its merits, not silently dropped.
+[[route]]
+path = "/2.0/elite/fleetcarrier/info"
+envelope = "fleetCarrierId=1643025&"
+
+[[route.reply]]
+status = 404
+encode = "game_api"
+payload = """
+{}
+"""
+
+[[route]]
+path = "/2.0/elite/fleetcarrier/info"
+envelope = "fleetCarrierId=1623162&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload = """
+{"fleetCarrier":{"market_id":3705929472,"body_site_id":1623162,"name":{"callsign":"Open Door"},"docking":{"accessLevel":"all","notoriousAccess":true},"owner":{"user_id":4301145,"squadron_id":0}}}
+"""
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3705929472&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-source.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009405&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-sink.json"

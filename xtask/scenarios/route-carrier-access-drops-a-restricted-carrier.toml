@@ -1,8 +1,8 @@
 # route-carrier-access-drops-a-restricted-carrier
-why = "C36, and the defect it was written for: `--carriers` used to rank fleet carriers the commander cannot dock at, and a private carrier's prices are the *best* in a region precisely because nobody is arbitraging them — so the restricted one wins every hop and the whole answer is a flight to a door that will not open. Neither source `route` already reads publishes docking access: the market payload's keys are exactly `allowsDumping`, `commodities` and `inventory`, and Ardent's station record has none either. Spansh does. Three gold sellers here: a carrier Spansh reports as `Squadron Friends` and which is far and away the cheapest, a carrier Spansh reports as `All`, and a starport. `--carriers` alone defaults the policy to `open`, so the restricted carrier is dropped *before the spend gate* and never costs a game-internal API request; the open carrier survives and is polled. Two Spansh POSTs answer for the whole batch, discriminated here by which access set each one asks for. The mock never serves market 3229009401, so if the filter regresses the scenario fails on an unscripted request rather than on a diff nobody reads."
+why = "C37, and the defect it was written for: `--carriers` used to rank fleet carriers the commander cannot dock at, and a private carrier's prices are the *best* in a region precisely because nobody is arbitraging them — so the restricted one wins every hop and the whole answer is a flight to a door that will not open. Neither source `route` already reads publishes docking access: the market payload's keys are exactly `allowsDumping`, `commodities` and `inventory`, and Ardent's station record has none either. `2.0/elite/fleetcarrier/info` does. Three gold sellers here: a carrier Frontier reports as `squadronfriends` and which is far and away the cheapest, a carrier it reports as `all`, and a starport. `--carriers` alone defaults the policy to `open`, so the restricted carrier is dropped before the sweep is priced and never costs a market read. The probes themselves are two metered requests, so they are priced and gated first, under their own CARRIER ACCESS PLAN heading — this scenario is what pins that the id `/info` is asked for is pure arithmetic from the market id (`market_id = fleetCarrierId * 256 + 3_290_400_000`, so 3229009401 is not a carrier at all and 3705929472 is carrier 1623162). The mock never serves market 3229009401 as a market listing, so if the filter regresses the scenario fails on an unscripted request rather than on a diff nobody reads."
 argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--rps", "8", "--no-cache", "--concurrency", "1", "--carriers"]
 oracle = "none"
-expect-frontier-requests = 2
+expect-frontier-requests = 4
 
 [env]
 EDM_JITTER = "0"
@@ -35,8 +35,8 @@ status = 200
 headers = [["Content-Type", "application/json"]]
 payload = """
 [
- {"commodityName":"gold","marketId":3229009401,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3},
- {"commodityName":"gold","marketId":3229009402,"stationName":"Open Door","stationType":"FleetCarrier","distanceToArrival":20,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9000,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3711014400,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3705929472,"stationName":"Open Door","stationType":"FleetCarrier","distanceToArrival":20,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9000,"stock":40000,"stockBracket":3},
  {"commodityName":"gold","marketId":3229009403,"stationName":"Pricier Dock","stationType":"Orbis","distanceToArrival":150,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9400,"stock":6000,"stockBracket":3}
 ]
 """
@@ -63,34 +63,35 @@ payload = """
 []
 """
 
-# The restricted query. `body-contains` discriminates it from the open one:
-# both POST the same path with the same batch of ids, and only the access set
-# differs. A carrier in neither reply would be `unknown` and would survive.
+# The two docking-access probes. Discriminated by the `fleetCarrierId` in the
+# encrypted envelope, which is the market id put through
+# `(id - 3_290_400_000) / 256` — so these two lines are also what pins the
+# arithmetic against a real request.
 [[route]]
-path = "/api/stations/search"
-body-contains = "Squadron Friends"
+path = "/2.0/elite/fleetcarrier/info"
+envelope = "fleetCarrierId=1643025&"
 
 [[route.reply]]
 status = 200
-headers = [["Content-Type", "application/json"]]
+encode = "game_api"
 payload = """
-{"count":1,"size":2,"results":[{"market_id":3229009401,"carrier_docking_access":"Squadron Friends"}]}
+{"fleetCarrier":{"market_id":3711014400,"body_site_id":1643025,"name":{"callsign":"T1N-W2F"},"docking":{"accessLevel":"squadronfriends","notoriousAccess":true},"owner":{"user_id":909522,"squadron_id":82472}}}
 """
 
 [[route]]
-path = "/api/stations/search"
-body-contains = "[\"All\"]"
+path = "/2.0/elite/fleetcarrier/info"
+envelope = "fleetCarrierId=1623162&"
 
 [[route.reply]]
 status = 200
-headers = [["Content-Type", "application/json"]]
+encode = "game_api"
 payload = """
-{"count":1,"size":2,"results":[{"market_id":3229009402,"carrier_docking_access":"All"}]}
+{"fleetCarrier":{"market_id":3705929472,"body_site_id":1623162,"name":{"callsign":"Open Door"},"docking":{"accessLevel":"all","notoriousAccess":true},"owner":{"user_id":4301145,"squadron_id":0}}}
 """
 
 [[route]]
 path = "/2.0/elite/market/list"
-envelope = "marketId=3229009402&"
+envelope = "marketId=3705929472&"
 
 [[route.reply]]
 status = 200

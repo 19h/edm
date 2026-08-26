@@ -33,6 +33,15 @@ pub struct SendOptions {
     /// Send even under `--dry-run`. Only ever set for read-only lookups: the
     /// trade price probe and the sweep's starsystem read. R74.
     pub ignore_dry_run: bool,
+    /// Suppress the second RESPONSE table and the failure block that a non-2xx
+    /// normally forces past `quiet` \[C37\].
+    ///
+    /// Those exist because for a single command the headers *are* the
+    /// diagnosis. For the carrier-access phase they are noise at a different
+    /// order of magnitude: two hundred probes, each able to print a table, for
+    /// failures the phase already reports as a count, a note, a coverage row
+    /// and a JSON field. Defaulted `false`, so nothing else changes.
+    pub quiet_failure: bool,
 }
 
 /// `send` (ts:1224).
@@ -108,10 +117,12 @@ where
         out.set_exit(EXIT_FAILURE);
         // The headers carry the diagnosis — `Allow`, the nonce — so they are
         // shown even for a poll that asked to stay quiet.
-        if options.quiet && !json {
+        if options.quiet && !json && !options.quiet_failure {
             emit_response(&exchange);
         }
-        report_failure(out, request, &exchange);
+        if !options.quiet_failure {
+            report_failure(out, request, &exchange);
+        }
         return Some(exchange);
     }
 

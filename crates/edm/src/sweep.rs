@@ -258,6 +258,7 @@ pub async fn visit_market<H: HttpTransport, C: Clock, E: Entropy>(
         crate::exchange::SendOptions {
             quiet: true,
             ignore_dry_run: false,
+            quiet_failure: false,
         },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),

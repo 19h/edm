@@ -1,0 +1,61 @@
+# route-carrier-access-gates-the-probes-before-sending
+why = "The single test that distinguishes 'gated before the probes' from 'gated after them', and the direct regression test for the defect PORTING.md records under the first live route run: a plan that priced twenty-two requests and then sent none. C36's Spansh filter could sit ahead of the plan because it was free; C37's cannot, because each carrier costs one metered request out of the same budget as the prices. With `--max-requests 1` the CARRIER ACCESS PLAN prices two probes, exceeds the ceiling, and refuses — and `expect-frontier-requests = 0` is the assertion, because a filter that spends two hundred authenticated requests and *then* prints 'Nothing has been sent' is lying by more than the number it quotes. The existing zero-request scenarios cannot cover this: neither route-ceiling-refuses nor route-sends-nothing passes --carriers, so both would keep passing while the probe pass leaked."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--no-cache", "--carriers", "--max-requests", "1"]
+oracle = "none"
+expect-frontier-requests = 0
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"}]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3711014400,"stationName":"Silent Running","stationType":"FleetCarrier","distanceToArrival":12,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":11,"stock":40000,"stockBracket":3},
+ {"commodityName":"gold","marketId":3705929472,"stationName":"Open Door","stationType":"FleetCarrier","distanceToArrival":20,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9000,"stock":40000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":19000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""

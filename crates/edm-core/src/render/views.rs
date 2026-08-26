@@ -811,6 +811,11 @@ pub struct PlanView<'a> {
     pub rate_per_second: f64,
     pub max_requests: f64,
     pub prior: crate::spend::SizePrior,
+    /// The heading. A run can be gated more than once — the carrier-access
+    /// probes are priced and approved before the sweep is \[C37\] — and two
+    /// tables both headed ROUTE PLAN would read as the program having changed
+    /// its mind rather than as two phases of one run.
+    pub title: &'a str,
 }
 
 /// The plan table: what a sweep will cost, before any of it is spent.
@@ -835,6 +840,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         rate_per_second,
         max_requests,
         prior,
+        title,
     } = view;
 
     let coverage = if price_index {
@@ -910,6 +916,12 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
         ]));
     }
 
+    if estimate.carriers_to_probe > 0 {
+        rows.push(field_row(
+            "carrier access to read",
+            format!("{}  (one per carrier)", int(estimate.carriers_to_probe as f64)),
+        ));
+    }
     rows.push(field_row(
         "markets to poll",
         int(estimate.markets_to_poll as f64),
@@ -926,25 +938,41 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
     // taken here.
     rows.push(field_row(
         "game-internal API requests",
-        if estimate.systems_to_read == 0 {
+        if estimate.systems_to_read == 0 && estimate.carriers_to_probe == 0 {
             format!("{}  (one per market)", int(estimate.requests))
         } else {
-            format!(
-                "{}  = {} official batch + {} market",
-                int(estimate.requests),
-                int(estimate.systems_to_read as f64),
-                int(estimate.markets_to_poll as f64)
-            )
+            let mut terms = Vec::new();
+            if estimate.systems_to_read > 0 {
+                terms.push(format!("{} official batch", int(estimate.systems_to_read as f64)));
+            }
+            if estimate.carriers_to_probe > 0 {
+                terms.push(format!(
+                    "{} carrier access",
+                    int(estimate.carriers_to_probe as f64)
+                ));
+            }
+            terms.push(format!("{} market", int(estimate.markets_to_poll as f64)));
+            format!("{}  = {}", int(estimate.requests), terms.join(" + "))
         },
     ));
     rows.push(field_row(
         "estimated transfer",
-        format!(
-            "{}  (prior: {} KB/system, {} KB/market)",
-            spend::transfer_range(estimate),
-            int(prior.system_bytes / 1024.0),
-            int(prior.market_bytes / 1024.0)
-        ),
+        if estimate.carriers_to_probe > 0 {
+            format!(
+                "{}  (prior: {} KB/system, {} KB/market, {} KB/carrier)",
+                spend::transfer_range(estimate),
+                int(prior.system_bytes / 1024.0),
+                int(prior.market_bytes / 1024.0),
+                int(prior.carrier_bytes / 1024.0)
+            )
+        } else {
+            format!(
+                "{}  (prior: {} KB/system, {} KB/market)",
+                spend::transfer_range(estimate),
+                int(prior.system_bytes / 1024.0),
+                int(prior.market_bytes / 1024.0)
+            )
+        },
     ));
     rows.push(field_row(
         "pacing",
@@ -964,7 +992,7 @@ pub fn route_plan(view: &PlanView<'_>) -> Vec<Block<'static>> {
     ));
 
     vec![Block::Table {
-        title: "ROUTE PLAN".to_owned(),
+        title: title.to_owned(),
         columns: columns::ROUTE_FIELD_COLUMNS,
         rows,
     }]

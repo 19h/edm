@@ -51,7 +51,20 @@ pub const ARDENT_NEARBY_CAP: usize = 1_000;
 pub struct SizePrior {
     pub system_bytes: f64,
     pub market_bytes: f64,
+    /// One `fleetcarrier/info` reply \[C37\].
+    ///
+    /// Measured over 53 captured replies: min 6,393 / median 8,877 /
+    /// mean 11,606 / max 34,835. Most of it is the owner's finance, inventory
+    /// and crew roster, none of which is parsed — the useful part is a
+    /// two-key `docking` object.
+    pub carrier_bytes: f64,
     /// Fractional spread either side, so the report can show a range.
+    ///
+    /// Stays 0.3 even though a single carrier reply varies far more than that
+    /// (CV 0.556). The estimate is a range on the *sum*, and the relative
+    /// standard deviation of two hundred independent draws is under 4%;
+    /// widening the band to match one reply would describe a quantity nobody
+    /// is being shown.
     pub spread: f64,
 }
 
@@ -60,6 +73,7 @@ impl Default for SizePrior {
         Self {
             system_bytes: 500.0 * 1024.0,
             market_bytes: 20.0 * 1024.0,
+            carrier_bytes: 11_606.0,
             spread: 0.3,
         }
     }
@@ -86,6 +100,12 @@ pub struct Counts {
     pub stations_known: usize,
     pub markets_to_poll: usize,
     pub cached_fresh: usize,
+    /// Fleet carriers whose docking access this run must read live \[C37\].
+    ///
+    /// A third class of request, priced with the others because it is spent
+    /// against the same budget and the same pacer. Zero unless
+    /// `--carrier-access` is filtering and the cache is cold.
+    pub carriers_to_probe: usize,
 }
 
 /// Everything the plan table needs, and everything the gate decides on.
@@ -99,6 +119,7 @@ pub struct Estimate {
     pub exclusions: Vec<Exclusion>,
     pub markets_to_poll: usize,
     pub cached_fresh: usize,
+    pub carriers_to_probe: usize,
     pub requests: f64,
     pub bytes_low: f64,
     pub bytes_high: f64,
@@ -121,11 +142,13 @@ impl Estimate {
             stations_known,
             markets_to_poll,
             cached_fresh,
+            carriers_to_probe,
         } = counts;
         let to_poll = markets_to_poll.saturating_sub(cached_fresh);
-        let requests = systems_to_read as f64 + to_poll as f64;
-        let bytes =
-            systems_to_read as f64 * prior.system_bytes + to_poll as f64 * prior.market_bytes;
+        let requests = systems_to_read as f64 + to_poll as f64 + carriers_to_probe as f64;
+        let bytes = systems_to_read as f64 * prior.system_bytes
+            + to_poll as f64 * prior.market_bytes
+            + carriers_to_probe as f64 * prior.carrier_bytes;
 
         Self {
             systems,
@@ -134,6 +157,7 @@ impl Estimate {
             exclusions,
             markets_to_poll: to_poll,
             cached_fresh,
+            carriers_to_probe,
             requests,
             bytes_low: bytes * (1.0 - prior.spread),
             bytes_high: bytes * (1.0 + prior.spread),
@@ -200,6 +224,20 @@ pub fn refusal_message(
             "--radius {} exceeds the {} Ly ceiling. Nothing has been sent.",
             js::js_number(radius_ly),
             js::js_number(MAX_RADIUS_LY),
+        ),
+        // The narrowing flags are named because a ceiling that only says "too
+        // many" leaves the reader to guess which knob is theirs. When carrier
+        // probes are in the count, `--carrier-access any` deletes the whole
+        // class in one flag and belongs in the list.
+        Refusal::TooManyRequests if estimate.carriers_to_probe > 0 => format!(
+            "Estimated {} game-internal API requests, above the {} ceiling.\n\
+             {} of them read fleet-carrier docking access; --carrier-access any skips\n\
+             all of those. Or narrow the sweep (--radius, --pad, --max-star-distance),\n\
+             or raise the ceiling with --max-requests {}. Nothing has been sent.",
+            js::format_integer(estimate.requests),
+            js::format_integer(max_requests),
+            js::format_integer(estimate.carriers_to_probe as f64),
+            js::format_integer((estimate.requests * 1.2).ceil()),
         ),
         Refusal::TooManyRequests => format!(
             "Estimated {} game-internal API requests, above the {} ceiling.\n\
@@ -268,6 +306,7 @@ mod tests {
         // 119 systems, ~1,000 stations Ardent knows, and 157 starports.
         Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 119,
                 systems_to_read: 119,
                 stations_known: 1_004,
@@ -320,6 +359,7 @@ mod tests {
     fn without_the_station_filter_the_ceiling_bites() {
         let unfiltered = Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 119,
                 systems_to_read: 119,
                 stations_known: 1_004,
@@ -339,6 +379,7 @@ mod tests {
         // And at 50 Ly it is refused outright rather than quietly attempted.
         let wide = Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 1_245,
                 systems_to_read: 1_245,
                 stations_known: 21_900,
@@ -382,6 +423,7 @@ mod tests {
     fn a_refusal_says_how_to_proceed() {
         let wide = Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 1_245,
                 systems_to_read: 1_245,
                 stations_known: 21_900,
@@ -403,6 +445,7 @@ mod tests {
     fn a_warm_cache_lowers_the_estimate() {
         let cold = Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 10,
                 systems_to_read: 10,
                 stations_known: 100,
@@ -415,6 +458,7 @@ mod tests {
         );
         let warm = Estimate::build(
             Counts {
+                carriers_to_probe: 0,
                 systems: 10,
                 systems_to_read: 10,
                 stations_known: 100,

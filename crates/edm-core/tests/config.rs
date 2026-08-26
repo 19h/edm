@@ -2050,21 +2050,21 @@ fn route_reuses_the_concurrency_flag_and_its_clamp() {
 /// filters.
 #[test]
 fn carriers_default_to_dropping_the_ones_that_restrict_docking() {
-    use edm_core::spansh::Policy;
+    use edm_core::carrier::Policy;
 
     // No carriers at all: nothing to filter, and nothing to ask Spansh.
     let plain = route(&["route", "Sol"]).unwrap();
     assert_eq!(plain.carrier_access, Policy::Any);
-    assert!(!plain.carrier_access.queries_spansh());
+    assert!(!plain.carrier_access.filters());
 
     let carriers = route(&["route", "Sol", "--carriers"]).unwrap();
     assert_eq!(carriers.carrier_access, Policy::Open);
-    assert!(carriers.carrier_access.queries_spansh());
+    assert!(carriers.carrier_access.filters());
 }
 
 #[test]
 fn carrier_access_accepts_its_three_policies_in_any_casing() {
-    use edm_core::spansh::Policy;
+    use edm_core::carrier::Policy;
 
     for (spelling, expected) in [
         ("any", Policy::Any),

@@ -149,7 +149,7 @@ fn serve(name: Option<&str>) -> Result<()> {
         println!("serving an empty script on {}", mock.base_url());
     }
     println!(
-        "  EDM_ORIGIN_OVERRIDE={0}  EDM_ARDENT_BASE={0}/v2  EDM_EDDN_URL={0}/upload/  EDM_SPANSH_BASE={0}/api",
+        "  EDM_ORIGIN_OVERRIDE={0}  EDM_ARDENT_BASE={0}/v2  EDM_EDDN_URL={0}/upload/",
         mock.base_url()
     );
     println!("interrupt to stop");

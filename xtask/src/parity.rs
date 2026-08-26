@@ -534,8 +534,7 @@ pub(crate) fn bless_goldens(root: &Path) -> Result<Vec<String>> {
                 command
                     .env("EDM_ORIGIN_OVERRIDE", &base)
                     .env("EDM_ARDENT_BASE", format!("{base}/v2"))
-                    .env("EDM_EDDN_URL", format!("{base}/upload/"))
-                    .env("EDM_SPANSH_BASE", format!("{base}/api"));
+                    .env("EDM_EDDN_URL", format!("{base}/upload/"));
             })
         };
         // The same two-run shape the comparison uses, or the golden would be
@@ -595,8 +594,7 @@ fn run_rust(
                 command
                     .env("EDM_ORIGIN_OVERRIDE", base)
                     .env("EDM_ARDENT_BASE", format!("{base}/v2"))
-                    .env("EDM_EDDN_URL", format!("{base}/upload/"))
-                    .env("EDM_SPANSH_BASE", format!("{base}/api"));
+                    .env("EDM_EDDN_URL", format!("{base}/upload/"));
             },
         )
     };

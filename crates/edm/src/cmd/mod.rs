@@ -38,7 +38,7 @@ use edm_core::cli::config::{self, SessionConfig, StampDefaults};
 use edm_core::cli::{self, Args, Cli, CliError, EnvSnapshot, Flag};
 use edm_core::consts::{
     API_ORIGIN, ARDENT_BASE_URL, DEFAULT_FDEV_SEASON, DEFAULT_FDEV_SEMVER, DEFAULT_USER_AGENT,
-    EDDN_UPLOAD_URL, Endpoint, MARKET_LIST, SPANSH_BASE_URL,
+    EDDN_UPLOAD_URL, Endpoint, MARKET_LIST,
 };
 use edm_core::js::json::{JsObject, JsValue};
 use edm_core::js::{self, text::Metric};
@@ -81,10 +81,6 @@ pub struct Overrides {
     pub ardent_base: String,
     /// `EDM_EDDN_URL`.
     pub eddn_url: String,
-    /// `EDM_SPANSH_BASE` — the docking-access index \[C36\]. Unset,
-    /// `--carrier-access` reaches the real one and everything else sends
-    /// nothing at all.
-    pub spansh_base: String,
     /// `EDM_STRICT_JSON=1` — routes R76's stray diagnostics to stderr so a
     /// `--json` run is parseable.
     pub strict_json: bool,
@@ -113,10 +109,6 @@ impl Overrides {
             eddn_url: env
                 .get("EDM_EDDN_URL")
                 .unwrap_or(EDDN_UPLOAD_URL)
-                .to_owned(),
-            spansh_base: env
-                .get("EDM_SPANSH_BASE")
-                .unwrap_or(SPANSH_BASE_URL)
                 .to_owned(),
             strict_json: env.get("EDM_STRICT_JSON") == Some("1"),
             metric: if env.get("EDM_WIDTH") == Some("display") {
@@ -371,6 +363,7 @@ impl<'a, H: HttpTransport, C: Clock, E: Entropy, F: Fs> App<'a, H, C, E, F> {
                 SendOptions {
                     quiet: true,
                     ignore_dry_run: true,
+                    quiet_failure: false,
                 },
             )
             .await?;
@@ -975,7 +968,6 @@ mod tests {
         assert_eq!(overrides.origin, API_ORIGIN);
         assert_eq!(overrides.ardent_base, ARDENT_BASE_URL);
         assert_eq!(overrides.eddn_url, EDDN_UPLOAD_URL);
-        assert_eq!(overrides.spansh_base, SPANSH_BASE_URL);
         assert!(!overrides.strict_json);
         assert_eq!(overrides.metric, Metric::Utf16);
     }

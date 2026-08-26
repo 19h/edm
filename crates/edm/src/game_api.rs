@@ -256,6 +256,32 @@ pub fn starsystem_fields(
     fields
 }
 
+/// The envelope observed for `/2.0/elite/fleetcarrier/info` \[C37\].
+///
+/// Field order is the captured one — `cmdrId`, `language`, `fleetCarrierId`,
+/// then the credentials — and it is not cosmetic: the plaintext is what gets
+/// sealed, so a reordering changes every byte on the wire. 53 of 53 captured
+/// requests carry exactly these seven names in exactly this order.
+///
+/// `fleetCarrierId` is not a field the caller has to look up. It is arithmetic
+/// from the market id — [`edm_core::carrier::carrier_id`] — which is what makes
+/// a per-carrier probe affordable at all.
+#[must_use]
+pub fn fleetcarrier_info_fields(
+    fleet_carrier_id: f64,
+    language: &str,
+    credentials: &Credentials,
+    frontier_time: f64,
+) -> Vec<Field> {
+    let mut fields = vec![
+        Field::text("cmdrId", credentials.commander_id.clone()),
+        Field::text("language", language),
+        Field::number("fleetCarrierId", fleet_carrier_id),
+    ];
+    fields.extend(credential_fields(credentials, frontier_time));
+    fields
+}
+
 /// Read-only finance-resource envelope, as emitted by the game.
 #[must_use]
 pub fn finance_fields(credentials: &Credentials, frontier_time: f64) -> Vec<Field> {

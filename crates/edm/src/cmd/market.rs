@@ -204,6 +204,7 @@ async fn poll<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         .fetch_market(
             &js::js_number(market_id),
             SendOptions {
+                quiet_failure: false,
                 quiet,
                 ignore_dry_run: false,
             },
@@ -327,6 +328,7 @@ async fn system<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             SendOptions {
                 quiet: true,
                 ignore_dry_run: true,
+                quiet_failure: false,
             },
         )
         .await;

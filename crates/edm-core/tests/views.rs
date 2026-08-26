@@ -685,6 +685,7 @@ fn sample_estimate() -> edm_core::spend::Estimate {
     use edm_core::spend::{Counts, Estimate, Exclusion, SizePrior};
     Estimate::build(
         Counts {
+            carriers_to_probe: 0,
             systems: 412,
             systems_to_read: 118,
             stations_known: 1_230,
@@ -720,6 +721,7 @@ fn sample_estimate() -> edm_core::spend::Estimate {
 
 fn plan_view(estimate: &edm_core::spend::Estimate) -> views::PlanView<'_> {
     views::PlanView {
+        title: "ROUTE PLAN",
         reference: "Sol",
         radius_ly: 20.0,
         complete_to_ly: 20.0,
@@ -960,6 +962,7 @@ fn a_small_sweep_is_priced_in_kilobytes() {
     use edm_core::spend::{Counts, Estimate, SizePrior};
     let estimate = Estimate::build(
         Counts {
+            carriers_to_probe: 0,
             systems: 3,
             systems_to_read: 0,
             stations_known: 4,
@@ -979,6 +982,7 @@ fn the_default_plan_does_not_mention_starsystem_reads() {
     use edm_core::spend::{Counts, Estimate, SizePrior};
     let estimate = Estimate::build(
         Counts {
+            carriers_to_probe: 0,
             systems: 412,
             systems_to_read: 0,
             stations_known: 1_230,

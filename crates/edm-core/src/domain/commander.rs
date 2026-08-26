@@ -219,10 +219,11 @@ pub enum CarrierDoor {
     /// admits this commander. This is what rescues a squadron carrier the
     /// commander is actually in the squadron of.
     Admitted,
-    /// `DockingDenied` with `Reason: "RestrictedAccess"`. Only that reason:
-    /// `NoSpace` is a full pad, `Distance` is a bad approach and `TooLarge` is a
-    /// fact about the ship, and none of the three is a statement about who the
-    /// door opens for.
+    /// `DockingDenied` with `Reason: "RestrictedAccess"` or `"Offences"`. Only
+    /// those two: `NoSpace` is a full pad, `Distance` is a bad approach and
+    /// `TooLarge` is a fact about the ship, and none of the three is a
+    /// statement about who the door opens for. `Offences` is — it is the door
+    /// refusing this commander for what they have done.
     Refused,
 }
 
@@ -266,6 +267,19 @@ pub struct CommanderState {
     /// forgetting that on every game start would throw away the only
     /// commander-specific evidence the program has.
     pub carrier_doors: Vec<(u64, DoorObservation)>,
+    /// The commander's current notoriety, from the journal's `Statistics`
+    /// event \[C37\].
+    ///
+    /// A second docking gate, and one no published index carries: a carrier
+    /// can set `notoriousAccess: false` while still advertising `all`, and
+    /// **eleven of the thirty-one carriers Frontier calls `all` do**. For a
+    /// notorious commander that makes `all` wrong 35% of the time.
+    ///
+    /// Current, not cumulative — it was observed decreasing, 0→1→0→1→0 across
+    /// one capture — so it is the value that actually gates a door. It arrives
+    /// in `Statistics`, which follows `LoadGame` in every file that has both,
+    /// so it lands *after* `reset_for_load_game` and needs no exemption.
+    pub notoriety: f64,
     #[serde(skip)]
     next_ordinal: u64,
 }
@@ -437,8 +451,23 @@ impl CommanderState {
                 self.apply_docked(object, source, timestamp, line);
             }
             "DockingDenied" if source == ObservationSource::Journal => {
-                if string_field(object, "Reason") == Some("RestrictedAccess") {
+                // `Offences` joins `RestrictedAccess` because it is the same
+                // kind of statement: a refusal about *who is asking*, not about
+                // the pad or the approach. It is the plausible code for a
+                // `notoriousAccess: false` door, and discarding it threw away
+                // the one direct observation of that gate.
+                if matches!(
+                    string_field(object, "Reason"),
+                    Some("RestrictedAccess" | "Offences")
+                ) {
                     self.note_carrier_door(object, CarrierDoor::Refused, timestamp);
+                }
+            }
+            "Statistics" if source == ObservationSource::Journal => {
+                if let Some(crime) = object.get("Crime").and_then(Value::as_object)
+                    && let Some(value) = finite_nonnegative_field(crime, "Notoriety")
+                {
+                    self.notoriety = value;
                 }
             }
             "Undocked" => self.apply_undocked(source, timestamp, line),

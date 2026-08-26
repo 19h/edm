@@ -401,6 +401,7 @@ where
         SendOptions {
             quiet: true,
             ignore_dry_run: false,
+            quiet_failure: false,
         },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),
@@ -501,6 +502,7 @@ where
         SendOptions {
             quiet: true,
             ignore_dry_run: false,
+            quiet_failure: false,
         },
         |_| {},
         |exchange| crate::cmd::emit_response(cx.out, exchange),
