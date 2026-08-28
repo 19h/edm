@@ -61,10 +61,19 @@ struct Excluded {
 /// **Stolen tons and mission cargo are excluded and named, never guessed at.**
 /// A stolen ton needs a black market even when the commodity is legal
 /// everywhere — `derive_black_market` is `stolen || illegal`, and the two are
-/// independent — so a station answers HTTP 401 for it. Worse, it cannot even be
-/// *priced*: Ardent publishes one price per row and it is the open-market one,
-/// and `RawCommodity` has no fence price at all. A plan that included them
+/// independent — so a station answers HTTP 401 for it. It also cannot be
+/// *nominated*: Ardent publishes one price per row and it is the open-market
+/// one, its `/markets` rows carry no `blackMarket` flag, and `RawCommodity`
+/// drops the fence price that the live payload does carry. So the search has
+/// no way to find a fence and no way to rank one. A plan that included them
 /// would be a plan that fails at the counter.
+///
+/// Not a permanent limit: `/system/name/{s}/stations` publishes `blackMarket`
+/// for free, and `Commodity::fence_price` is already read from every market —
+/// `edm market` prints it. Measured first, though: over 317,599 illegal rows
+/// the fence pays the open-market price in 66.2% of them and a median 0.02%
+/// more in the rest, so the value of building this is the access, never a
+/// better price.
 fn manifest(state: &CommanderState, items: &[String]) -> (Vec<Stack>, Vec<Excluded>) {
     let mut clean = Vec::new();
     let mut excluded = Vec::new();
@@ -90,7 +99,7 @@ fn manifest(state: &CommanderState, items: &[String]) -> (Vec<Stack>, Vec<Exclud
             excluded.push(Excluded {
                 symbol: symbol.clone(),
                 tons: stolen,
-                reason: "stolen; this program cannot see fence prices",
+                reason: "stolen; needs a black market, which nothing indexes yet",
             });
         }
         let sellable = item.count as i64 - stolen;
