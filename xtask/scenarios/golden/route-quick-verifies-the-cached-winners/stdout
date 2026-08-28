@@ -56,7 +56,7 @@ verified 2 markets live over 1 round
 +===+====================================+================+==============+=========================+
 | 1 | Pricier Dock (Alpha Centauri) > M~ | Gold           | 1,960,000 cr | verified, best of these |
 +---+------------------------------------+----------------+--------------+-------------------------+
-   columns hidden to fit 100 cols: Lap, Ly, Stock/Demand
+   columns hidden to fit 100 cols: Lap, Ly, To start, Stock/Demand
    ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
    above it and still take longer to fly
    market observations are ageing independently; another commander may have traded them since

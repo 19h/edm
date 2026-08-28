@@ -42,7 +42,7 @@ pub fn ranking(
     markets: &[Market],
     commodities: &Commodities,
 ) -> Vec<Block<'static>> {
-    ranking_with(kind, routes, markets, commodities, false)
+    ranking_with(kind, routes, markets, commodities, false, None)
 }
 
 /// The ranking table, optionally with the credits-per-hour column \[C39\].
@@ -53,6 +53,7 @@ pub fn ranking_with(
     markets: &[Market],
     commodities: &Commodities,
     show_rate: bool,
+    origin: Option<edm_core::domain::id64::Coordinates>,
 ) -> Vec<Block<'static>> {
     if routes.is_empty() {
         return vec![
@@ -72,6 +73,7 @@ pub fn ranking_with(
                 cargo(route, commodities).into(),
                 money(route.profit.0).into(),
                 quantities(route, markets).into(),
+                approach(route, markets, origin).into(),
                 js::to_fixed_1(route.legs.iter().map(|leg| leg.distance_ly).sum()).into(),
             ];
             if show_rate {
@@ -158,6 +160,29 @@ fn quantities(route: &Route, markets: &[Market]) -> String {
             },
         );
     format!("{stock}/{demand}")
+}
+
+/// How far the ship is from the market this route starts at \[C40\].
+///
+/// `-` when the origin is unknown, which is honest: the model has never
+/// included the approach in the rate, and inventing a zero would say the route
+/// begins where you are standing.
+fn approach(
+    route: &Route,
+    markets: &[Market],
+    origin: Option<edm_core::domain::id64::Coordinates>,
+) -> String {
+    let Some(origin) = origin else {
+        return "-".to_owned();
+    };
+    let Some(start) = route
+        .legs
+        .first()
+        .and_then(|leg| markets.get(leg.from as usize))
+    else {
+        return "-".to_owned();
+    };
+    js::to_fixed_1(crate::time::distance_ly(origin, start.coords))
 }
 
 /// Every leg of one route, for `--detail`.
@@ -906,6 +931,7 @@ mod open_route_tests {
             &markets,
             &crate::fixture::round_trip_commodities(),
             true,
+            None,
         );
         let text = blocks
             .iter()
@@ -957,6 +983,29 @@ mod open_route_tests {
             notes.iter().any(|note| note.contains("ordered by credits per hour")),
             "{notes:?}"
         );
+    }
+
+    /// The approach is measured from where the ship is, not from the search
+    /// centre, and is absent rather than zero when nobody said \[C40\].
+    #[test]
+    fn the_approach_is_the_distance_to_the_first_market() {
+        use edm_core::domain::id64::Coordinates;
+
+        let markets = crate::fixture::round_trip_markets();
+        let geometry = crate::fixture::geometry(&markets);
+        let hop =
+            crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
+
+        // The fixture puts market 0 at the origin and market 1 eight light
+        // years along x, so a ship three light years out is three from the
+        // start and not eight.
+        let ship_at = Coordinates {
+            x: -3.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        assert_eq!(approach(&hop, &markets, Some(ship_at)), "3.0");
+        assert_eq!(approach(&hop, &markets, None), "-");
     }
 
     /// The pair that replaced the rate: what the seller has against what the

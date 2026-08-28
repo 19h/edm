@@ -131,6 +131,13 @@ Output
   it says where it has got to and what the best rate so far is, once it has been
   working for more than a couple of seconds.
   --json                   one document, for piping; silences the progress lines
+  --from <system>          where the ship is now, for the `To start` column.
+                           Defaults to the commander's own position when the
+                           journal supplies one. This is not the positional:
+                           the positional says where to *search*, and searching
+                           a region 300 Ly away does not move the ship. The
+                           approach is not part of the lap or the rate — the
+                           model starts its clock in the source system
   --per-hour               show the credits-per-hour column. The ranking is
                            ordered by it either way; it is hidden so the table
                            has room for Stock/Demand, and because it is the

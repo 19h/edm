@@ -99,6 +99,14 @@ pub enum Flag {
     /// the docking access Spansh publishes for them \[C36\]. Route-only, and
     /// meaningless without `--carriers`, which is refused rather than ignored.
     CarrierAccess,
+    /// `--from <system>`: where the commander actually is, for the approach
+    /// distance to a route's first market \[C40\].
+    ///
+    /// Distinct from the positional, which says where to *search*. Standing in
+    /// Sol and searching around Mundii are different facts and the table needs
+    /// both. Defaults to the commander's own location when the journal supplies
+    /// one, and to the search centre otherwise.
+    From,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -163,7 +171,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 88] = [
+    pub const ALL: [Self; 89] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -224,6 +232,7 @@ impl Flag {
         Self::MinLevel,
         Self::Quick,
         Self::CarrierAccess,
+        Self::From,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -331,6 +340,7 @@ impl Flag {
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
             "carrieraccess" => Self::CarrierAccess,
+            "from" | "origin" => Self::From,
             // NOT `rate`: that is already a base-table alias for
             // `--concurrency` (see `resolve`), and a route-only name is only
             // consulted after the base table has missed — so spelling it
@@ -402,6 +412,7 @@ impl Flag {
             Self::MinLevel => "--min-level",
             Self::Quick => "--quick",
             Self::CarrierAccess => "--carrier-access",
+            Self::From => "--from",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

@@ -74,7 +74,7 @@ carrier access: 2 carriers, 2 read live, 0 restrict docking, 1 unread and kept
 +===+==============================+================+==============+==============+================+
 | 1 | Open Door (Alpha Centauri) ~ | Gold           | 1,960,000 cr |  5,000/7,000 | proved optimal |
 +---+------------------------------+----------------+--------------+--------------+----------------+
-   columns hidden to fit 100 cols: Lap, Ly
+   columns hidden to fit 100 cols: Lap, Ly, To start
    ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
    above it and still take longer to fly
    market observations are ageing independently; another commander may have traded them since

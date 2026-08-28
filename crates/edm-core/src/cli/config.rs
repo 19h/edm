@@ -1235,6 +1235,13 @@ pub struct RouteConfig {
     /// `--per-hour`: show the credits-per-hour column the ranking is ordered
     /// by \[C39\]. Hidden by default, which buys the width for `Stock/Demand`.
     pub rate: bool,
+    /// `--from <system>`: where the commander is now \[C40\].
+    ///
+    /// `None` means "use the commander's own location, or the search centre if
+    /// the journal does not say". It is not the same as the positional: a
+    /// search centred on a region three hundred light years away still starts
+    /// from wherever the ship is parked.
+    pub origin: Option<String>,
 
     pub dry_run: bool,
     pub json: bool,
@@ -1578,6 +1585,7 @@ pub fn route_config_with_reference(
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         json: cli.switch_value(Flag::Json, false)?,
         rate: cli.switch_value(Flag::PerHour, false)?,
+        origin: cli.optional_value(Flag::From, None).map(ToOwned::to_owned),
         detail: cli.switch_value(Flag::Detail, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
         include_illegal: cli.switch_value(Flag::IncludeIllegal, false)?,

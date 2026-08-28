@@ -486,6 +486,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         .map(|listing| listing.market_id.to_bits())
         .collect();
 
+    let origin = super::approach_origin(&ardent, config, commander).await?;
     let no_candidates = std::collections::HashMap::new();
     let mut ranked = super::solve_ranked_from(
         &rank_config,
@@ -578,6 +579,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         out,
         &rank_config,
         &ranked,
+        origin,
         &coverage,
         super::SpecialOpportunities::default(),
         Some(&provenance),

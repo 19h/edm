@@ -875,6 +875,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         opportunities,
         None,
         carrier_access,
+        approach_origin(&ardent, config, commander).await?,
         watch,
     );
 
@@ -1338,10 +1339,15 @@ fn finish_solve(
 }
 
 /// Print a solved instance.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the rendered answer needs the instance, where the ship is, what the run cost, and every provenance flag the tables state"
+)]
 fn render_ranked(
     out: &crate::out::Out,
     config: &RouteConfig,
     ranked: &Ranked,
+    origin: Option<edm_core::domain::id64::Coordinates>,
     coverage: &RouteCoverage,
     opportunities: SpecialOpportunities,
     quick: Option<&QuickProvenance>,
@@ -1386,6 +1392,7 @@ fn render_ranked(
         &ranked.markets,
         &ranked.commodities,
         config.rate,
+        origin,
     ));
     // The ranking names stations; `edm trade` wants a market id. Without this
     // the answer stops one step short of being usable.
@@ -1418,6 +1425,7 @@ fn rank(
     opportunities: SpecialOpportunities,
     quick: Option<&QuickProvenance>,
     carrier_access: Option<access::Report>,
+    origin: Option<edm_core::domain::id64::Coordinates>,
     watch: edm_route::watch::Watch<'_>,
 ) {
     let ranked = solve_ranked(
@@ -1431,6 +1439,7 @@ fn rank(
         out,
         config,
         &ranked,
+        origin,
         coverage,
         opportunities,
         quick,
@@ -1722,6 +1731,27 @@ fn pacing(config: &RouteConfig) -> Pacing {
         },
         ..Pacing::default()
     }
+}
+
+/// Where the ship is, for the approach distance \[C40\].
+///
+/// In preference order: `--from`, resolved through Ardent; the commander's own
+/// position, which the journal supplies for free and which is the common case;
+/// then nothing. **Not** the search centre — searching a region three hundred
+/// light years away does not move the ship, and quietly substituting the centre
+/// would print a confident `0.0` for a route the commander cannot reach today.
+async fn approach_origin<H: HttpTransport>(
+    ardent: &ArdentClient<'_, H>,
+    config: &RouteConfig,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
+) -> Result<Option<edm_core::domain::id64::Coordinates>, String> {
+    if let Some(name) = config.origin.as_deref() {
+        return Ok(Some(resolve(ardent, name).await?.coordinates));
+    }
+    Ok(commander
+        .and_then(|state| state.current_system.as_ref())
+        .and_then(|located| located.value.coordinates)
+        .map(|[x, y, z]| edm_core::domain::id64::Coordinates { x, y, z }))
 }
 
 /// Whether the run continues after a gated phase.

@@ -77,14 +77,20 @@ pub const ROUTE_COLUMNS: &[Column] = &[
     // discarding the amount of money involved is not a ranking.
     Column::new("profit", "Profit").right(),
     Column::new("quantity", "Stock/Demand").right().priority(1),
+    // How far the ship is from where the route begins \[C40\]. Not part of the
+    // lap and not in the rate: the model starts the clock in the source system,
+    // so a 65 Mcr hop three hundred light years away and one next door read
+    // identically in every other column. Measured from the commander's own
+    // position, or `--from`, which is not the same place as the search centre.
+    Column::new("approach", "To start").right().priority(2),
     // Total distance flown per lap. A round trip's is the out-and-back, which
     // is what you actually fly; `--detail` and `--json` carry it per leg.
-    Column::new("distance", "Ly").right().priority(2),
+    Column::new("distance", "Ly").right().priority(3),
     // No `Cr/h lap 1` column. It is the same quantity measured over the
     // approach as well, useful and secondary, and at any real terminal width it
     // was thirteen characters taken from `Cargo` — which is the thing a reader
     // cannot act without. It is in `--json`.
-    Column::new("time", "Lap").right().priority(3),
+    Column::new("time", "Lap").right().priority(4),
     Column::new("claim", "Claim"),
 ];
 
@@ -99,9 +105,10 @@ pub const ROUTE_COLUMNS_WITH_RATE: &[Column] = &[
     Column::new("cargo", "Cargo").min_width(14),
     Column::new("profit", "Profit").right(),
     Column::new("quantity", "Stock/Demand").right().priority(1),
-    Column::new("distance", "Ly").right().priority(2),
+    Column::new("approach", "To start").right().priority(2),
+    Column::new("distance", "Ly").right().priority(3),
     Column::new("rate", "Cr/h").right(),
-    Column::new("time", "Lap").right().priority(3),
+    Column::new("time", "Lap").right().priority(4),
     Column::new("claim", "Claim"),
 ];
 
