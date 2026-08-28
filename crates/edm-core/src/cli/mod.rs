@@ -27,6 +27,7 @@ pub mod flag;
 pub mod parse;
 pub mod route_usage;
 pub mod usage;
+pub mod sell;
 pub mod vendor;
 
 pub use access::{Cli, CliError, EnvSnapshot, POISON_TYPE_ERROR};
@@ -53,7 +54,7 @@ pub fn is_known_command(command: &str) -> bool {
 /// Kept disjoint from [`KNOWN_COMMANDS`] rather than appended to it, because
 /// that constant's contents and R48's ordering around it are both pinned by the
 /// parity harness. Bun rejects each extension as an unknown command.
-pub const EXTENDED_COMMANDS: [&str; 3] = ["route", "eddn", "vendor"];
+pub const EXTENDED_COMMANDS: [&str; 4] = ["route", "eddn", "vendor", "sell"];
 
 #[must_use]
 pub fn is_extended_command(command: &str) -> bool {

@@ -474,8 +474,14 @@ fn validate(scenario: &Scenario) -> Result<()> {
     // it would be asserting only that the Rust still does whatever it did when
     // the golden was blessed — which is what the differential gate exists to be
     // better than. `route` is the one command the TypeScript does not have
-    // \[C25\], so it is the one command with nothing to ask.
-    if scenario.oracle == Oracle::None && command_of(&scenario.argv) != Some("route") {
+    // \[C25\], and `eddn` \[C33\], `vendor` \[C35\] and `sell` \[C41\] are the
+    // others — every name in `EXTENDED_COMMANDS` is a command this port added,
+    // so every one of them has nothing to ask. The test was written against
+    // `route` when `route` was the only one, and it is the set that is meant.
+    if scenario.oracle == Oracle::None
+        && !command_of(&scenario.argv)
+            .is_some_and(edm_core::cli::is_extended_command)
+    {
         bail!(
             "`oracle = \"none\"` is only for `route`, the one command the TypeScript \
              does not have (C25); this scenario runs `{}`, which has an oracle and \

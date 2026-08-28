@@ -174,6 +174,24 @@ impl<'a> Geometry<'a> {
 
     /// Wall-clock for the laden leg `from` to `to`.
     #[must_use]
+    /// Travel from a free-floating point to a market.
+    ///
+    /// The ship's own position is not a node — nothing is bought there — so an
+    /// open plan that starts where the commander is standing needs this rather
+    /// than the node-to-node form. It lives here because this is the module the
+    /// exactness gate exempts for floating point, and keeping the square root
+    /// on this side of the boundary is what lets a solver stay integer-only.
+    pub fn millis_from(&self, from: Coordinates, to: u32) -> Millis {
+        let market = &self.markets[to as usize];
+        self.time
+            .leg_millis(distance_ly(from, market.coords), market.arrival_ls)
+    }
+
+    /// The straight-line distance from a free-floating point to a market.
+    pub fn ly_from(&self, from: Coordinates, to: u32) -> f64 {
+        distance_ly(from, self.markets[to as usize].coords)
+    }
+
     pub fn leg_millis(&self, from: u32, to: u32) -> Millis {
         self.time
             .leg_millis(self.leg_ly(from, to), self.markets[to as usize].arrival_ls)

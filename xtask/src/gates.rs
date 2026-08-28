@@ -136,7 +136,7 @@ fn purity(root: &Path) -> Result<()> {
 /// `f64` is legal in `time.rs`, which evaluates a square root, and in the
 /// display paths. It is not legal anywhere the search compares two things.
 fn route_exactness(root: &Path) -> Result<()> {
-    const SOLVING_PATH: [&str; 7] = [
+    const SOLVING_PATH: [&str; 8] = [
         "num.rs",
         "weight.rs",
         "single.rs",
@@ -144,6 +144,7 @@ fn route_exactness(root: &Path) -> Result<()> {
         "ratio.rs",
         "bounded.rs",
         "distinct.rs",
+        "sell.rs",
     ];
     let dir = root.join("crates").join("edm-route").join("src");
 
@@ -317,20 +318,27 @@ fn parity_isolation(root: &Path) -> Result<()> {
     }
 
     // 3. The strongest statement available: over every argv the harness
-    //    actually runs, the two tables agree — *except* on a `route` argv,
-    //    which is the one case the extended table exists for. A route argv
-    //    instead has to satisfy the complementary claim, that the extended
-    //    parse it reached is only ever reached for `route`.
+    //    actually runs, the two tables agree — *except* on an argv for a
+    //    command this port added, which is the one case the extended table
+    //    exists for. Such an argv instead has to satisfy the complementary
+    //    claim, that the extended parse it reached is never reached for a
+    //    *ported* command, where a widened grammar would accept argv the
+    //    TypeScript rejects.
+    //
+    //    This said `route` when `route` was the only extension. It is the set
+    //    that is meant: `eddn` \[C33\], `vendor` \[C35\] and `sell` \[C41\]
+    //    reach the same arm for the same reason.
     let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
     for scenario in &scenarios {
         let dispatched = cli::parse_dispatch(&scenario.argv);
 
         if let Some(route) = &dispatched.route {
             // The dispatcher hands the extended parse to the command layer, so
-            // this is the whole of what "route-only" means at run time.
-            if route.command != "route" {
+            // this is the whole of what "extension-only" means at run time.
+            if !cli::is_extended_command(&route.command) {
                 bail!(
-                    "scenario {} took the extended arm as command {:?}, not route: {:?}",
+                    "scenario {} took the extended arm as command {:?}, which is not an \
+                     extension command: {:?}",
                     scenario.name,
                     route.command,
                     scenario.argv

@@ -27,6 +27,7 @@ pub mod feed;
 pub mod market;
 pub mod markets;
 pub mod route;
+pub mod sell;
 pub mod trade;
 pub mod vendor;
 
@@ -807,6 +808,7 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         out.line(&match args.command.as_str() {
             "eddn" => edm_core::cli::feed::feed_usage(),
             "vendor" => edm_core::cli::vendor::vendor_usage(),
+            "sell" => edm_core::cli::sell::sell_usage(),
             _ => cli::route_usage(),
         });
         return;
@@ -837,6 +839,46 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             out.error(&error);
             out.set_exit(EXIT_FAILURE);
         }
+        return;
+    }
+
+    if args.command == "sell" {
+        let commander = local_commander_state(&cli, ports, out);
+        let config = match edm_core::cli::sell::sell_config(&cli) {
+            Ok(config) => config,
+            Err(error) => {
+                out.error_paragraph(error.message());
+                out.set_exit(EXIT_USAGE);
+                return;
+            }
+        };
+        let app = match App::open(cli, http, ports, out, overrides) {
+            Ok(app) => app,
+            Err(error) => {
+                out.error(&error);
+                out.set_exit(EXIT_FAILURE);
+                return;
+            }
+        };
+        if let Err(error) = sell::run(&app, &config, commander.as_ref(), &crate::ports::RealTimer).await {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+        }
+        return;
+    }
+
+    // Everything past here is the route command, and until this guard existed
+    // it ran for *any* name in `EXTENDED_COMMANDS` that had no arm above — the
+    // chain is early-returning `if`s with no final match. A command added to
+    // the set and forgotten here would have silently executed route under its
+    // own name, which no gate catches: `parity-isolation` proves the two flag
+    // tables are disjoint, not that every extended name is dispatched.
+    if args.command != "route" {
+        out.error(&format!(
+            "{} is registered as a command but nothing dispatches it",
+            args.command
+        ));
+        out.set_exit(EXIT_FAILURE);
         return;
     }
 

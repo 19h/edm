@@ -94,6 +94,44 @@ pub const ROUTE_COLUMNS: &[Column] = &[
     Column::new("claim", "Claim"),
 ];
 
+/// One row per commodity dropped at a stop \[C41\].
+///
+/// `Stop`, `Item`, `Tons` and `Credits` are the four a commander cannot act
+/// without: where to go, what to hand over, how much, and what it pays. There
+/// is deliberately **no credits-per-hour column** here — C39's argument applies
+/// twice over, because a per-stop rate on a finite disposal annualises a
+/// journey that happens once.
+///
+/// Two width floors and no more, which is the bound
+/// `fitting_terminates_within_two_steps_per_column` enforces over every set in
+/// [`ALL`].
+pub const SELL_COLUMNS: &[Column] = &[
+    Column::new("stop", "#").right(),
+    Column::new("station", "Stop").min_width(24),
+    Column::new("distance", "Ly").right().priority(3),
+    Column::new("item", "Item").min_width(10),
+    Column::new("tons", "Tons").right(),
+    Column::new("unit", "Unit").right().priority(2),
+    Column::new("credits", "Credits").right(),
+];
+
+/// The plans that were considered and not chosen \[C41\].
+///
+/// This table exists so the refusal is arithmetic rather than assertion.
+/// `Extra pays` is the marginal rate — the credits the longer plan adds divided
+/// by the time it adds — and it is the number the decision actually turns on:
+/// the commander moves `--worth` and watches the recommendation move, which is
+/// a better interface than disputing a ranking.
+pub const SELL_ALTERNATIVES_COLUMNS: &[Column] = &[
+    Column::new("plan", "Plan").min_width(14),
+    Column::new("stops", "Stops").right().priority(2),
+    Column::new("sold", "Sold").right(),
+    Column::new("credits", "Credits").right(),
+    Column::new("time", "Time").right().priority(1),
+    Column::new("rate", "Cr/h").right().priority(1),
+    Column::new("marginal", "Extra pays").right(),
+];
+
 /// The same table with the rate restored, for `--per-hour` \[C39\].
 ///
 /// A separate constant rather than a runtime filter because a `Column` set is a
@@ -308,6 +346,9 @@ pub const ALL: &[(&str, &[Column])] = &[
     ("VENDOR", VENDOR_COLUMNS),
     ("QUICK_LOOKUP", QUICK_LOOKUP_COLUMNS),
     ("QUICK_LIVE", QUICK_LIVE_COLUMNS),
+    ("SELL", SELL_COLUMNS),
+    ("SELL_ALTERNATIVES", SELL_ALTERNATIVES_COLUMNS),
+    ("ROUTE_WITH_RATE", ROUTE_COLUMNS_WITH_RATE),
 ];
 
 /// Looks a column set up by the name it has in `game-internal-api.ts`.

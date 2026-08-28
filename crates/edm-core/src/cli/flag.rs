@@ -107,6 +107,17 @@ pub enum Flag {
     /// both. Defaults to the commander's own location when the journal supplies
     /// one, and to the search centre otherwise.
     From,
+    /// `--worth <cr/h>`: what an hour of the commander's time is worth, for
+    /// `edm sell` \[C41\].
+    ///
+    /// The bar in "the flight is not worth it": a stop joins the plan exactly
+    /// when it earns more than this for the time it costs. Not `--min-rate` —
+    /// it is not a floor on the answer's rate, it is the exchange rate between
+    /// credits and time.
+    Worth,
+    /// `--stops <n>`: how many markets one disposal may spread across
+    /// \[C41\]. It is the exact search bound, so it is visible.
+    Stops,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -171,7 +182,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 89] = [
+    pub const ALL: [Self; 91] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -233,6 +244,8 @@ impl Flag {
         Self::Quick,
         Self::CarrierAccess,
         Self::From,
+        Self::Worth,
+        Self::Stops,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -341,6 +354,8 @@ impl Flag {
             "includecarriers" => Self::Carriers,
             "carrieraccess" => Self::CarrierAccess,
             "from" | "origin" => Self::From,
+            "worth" | "timeworth" => Self::Worth,
+            "stops" | "maxstops" => Self::Stops,
             // NOT `rate`: that is already a base-table alias for
             // `--concurrency` (see `resolve`), and a route-only name is only
             // consulted after the base table has missed — so spelling it
@@ -413,6 +428,8 @@ impl Flag {
             Self::Quick => "--quick",
             Self::CarrierAccess => "--carrier-access",
             Self::From => "--from",
+            Self::Worth => "--worth",
+            Self::Stops => "--stops",
             Self::Yes => "--yes",
             Self::Settlements => "--settlements",
             Self::Cache => "--cache",

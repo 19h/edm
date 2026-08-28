@@ -1669,7 +1669,7 @@ fn best_live_json(entry: &quick::BestLive) -> edm_core::js::json::JsValue {
 }
 
 /// The travel model, with every constant a flag.
-fn time_model(config: &RouteConfig) -> TimeModel {
+pub(super) fn time_model(config: &RouteConfig) -> TimeModel {
     TimeModel {
         jump_range_ly: config.jump_range_ly,
         ..TimeModel::default()
@@ -1707,7 +1707,7 @@ fn limits(config: &RouteConfig) -> Limits {
 }
 
 /// The pacing a run is built with.
-fn pacing(config: &RouteConfig) -> Pacing {
+pub(super) fn pacing(config: &RouteConfig) -> Pacing {
     Pacing {
         bucket: Bucket {
             rate: config.rate_per_second,
@@ -2021,7 +2021,7 @@ fn reapply_docking_access<H, C, E, F>(
 /// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
 /// harness* \[R55\]. Reading the process environment directly here would give
 /// the cache a home the rest of the program cannot see.
-fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
+pub(super) fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
     let root = Cache::locate(
         app.cli.env("XDG_CACHE_HOME"),
         app.cli.env("HOME"),

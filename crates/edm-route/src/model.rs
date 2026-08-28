@@ -44,6 +44,26 @@ impl Commodities {
         CommodityId(id)
     }
 
+    /// The id for a commodity *symbol*, without assigning one.
+    ///
+    /// Normalises both sides, because the table is keyed on the payload's own
+    /// spelling — `Tritium`, `LowTemperatureDiamond` — while an outside caller
+    /// holds a canonical symbol: a journal cargo name, or an `--item`. An exact
+    /// lookup silently misses every one of them.
+    ///
+    /// Distinct from `intern`: a caller matching an outside name against what a
+    /// market actually listed must not mint an id for a commodity nobody
+    /// trades, because a `CommodityId` that appears in no `Market` reads as a
+    /// commodity with no buyers rather than as a lookup that failed.
+    #[must_use]
+    pub fn id_of_symbol(&self, symbol: &str) -> Option<CommodityId> {
+        let wanted = edm_core::ardent::normalise_commodity_name(symbol);
+        self.names
+            .iter()
+            .position(|name| edm_core::ardent::normalise_commodity_name(name) == wanted)
+            .map(|index| CommodityId(index as u32))
+    }
+
     /// The name behind an id, or `None` if it came from another table.
     #[must_use]
     pub fn name(&self, id: CommodityId) -> Option<&str> {

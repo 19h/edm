@@ -63,6 +63,7 @@ pub mod ratio;
 pub mod report;
 pub mod rescore;
 pub mod round;
+pub mod sell;
 pub mod single;
 pub mod thread;
 pub mod time;

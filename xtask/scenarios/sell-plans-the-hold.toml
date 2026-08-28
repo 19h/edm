@@ -1,0 +1,67 @@
+# sell-plans-the-hold
+why = "C41 end to end, and the decision it exists to make. The hold is 1,232 t of tritium. Three buyers are nominated: one nearby that will take the lot at 50,000, one nearby that pays 52,000 but takes only 400, and one 300 Ly away that pays 60,000. Maximising credits would fly 300 Ly for the third; maximising credits per hour would sell 400 t at the second and stop, leaving 832 t aboard — which is why neither is the objective. `credits - lambda*time` takes the plan that clears the hold for the least flying, and the alternatives table prints the marginal rate of the one it refused so the commander can move the bar with --worth rather than argue with the ranking. Also pins that a market is only presented on a price this run read: all three are polled live, and the plan's own buyers are re-read before the table is drawn."
+argv = ["sell", "--from", "Sol", "--radius", "500", "--top", "5", "--stops", "3", "--rps", "8", "--no-cache", "--yes"]
+oracle = "none"
+
+[env]
+EDM_JITTER = "0"
+EDM_JOURNAL_DIR = "xtask/scenarios/journals/one-stack"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/tritium/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"tritium","marketId":3229009410,"stationName":"Takes The Lot","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":50000,"demand":9000,"demandBracket":3},
+ {"commodityName":"tritium","marketId":3229009411,"stationName":"Pays More Takes Less","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":52000,"demand":400,"demandBracket":3},
+ {"commodityName":"tritium","marketId":3229009412,"stationName":"Far And Rich","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828642,"systemName":"Long Way","systemX":300,"systemY":0,"systemZ":0,"sellPrice":60000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/tritium"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009410&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-tritium-takes-the-lot.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009411&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-tritium-small.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009412&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-tritium-far.json"

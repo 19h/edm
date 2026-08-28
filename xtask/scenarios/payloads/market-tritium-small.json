@@ -1,0 +1,1 @@
+{"inventory": [], "commodities": {"128961249": {"id": 128961249, "categoryname": "Chemicals", "name": "Tritium", "stock": 0, "buyPrice": 0, "sellPrice": 52000, "fencePrice": 0, "demand": 400, "legality": "", "meanPrice": 50000, "demandBracket": 3, "stockBracket": 0, "consumer": 1, "producer": 0, "rare": 0}}, "allowsDumping": true}

@@ -1048,18 +1048,32 @@ impl CommanderState {
                     mission_id: None,
                 }),
                 (TradeKind::Sell, Some(index)) => {
-                    inventory[index].count = inventory[index]
-                        .count
-                        .checked_sub(trade.count)
-                        .unwrap_or_else(|| {
-                            self.warn(
-                                WarningCode::ArithmeticUnderflow,
-                                "MarketSell exceeds known commodity stack; count clamped to zero",
-                                line,
-                                Some(ObservationSource::Journal),
-                            );
-                            0
-                        });
+                    let held = inventory[index].count;
+                    let sold = held.min(trade.count);
+                    if sold < trade.count {
+                        self.warn(
+                            WarningCode::ArithmeticUnderflow,
+                            "MarketSell exceeds known commodity stack; count clamped to zero",
+                            line,
+                            Some(ObservationSource::Journal),
+                        );
+                    }
+                    inventory[index].count = held - sold;
+                    // **Clean tons go first, and `stolen` comes down with the
+                    // stack.** A stack is a count plus how many of it are
+                    // stolen, not two stacks, and an ordinary `MarketSell` is
+                    // the one thing that cannot move a stolen ton — a station
+                    // answers HTTP 401. Leaving `stolen` untouched turned a
+                    // 1,000-clean / 232-stolen stack into `count: 232,
+                    // stolen: 232` after selling the clean thousand: a hold the
+                    // model then believed was wholly stolen. Nothing read
+                    // `stolen` until `edm sell` did, which is why it survived
+                    // this long.
+                    let clean = held.saturating_sub(inventory[index].stolen);
+                    inventory[index].stolen = inventory[index]
+                        .stolen
+                        .saturating_sub(sold.saturating_sub(clean))
+                        .min(inventory[index].count);
                     if inventory[index].count == 0 {
                         inventory.remove(index);
                     }
@@ -1763,6 +1777,40 @@ mod carrier_door_tests {
             state.apply_journal_json(line, n + 1);
         }
         state
+    }
+
+    /// Selling clean cargo must not turn the remainder wholly stolen.
+    ///
+    /// A stack is a count plus how many of it are stolen. An ordinary
+    /// `MarketSell` cannot move a stolen ton — the station answers 401 — so the
+    /// sale draws the clean tons down and `stolen` rides with the stack. Before
+    /// this, selling the clean thousand out of 1,000 clean + 232 stolen left
+    /// `count: 232, stolen: 232`, and `edm sell` would then have excluded a
+    /// hold that was entirely clean.
+    #[test]
+    fn selling_clean_cargo_leaves_the_stolen_count_alone() {
+        let state = replay(&[
+            r#"{"timestamp":"3309-01-01T00:00:01Z","event":"Cargo","Vessel":"Ship","Count":1232,"Inventory":[{"Name":"tritium","Count":1232,"Stolen":232}]}"#,
+            r#"{"timestamp":"3309-01-01T00:00:02Z","event":"MarketSell","MarketID":1,"Type":"tritium","Count":1000,"SellPrice":50000,"TotalSale":50000000,"BlackMarket":false}"#,
+        ]);
+        let held = state.cargo.inventory.as_ref().expect("inventory");
+        let stack = held.value.first().expect("one stack");
+        assert_eq!(stack.count, 232, "232 t left aboard");
+        assert_eq!(stack.stolen, 232, "and all of it is the stolen part");
+    }
+
+    /// Selling past the clean tons does draw the stolen ones down, and `stolen`
+    /// can never exceed what is left.
+    #[test]
+    fn a_sale_beyond_the_clean_tons_reduces_the_stolen_count() {
+        let state = replay(&[
+            r#"{"timestamp":"3309-01-01T00:00:01Z","event":"Cargo","Vessel":"Ship","Count":100,"Inventory":[{"Name":"gold","Count":100,"Stolen":40}]}"#,
+            r#"{"timestamp":"3309-01-01T00:00:02Z","event":"MarketSell","MarketID":1,"Type":"gold","Count":80,"SellPrice":1,"TotalSale":80,"BlackMarket":true}"#,
+        ]);
+        let held = state.cargo.inventory.as_ref().expect("inventory");
+        let stack = held.value.first().expect("one stack");
+        assert_eq!(stack.count, 20);
+        assert_eq!(stack.stolen, 20, "60 clean went first, then 20 stolen");
     }
 
     /// The event that started this: a real line from a real journal.

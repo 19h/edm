@@ -1,0 +1,3 @@
+{ "timestamp":"3309-01-01T00:00:00Z", "event":"Fileheader", "part":1, "language":"English/UK", "gameversion":"4.0", "build":"r0" }
+{ "timestamp":"3309-01-01T00:00:01Z", "event":"LoadGame", "Commander":"Test", "Ship":"Type9", "Credits":1000000, "Loan":0 }
+{ "timestamp":"3309-01-01T00:00:02Z", "event":"Location", "StarSystem":"Sol", "SystemAddress":10477373803, "StarPos":[0.0,0.0,0.0], "Docked":false }
