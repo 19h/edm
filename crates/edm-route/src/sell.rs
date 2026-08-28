@@ -39,7 +39,7 @@
 //! to the rate objective — which is why that mode is not offered separately. It
 //! is the fixed point of this one.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use crate::model::{CommodityId, DemandQty, Market};
 use crate::num::{Credits, Millis, Ratio, Tons};
@@ -326,7 +326,10 @@ pub fn plans(
 
     // Keyed by the *set* of markets actually sold at, so two orderings of the
     // same set keep only the faster one and the caller never sees a plan twice.
-    let mut best: BTreeMap<Vec<u32>, Plan> = BTreeMap::new();
+    // A hash map, and the iteration order it does not promise is harmless: the
+    // sort below ends in a total tie-break on the market ids themselves, so the
+    // returned order is a function of the plans and not of how they were stored.
+    let mut best: HashMap<Vec<u32>, Plan> = HashMap::new();
     let mut order: Vec<u32> = Vec::with_capacity(stops);
     walk(
         geometry, from, hold, candidates, stops, &mut order, &mut best,
@@ -353,7 +356,7 @@ fn walk(
     candidates: &[u32],
     stops: usize,
     order: &mut Vec<u32>,
-    best: &mut BTreeMap<Vec<u32>, Plan>,
+    best: &mut HashMap<Vec<u32>, Plan>,
 ) {
     if !order.is_empty()
         && let Some(plan) = plan_for(geometry, from, hold, order)

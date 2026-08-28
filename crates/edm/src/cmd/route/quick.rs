@@ -1015,6 +1015,8 @@ where
     let proven = config.carrier_access == edm_core::carrier::Policy::Proven;
     let removed = access::Removed {
         restricted: cost.restricted,
+        // Counted by `apply` per side, not derivable from the deduped cost.
+        moved: 0,
         unproven: if proven { cost.unknown } else { 0 },
         unproven_kept: if proven { 0 } else { cost.unknown },
     };

@@ -310,12 +310,23 @@ pub fn parse_info(document: &JsValue, expected_market_id: f64) -> Result<Owned, 
         })
         .unwrap_or(true);
 
+    // `location.current.systemAddress`, which is the only field in the reply
+    // that says where the ship would actually have to fly.
+    let system_address = carrier
+        .get("location")
+        .and_then(JsValue::as_record)
+        .and_then(|location| location.get("current"))
+        .and_then(JsValue::as_record)
+        .and_then(|current| current.get("systemAddress"))
+        .and_then(JsValue::as_f64);
+
     let owner = carrier.get("owner").and_then(JsValue::as_record);
     Ok(Owned {
         docking: Docking {
             level,
             notorious_ok,
         },
+        system_address,
         // Carried for a squadron or friends match that is not implemented yet
         // \[C37\]. Eight bytes of cache each, and the alternative is re-probing
         // every carrier on the day it lands.
@@ -332,6 +343,15 @@ pub fn parse_info(document: &JsValue, expected_market_id: f64) -> Result<Owned, 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Owned {
     pub docking: Docking,
+    /// Where Frontier says the carrier is **now** \[C42\].
+    ///
+    /// A carrier's market answers by id from anywhere, so a live price says
+    /// nothing about its position — that comes from Ardent, and Ardent only
+    /// learns a jump when somebody reports the carrier at its new home. The
+    /// gap is days: VBV-WKK was nominated in Col 285 Sector MO-N b21-4 on a
+    /// three-day-old sighting while Frontier had it in Faroahy, 170 Ly from
+    /// where the commander flew.
+    pub system_address: Option<f64>,
     /// `0` means "no squadron" and must never be matched against itself.
     pub owner_squadron_id: Option<f64>,
     pub owner_user_id: Option<f64>,
@@ -485,6 +505,7 @@ mod tests {
     fn reply(market_id: f64, level: &str, notorious: bool) -> JsValue {
         JsValue::parse(&format!(
             r#"{{"fleetCarrier":{{"market_id":{market_id},"body_site_id":1,
+               "location":{{"current":{{"systemAddress":7269098202465}}}},
                "docking":{{"accessLevel":"{level}","notoriousAccess":{notorious}}},
                "owner":{{"user_id":909522,"squadron_id":82472}}}}}}"#
         ))
@@ -499,6 +520,7 @@ mod tests {
         assert!(!parsed.docking.notorious_ok);
         assert_eq!(parsed.owner_squadron_id, Some(82472.0));
         assert_eq!(parsed.owner_user_id, Some(909_522.0));
+        assert_eq!(parsed.system_address, Some(7_269_098_202_465.0));
     }
 
     /// The check `market/list` cannot offer: every reply names the carrier it

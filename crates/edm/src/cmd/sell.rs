@@ -35,6 +35,7 @@ use crate::ardent::ArdentClient;
 use crate::cmd::{App, CmdResult};
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs, Timer};
+use crate::route::access;
 use crate::route::acquire;
 use crate::route::cache::Cache;
 use crate::route::pacer::Pacer;
@@ -282,6 +283,22 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     let keep = best_per_commodity(&rows, &selection.keep, config.top);
     selection.keep.retain(|station| keep.contains(&station.market_id.to_bits()));
 
+    // --- the carriers among them, priced ----------------------------------
+    //
+    // Two questions in one request, and a disposal needs both. **Can I dock?**
+    // — a squadron-only carrier is not a buyer. **Is it still there?** — a
+    // carrier's market answers by id from anywhere, so its live price says
+    // nothing about its position, and Ardent only learns of a jump when
+    // somebody reports the carrier at its new home. Skipping this sent a
+    // commander 170 Ly to an empty orbit for a `squadronfriends` carrier that
+    // had been in another system for three days \[C42\].
+    let carrier_ids: Vec<f64> = selection
+        .keep
+        .iter()
+        .filter(|station| ardent::is_carrier(station.station_type.as_deref()))
+        .map(|station| station.market_id)
+        .collect();
+
     // --- the priced gate ---------------------------------------------------
     let read_cache = crate::cmd::route::cache_for(app, &route_config);
     let write_cache = Cache::new(
@@ -296,6 +313,24 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         &selection.keep,
         app.ports.clock.now_ms(),
     );
+    let notoriety = state.notoriety;
+    let access_cache = access::CachePolicy {
+        enabled: route_config.cache,
+        refresh: route_config.refresh,
+        max_age_minutes: Some(route_config.max_age_minutes),
+    };
+    let mut carriers = access::prepare(
+        &app.ports.fs,
+        read_cache.root(),
+        &carrier_ids,
+        app.ports.clock.now_ms(),
+        access_cache,
+        notoriety,
+    );
+    // Both classes are priced in one gate, before either is sent. The market
+    // count is the pre-filter one, so the ceiling is checked against more
+    // requests than the run will make once closed and departed carriers drop
+    // out — over-pricing is the safe direction for a ceiling.
     let estimate = Estimate::build(
         Counts {
             systems: 0,
@@ -303,26 +338,38 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             stations_known: considered,
             markets_to_poll: selection.keep.len(),
             cached_fresh: prepared.hits.fresh,
-            carriers_to_probe: 0,
+            carriers_to_probe: carriers.cold.len(),
         },
         selection.exclusions.clone(),
         route_config.rate_per_second,
         &SizePrior::default(),
     );
-    out.aside(&[Block::Table {
-        title: "SELL PLAN COST".to_owned(),
-        columns: columns::ROUTE_FIELD_COLUMNS,
-        rows: vec![
+    let mut cost_rows = vec![
             field("buyers considered", js::format_integer(considered as f64)),
             field("buyers to read", js::format_integer(estimate.markets_to_poll as f64)),
             field("cached and still fresh", js::format_integer(estimate.cached_fresh as f64)),
             field("game-internal API requests", js::format_integer(estimate.requests)),
-            field("ceiling", format!(
-                "{} of {}   (--max-requests to raise)",
-                js::format_integer(estimate.requests),
-                js::format_integer(route_config.max_requests),
-            )),
-        ],
+        field("ceiling", format!(
+            "{} of {}   (--max-requests to raise)",
+            js::format_integer(estimate.requests),
+            js::format_integer(route_config.max_requests),
+        )),
+    ];
+    // Only when there are any. A run over stations alone should not have to
+    // read a row saying nothing was checked.
+    if !carriers.cold.is_empty() {
+        cost_rows.insert(
+            2,
+            field(
+                "carriers to check",
+                js::format_integer(carriers.cold.len() as f64),
+            ),
+        );
+    }
+    out.aside(&[Block::Table {
+        title: "SELL PLAN COST".to_owned(),
+        columns: columns::ROUTE_FIELD_COLUMNS,
+        rows: cost_rows,
     }]);
     if estimate.requests > route_config.max_requests {
         out.set_exit(crate::out::EXIT_FAILURE);
@@ -393,6 +440,73 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             if to_read == 1 { "buyer" } else { "buyers" },
         ));
     }
+    // Docking access *and* position, from the same reply \[C42\]. A carrier
+    // that has jumped is dropped whatever its door says: its market answers by
+    // id from anywhere, so a live price is no evidence at all about where the
+    // ship would have to fly.
+    if !carriers.cold.is_empty() {
+        note(format!(
+            "checking {} fleet {} for docking access and position...",
+            js::format_integer(carriers.cold.len() as f64),
+            if carriers.cold.len() == 1 { "carrier" } else { "carriers" },
+        ));
+        let probe_cx = access::ProbeCx {
+            http: app.http,
+            out,
+            origin: &app.overrides.origin,
+            clock: &app.ports.clock,
+            entropy: &app.ports.entropy,
+            credentials: &app.credentials,
+            headers: &app.headers,
+            language: &query.language,
+            method_override: app.session.method_override.as_deref(),
+            dry_run: false,
+            nonce_override: stamp_overrides.nonce,
+            frontier_time_override: stamp_overrides.frontier_time,
+            request_time_override: stamp_overrides.request_time,
+        };
+        let cold = std::mem::take(&mut carriers.cold);
+        access::probe(
+            &probe_cx,
+            &pacer,
+            &app.ports.fs,
+            read_cache.root(),
+            &cold,
+            app.ports.clock.now_ms(),
+            access_cache,
+            notoriety,
+            &mut carriers.index,
+            &mut carriers.cost,
+            None,
+        )
+        .await
+        .map_err(|error| {
+            format!("{error}\n   pass --carrier-access any to rank carriers without checking")
+        })?;
+    }
+    if !carrier_ids.is_empty() {
+        access::finish(
+            &mut carriers.index,
+            &carrier_ids,
+            commander,
+            &mut carriers.cost,
+        );
+        let dropped = access::apply(&mut selection, &carriers.index, route_config.carrier_access);
+        if dropped.total() > 0 {
+            note(access::note(carriers.cost, dropped));
+        }
+        if selection.keep.is_empty() {
+            return Err("every buyer was a carrier you cannot reach or dock at".to_owned());
+        }
+    }
+    // Re-prepared over what survived, so nothing is read for a market the
+    // carrier filter has already removed.
+    let prepared = acquire::prepare(
+        &read_cache,
+        &app.ports.fs,
+        &selection.keep,
+        app.ports.clock.now_ms(),
+    );
     let acquired = acquire::sweep(&cx, &pacer, prepared, &[]).await;
 
     // --- the plan ----------------------------------------------------------
@@ -625,11 +739,22 @@ fn worth_bar(
         Ratio::new(Credits(1), Millis(3_600_000)),
     )
     .unwrap_or_default();
+    // `reduce` with a strict `>` rather than `max_by_key`, which returns the
+    // *last* maximum \[R27\]. Ties here are plans of equal merit and the first
+    // is the one the enumeration's own total order already settled on.
     let clearing = singles
         .iter()
         .filter(|plan| plan.sold.0 >= total)
-        .max_by_key(|plan| plan.rate().credits_per_hour_floor());
-    let fallback = singles.iter().max_by_key(|plan| plan.revenue.0);
+        .reduce(|a, b| {
+            if b.rate().credits_per_hour_floor() > a.rate().credits_per_hour_floor() {
+                b
+            } else {
+                a
+            }
+        });
+    let fallback = singles
+        .iter()
+        .reduce(|a, b| if b.revenue.0 > a.revenue.0 { b } else { a });
     clearing
         .or(fallback)
         .map_or(Ratio::new(Credits(0), Millis(3_600_000)), Plan::rate)
@@ -707,7 +832,13 @@ fn render(
     // money presented as an alternative worth considering.
     let most_credits = plans
         .iter()
-        .max_by_key(|plan| (plan.revenue.0, -plan.millis.0))
+        .reduce(|a, b| {
+            if (b.revenue.0, -b.millis.0) > (a.revenue.0, -a.millis.0) {
+                b
+            } else {
+                a
+            }
+        })
         .filter(|plan| plan.revenue.0 > best.revenue.0);
     let mut alt = Vec::new();
     for (label, plan) in [("recommended", Some(best)), ("most credits", most_credits)] {
@@ -726,8 +857,15 @@ fn render(
                 )
             }
         };
+        let where_at = plan
+            .stops
+            .iter()
+            .map(|stop| markets[stop.market as usize].station.as_str())
+            .collect::<Vec<_>>()
+            .join(" > ");
         alt.push(Row::Data(vec![
             label.into(),
+            where_at.into(),
             int(plan.stops.len() as f64).into(),
             int(plan.sold.0 as f64).into(),
             format!("{} cr", int(plan.revenue.0 as f64)).into(),

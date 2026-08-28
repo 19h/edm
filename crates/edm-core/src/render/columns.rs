@@ -123,12 +123,16 @@ pub const SELL_COLUMNS: &[Column] = &[
 /// the commander moves `--worth` and watches the recommendation move, which is
 /// a better interface than disputing a ranking.
 pub const SELL_ALTERNATIVES_COLUMNS: &[Column] = &[
-    Column::new("plan", "Plan").min_width(14),
-    Column::new("stops", "Stops").right().priority(2),
+    Column::new("plan", "Plan").min_width(11),
+    // Without this the block is arithmetic about plans the reader cannot see:
+    // "most credits, 2 stops, +30 M" names no market, so there is nothing to
+    // act on and no way to tell how it differs from the recommendation.
+    Column::new("where", "Stops at").min_width(18),
+    Column::new("stops", "Stops").right().priority(3),
     Column::new("sold", "Sold").right(),
     Column::new("credits", "Credits").right(),
     Column::new("time", "Time").right().priority(1),
-    Column::new("rate", "Cr/h").right().priority(1),
+    Column::new("rate", "Cr/h").right().priority(2),
     Column::new("marginal", "Extra pays").right(),
 ];
 

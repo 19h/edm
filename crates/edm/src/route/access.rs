@@ -93,11 +93,15 @@ const CONCURRENCY: usize = 8;
 const RESTRICTED_LABEL: &str = "carriers that restrict docking";
 /// The label for a carrier nobody has published an access for.
 const UNPROVEN_LABEL: &str = "carriers with no published access";
+/// The label for a carrier that is no longer where it was nominated.
+const MOVED_LABEL: &str = "carriers that have moved since Ardent saw them";
 
 /// Every carrier's verdict, by market id.
 #[derive(Clone, Debug, Default)]
 pub struct AccessIndex {
     verdicts: HashMap<u64, Access>,
+    /// Where Frontier says each carrier is now, when it said \[C42\].
+    locations: HashMap<u64, f64>,
     /// Ids whose verdict came from a probe issued during *this* run, as
     /// opposed to one read out of the cache. The journal overlay turns on the
     /// distinction and nothing else does.
@@ -131,6 +135,16 @@ impl AccessIndex {
 
     fn set(&mut self, market_id: f64, access: Access) {
         self.verdicts.insert(market_id.to_bits(), access);
+    }
+
+    fn set_location(&mut self, market_id: f64, system_address: f64) {
+        self.locations.insert(market_id.to_bits(), system_address);
+    }
+
+    /// The system Frontier last said this carrier was in, if it said.
+    #[must_use]
+    pub fn system_of(&self, market_id: f64) -> Option<f64> {
+        self.locations.get(&market_id.to_bits()).copied()
     }
 
     fn set_fresh(&mut self, market_id: f64, access: Access) {
@@ -201,6 +215,9 @@ pub struct Cost {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Removed {
     pub restricted: usize,
+    /// Carriers Frontier places somewhere other than where they were
+    /// nominated \[C42\].
+    pub moved: usize,
     /// Non-zero only under [`Policy::Proven`].
     pub unproven: usize,
     /// Kept, but unproven. Not a removal — the number the user is owed anyway,
@@ -211,7 +228,7 @@ pub struct Removed {
 impl Removed {
     #[must_use]
     pub const fn total(self) -> usize {
-        self.restricted + self.unproven
+        self.restricted + self.unproven + self.moved
     }
 }
 
@@ -301,6 +318,7 @@ fn cached<F: Fs>(
             level,
             notorious_ok,
         },
+        system_address: record.get("systemAddress").and_then(JsValue::as_f64),
         owner_squadron_id: record.get("ownerSquadronId").and_then(JsValue::as_f64),
         owner_user_id: record.get("ownerUserId").and_then(JsValue::as_f64),
     })
@@ -341,6 +359,7 @@ fn bank<F: Fs>(
             "accessLevel".into(),
             JsValue::Str(owned.docking.level.name().into()),
         ),
+        ("systemAddress".into(), optional(owned.system_address)),
         (
             "notoriousAccess".into(),
             JsValue::Bool(owned.docking.notorious_ok),
@@ -589,6 +608,9 @@ where
         match outcome {
             Probed::Verdict(owned) => {
                 answered += 1;
+                if let Some(system) = owned.system_address {
+                    index.set_location(market_id, system);
+                }
                 let (access, why) = carrier::verdict(owned.docking, notoriety);
                 if why == Some(Closed::Notoriety) {
                     cost.notoriety_blocked += 1;
@@ -769,6 +791,17 @@ pub fn note(cost: Cost, removed: Removed) -> String {
         let _ = write!(text, ", {} from cache", n(cost.cache_hits));
     }
     let _ = write!(text, ", {} restrict docking", n(removed.restricted));
+    // Reported beside the access count, never folded into it: "cannot dock"
+    // and "not there any more" are different facts, and a reader who sees only
+    // the first will assume the rest of the list is positioned correctly \[C42\].
+    if removed.moved > 0 {
+        let _ = write!(
+            text,
+            ", {} {} moved since Ardent saw them",
+            n(removed.moved),
+            if removed.moved == 1 { "has" } else { "have" },
+        );
+    }
     if cost.notoriety_blocked > 0 {
         let _ = write!(
             text,
@@ -812,6 +845,19 @@ pub fn apply(selection: &mut Selection, index: &AccessIndex, policy: Policy) -> 
             if !edm_core::ardent::is_carrier(station.station_type.as_deref()) {
                 return true;
             }
+            // **Where it is, before what its door does.** A carrier's market
+            // answers by id from anywhere in the galaxy, so a live price says
+            // nothing about its position; that comes from Ardent, which only
+            // learns of a jump when somebody reports the carrier at its new
+            // home. Flying to a carrier that has left is a wasted trip whatever
+            // its access level, so the location is checked first and reported
+            // separately.
+            if let Some(now) = index.system_of(station.market_id)
+                && now != station.system_address
+            {
+                removed.moved += 1;
+                return false;
+            }
             let access = index.get(station.market_id);
             if matches!(access, Access::Unknown) && policy.admits(access) {
                 removed.unproven_kept += 1;
@@ -843,6 +889,13 @@ pub fn apply(selection: &mut Selection, index: &AccessIndex, policy: Policy) -> 
             label: UNPROVEN_LABEL,
             removed: removed.unproven,
             keep_with: "--carrier-access open",
+        });
+    }
+    if removed.moved > 0 {
+        selection.exclusions.push(Exclusion {
+            label: MOVED_LABEL,
+            removed: removed.moved,
+            keep_with: "--carrier-access any",
         });
     }
     removed
@@ -896,6 +949,7 @@ mod tests {
                 level,
                 notorious_ok,
             },
+            system_address: Some(1.0),
             owner_squadron_id: Some(82472.0),
             owner_user_id: Some(909_522.0),
         }
@@ -1199,6 +1253,69 @@ mod tests {
         assert_eq!(removed.total(), 2);
         let labels: Vec<&str> = selection.exclusions.iter().map(|e| e.label).collect();
         assert_eq!(labels, vec![RESTRICTED_LABEL, UNPROVEN_LABEL]);
+    }
+
+    /// A carrier that Frontier places elsewhere is dropped whatever its door
+    /// says, and reported under its own heading \[C42\].
+    ///
+    /// This is the failure it was written for: VBV-WKK was nominated in
+    /// Col 285 Sector MO-N b21-4 on a three-day-old Ardent sighting and was
+    /// actually in Faroahy, so a plan sent the commander 170 Ly to an empty
+    /// orbit. A live *price* proves nothing about position — a carrier's market
+    /// answers by id from anywhere.
+    #[test]
+    fn a_carrier_that_has_jumped_is_dropped_wherever_its_door_stands() {
+        let mut selection = selection_of(vec![station(OPEN_ID, "FleetCarrier")]);
+        let mut index = index_of(&[(OPEN_ID, Access::Open)]);
+        // The station was nominated at system 1; Frontier says it is at 2.
+        index.set_location(OPEN_ID, 2.0);
+
+        let removed = apply(&mut selection, &index, Policy::Open);
+        assert_eq!(removed.moved, 1);
+        assert_eq!(removed.restricted, 0, "not a door problem");
+        assert!(selection.keep.is_empty());
+        assert_eq!(selection.exclusions[0].label, MOVED_LABEL);
+    }
+
+    /// The two removals are different facts and the sentence keeps them apart:
+    /// a reader who is told only how many doors were shut will assume the rest
+    /// of the list is where it says it is \[C42\].
+    #[test]
+    fn the_note_counts_departures_separately_from_shut_doors() {
+        let cost = Cost {
+            carriers: 4,
+            requests: 4,
+            ..Cost::default()
+        };
+        let removed = Removed {
+            restricted: 2,
+            moved: 1,
+            ..Removed::default()
+        };
+        let text = note(cost, removed);
+        assert!(text.contains("2 restrict docking"), "{text}");
+        assert!(text.contains("1 has moved since Ardent saw them"), "{text}");
+        // Singular and plural, because one departure is the common case.
+        let many = note(
+            cost,
+            Removed {
+                moved: 3,
+                ..Removed::default()
+            },
+        );
+        assert!(many.contains("3 have moved since Ardent saw them"), "{many}");
+    }
+
+    /// Agreement is silence: a carrier where it was nominated is not reported
+    /// as having moved.
+    #[test]
+    fn a_carrier_still_where_it_was_nominated_is_kept() {
+        let mut selection = selection_of(vec![station(OPEN_ID, "FleetCarrier")]);
+        let mut index = index_of(&[(OPEN_ID, Access::Open)]);
+        index.set_location(OPEN_ID, 1.0);
+        let removed = apply(&mut selection, &index, Policy::Open);
+        assert_eq!(removed.moved, 0);
+        assert_eq!(selection.keep.len(), 1);
     }
 
     /// `any` is the escape hatch, and it must not merely admit everything — it
