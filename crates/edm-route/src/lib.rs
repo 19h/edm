@@ -61,6 +61,7 @@ pub mod model;
 pub mod num;
 pub mod ratio;
 pub mod report;
+pub mod rescore;
 pub mod round;
 pub mod single;
 pub mod thread;
@@ -166,7 +167,17 @@ pub fn solve(
 ) -> Solution {
     let geometry = Geometry::new(markets, time);
     let pools = Pools::from_markets(markets);
-    let graph = TradeGraph::build(&pools, &geometry, ship, limits, watch);
+    // Built only for the shapes that read it. `single::solve` works off the
+    // pools alone, so a one-way search used to pay for the whole trade graph
+    // and then never look at it — and the graph is the expensive half:
+    // quadratic in the market count, measured at 127 s and a 4.1 GiB peak over
+    // 5,049 markets. `Wanted::only` already exists to stop a search nobody
+    // asked for; this stops the *build* nobody asked for.
+    let graph = if wanted.round_trip || wanted.loops {
+        Some(TradeGraph::build(&pools, &geometry, ship, limits, watch))
+    } else {
+        None
+    };
 
     let mut single = if wanted.single {
         single::solve(&pools, &geometry, ship, limits)
@@ -177,36 +188,39 @@ pub fn solve(
     // rational lower bound that Dinkelbach begins from — so it is computed
     // whenever either is wanted, and is cheap either way (exact enumeration
     // over 2-cycles).
-    let mut round_trip = if wanted.round_trip || wanted.loops {
-        round::solve(&graph, &geometry, limits)
-    } else {
-        Vec::new()
+    let mut round_trip = match &graph {
+        Some(graph) => round::solve(graph, &geometry, limits),
+        None => Vec::new(),
     };
     // Only the requested shape is searched, which is also what keeps the
     // budget's withdrawal notice honest: an `Abandoned` event can now only come
     // from the search whose table is about to be printed. Running all three and
     // printing one meant a loop search's "reporting the best route it had,
     // unproved" could be announced over an exhaustively proved round trip.
-    let mut loops = if wanted.loops {
-        match (limits.min_distinct, limits.max_stops) {
-            (Some(k_min), _) => distinct::solve(&graph, &geometry, limits, k_min, watch),
-            (None, Some(k)) => bounded::solve(&graph, &geometry, limits, k, watch),
-            (None, None) => ratio::solve(&graph, &geometry, limits, watch),
-        }
-    } else {
-        Vec::new()
+    let mut loops = match (wanted.loops, &graph) {
+        (true, Some(graph)) => match (limits.min_distinct, limits.max_stops) {
+            (Some(k_min), _) => distinct::solve(graph, &geometry, limits, k_min, watch),
+            (None, Some(k)) => bounded::solve(graph, &geometry, limits, k, watch),
+            (None, None) => ratio::solve(graph, &geometry, limits, watch),
+        },
+        _ => Vec::new(),
     };
     if !wanted.round_trip {
         round_trip.clear();
     }
 
-    if graph.stats.profit_floor_applied {
+    // `BuildStats::default()` is the honest description of a build that did not
+    // happen, not a zeroed one that did.
+    let stats = graph.map_or_else(graph::BuildStats::default, |graph| graph.stats);
+    // Read from the limits, not from `stats.profit_floor_applied`. The floor is
+    // a property of the request — `single::solve` applies it too — and reading
+    // it off the graph meant a one-way search silently stopped declaring a
+    // filter it was still performing the moment the graph became optional.
+    if limits.min_profit.0 > 0 {
         for route in single.iter_mut().chain(&mut round_trip).chain(&mut loops) {
             route.add_caveat(Caveat::EdgesBelowFloorDropped);
         }
     }
-
-    let stats = graph.stats;
     let threading = thread::Threading {
         markets,
         ship,

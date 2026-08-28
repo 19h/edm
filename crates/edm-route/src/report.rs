@@ -99,6 +99,15 @@ pub enum HeuristicReason {
     SearchBudgetExhausted,
     /// Destination prices use the empirical cargo-quantity estimator.
     BulkPriceEstimate,
+    /// The instance was re-priced after the search, so the ordering is correct
+    /// for the routes that were rescored and says nothing about the rest.
+    ///
+    /// Nothing in this crate sets this either. It belongs to a caller that
+    /// ranks on one set of prices, re-reads a few markets live, and rescores —
+    /// which can only ever *demote* a route. A better route that the first
+    /// ranking buried is not discovered by rescoring, so the claim "the best of
+    /// these N" survives and the claim "the best N there are" does not.
+    RescoredAfterSearch,
 }
 
 /// What the model does not know, independently of how well it was searched.
@@ -113,6 +122,21 @@ pub enum Caveat {
     StaleListing,
     /// Destination price was estimated from cargo quantity and published demand.
     BulkPriceEstimated,
+    /// A leg buys from a fleet carrier, whose stock is a fixed pot rather than
+    /// a regenerating economy.
+    ///
+    /// The rate assumes a lap can be repeated. A station restocks; a carrier's
+    /// shelf was filled by one commander and, once bought out, stays empty. The
+    /// hop can still be the most profitable row in the table — it is simply a
+    /// hop that can be flown once.
+    CarrierSourceDoesNotRestock,
+    /// At least one price in this route was read before this run and reused
+    /// from the local cache rather than measured now.
+    ///
+    /// Distinct from [`Caveat::StaleListing`], which is unconditional and says
+    /// only that prices age. This one says *this* route was not fully measured
+    /// this run, and its absence therefore means something.
+    PricedFromCache,
     /// Jump count is `ceil(ly / range)` on a straight line; the real galaxy has
     /// gaps, neutron boosts and fuel.
     JumpGraphUnmodelled,
@@ -236,7 +260,7 @@ impl Route {
             distance_ly: geometry.leg_ly(from, to),
         };
         let first_lap_millis = geometry.startup_millis(from) + leg.millis;
-        let mut caveats = leg_caveats(std::slice::from_ref(&leg));
+        let mut caveats = leg_caveats(std::slice::from_ref(&leg), geometry.markets);
         caveats.push(Caveat::SingleHopNotRepeatable);
         caveats.sort_unstable();
         caveats.dedup();
@@ -296,7 +320,7 @@ impl Route {
         let cycle_millis: Millis = legs.iter().map(|l| l.millis).sum();
         let first_lap_millis = geometry.startup_millis(nodes[0]) + cycle_millis;
         let steady = Ratio::new(profit, cycle_millis);
-        let mut caveats = leg_caveats(&legs);
+        let mut caveats = leg_caveats(&legs, geometry.markets);
         caveats.sort_unstable();
         caveats.dedup();
         let rank = RankKey::build(geometry, &legs, steady, profit, cycle_millis, true);
@@ -338,6 +362,19 @@ impl Route {
         self.add_caveat(Caveat::BulkPriceEstimated);
     }
 
+    /// Mark this route as re-priced after the search that produced it.
+    ///
+    /// The caller ranked on one set of prices, re-read some markets live, and
+    /// rescored. That can only demote: a better route the first ranking buried
+    /// is not discovered by rescoring it was never part of. So the ordering
+    /// claim narrows to the routes that were rescored, and the optimality claim
+    /// over the instance goes away.
+    pub fn mark_rescored(&mut self) {
+        self.guarantee = Guarantee::Heuristic {
+            reason: HeuristicReason::RescoredAfterSearch,
+        };
+    }
+
     /// Adds a caveat, keeping the list sorted and unique.
     pub fn add_caveat(&mut self, caveat: Caveat) {
         if let Err(at) = self.caveats.binary_search(&caveat) {
@@ -364,7 +401,7 @@ fn bulk_guarantee(legs: &[RouteLeg]) -> Option<Guarantee> {
         })
 }
 
-fn leg_caveats(legs: &[RouteLeg]) -> Vec<Caveat> {
+fn leg_caveats(legs: &[RouteLeg], markets: &[crate::model::Market]) -> Vec<Caveat> {
     // Three of these are unconditional: they are properties of reading a market
     // over a network at all, and a report that only mentioned them sometimes
     // would read as if their absence meant something.
@@ -385,6 +422,18 @@ fn leg_caveats(legs: &[RouteLeg]) -> Vec<Caveat> {
         }
         if leg.choice.bulk_estimated {
             caveats.push(Caveat::BulkPriceEstimated);
+        }
+        // Frontier's own id space says what a fleet carrier is: a carrier's
+        // market id is `fleetCarrierId * 256 + 3_290_400_000`, so a market id
+        // that is congruent to the base on that stride is a carrier and nothing
+        // else is. No station type is needed, and none reaches this crate.
+        if markets
+            .get(leg.from as usize)
+            .is_some_and(|market| {
+                edm_core::carrier::carrier_id(market.market_id as f64).is_some()
+            })
+        {
+            caveats.push(Caveat::CarrierSourceDoesNotRestock);
         }
     }
     caveats
@@ -476,6 +525,44 @@ impl PartialOrd for RankKey {
 mod tests {
     use super::RankKey;
     use crate::fixture::{choice, geometry, market};
+
+
+    /// A carrier's stock is a fixed pot one commander filled, not an economy.
+    /// The rate assumes a repeatable lap, so a carrier *source* is exactly the
+    /// case where it is worth the least — and the caveat is what says so now
+    /// the rate is not on screen \[C39\].
+    ///
+    /// A carrier is recognised by Frontier's own id arithmetic, so no station
+    /// type is needed: 3,711,014,400 is `T1N-W2F`, measured live.
+    #[test]
+    fn a_carrier_source_says_its_stock_does_not_restock() {
+        const CARRIER: i64 = 3_711_014_400;
+        const STATION: i64 = 128_016_384;
+
+        let from_carrier = vec![
+            market(CARRIER, 0.0, &[(0, 1_000, 10_000)], &[]),
+            market(STATION, 10.0, &[], &[(0, 5_000, 10_000)]),
+        ];
+        let hop = Route::single_hop(&geometry(&from_carrier), 0, 1, choice(0, 1_000));
+        assert!(
+            hop.caveats.contains(&super::Caveat::CarrierSourceDoesNotRestock),
+            "{:?}",
+            hop.caveats
+        );
+
+        // Buying from a station and selling *to* a carrier is not the same
+        // thing: what does not regenerate is the seller's shelf.
+        let to_carrier = vec![
+            market(STATION, 0.0, &[(0, 1_000, 10_000)], &[]),
+            market(CARRIER, 10.0, &[], &[(0, 5_000, 10_000)]),
+        ];
+        let hop = Route::single_hop(&geometry(&to_carrier), 0, 1, choice(0, 1_000));
+        assert!(
+            !hop.caveats.contains(&super::Caveat::CarrierSourceDoesNotRestock),
+            "{:?}",
+            hop.caveats
+        );
+    }
     use crate::num::{Credits, Millis, Ratio};
     use crate::report::Route;
 

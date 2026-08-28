@@ -640,24 +640,41 @@ proptest! {
 /// guarantee together. The table is where it is easy to lose: the first live
 /// run of `edm route` dropped `Claim` to fit an ordinary 100-column terminal
 /// and printed twenty rates with nothing said about what was proved of any of
-/// them. Both columns declare priority zero, and this asserts it holds at every
-/// width down to the clamp floor.
+/// them.
+///
+/// The default set no longer carries a rate at all \[C39\], so there the
+/// invariant is satisfied by absence — and `Claim` still may not be dropped,
+/// because it qualifies the ordering whether or not the number is on screen.
+/// Under `--per-hour` the original pairing is what must hold.
 #[test]
 fn a_route_rate_is_never_printed_without_its_claim() {
     for available in 20..=200 {
-        let fit = render::fit(columns::ROUTE_COLUMNS, &[], available);
-        let kept: Vec<&str> = fit
-            .active
-            .iter()
-            .map(|index| columns::ROUTE_COLUMNS[*index].key)
-            .collect();
+        let kept = |set: &'static [edm_core::render::table::Column]| -> Vec<&'static str> {
+            render::fit(set, &[], available)
+                .active
+                .iter()
+                .map(|index| set[*index].key)
+                .collect()
+        };
+
+        let default = kept(columns::ROUTE_COLUMNS);
         assert!(
-            kept.contains(&"rate"),
-            "rate dropped at {available}: {kept:?}"
+            !default.contains(&"rate"),
+            "the default set must not carry a rate at {available}: {default:?}"
         );
         assert!(
-            kept.contains(&"claim"),
-            "claim dropped at {available}: {kept:?}"
+            default.contains(&"claim"),
+            "claim dropped at {available}: {default:?}"
+        );
+
+        let with_rate = kept(columns::ROUTE_COLUMNS_WITH_RATE);
+        assert!(
+            with_rate.contains(&"rate"),
+            "rate dropped at {available}: {with_rate:?}"
+        );
+        assert!(
+            with_rate.contains(&"claim"),
+            "claim dropped at {available}: {with_rate:?}"
         );
     }
 }

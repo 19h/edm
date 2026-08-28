@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc 75631b15cd52fa0fca105fef17d397c31b6b7e9e4f8b78d86dbc6b2eb837668a # shrinks to index = 36
 cc 4c68ade6877ba3f16d8db1e719c0a72ba10e0b8c0b089f49fa94d035515363c1 # shrinks to index = 36, seeds = []
+cc 25f2b05c2957cd549271064cb815cf5477cbbaa1ec9812d0ed78cf0573202843 # shrinks to index = 87, seeds = []
+cc a7918237a3d839bf4b12c57c425556eea22c7d9e43c56658d0cf704d6fadc6d5 # shrinks to index = 87

@@ -1232,6 +1232,9 @@ pub struct RouteConfig {
     /// `--verify-systems`. See [`Flag::VerifySystems`] — off by default, and
     /// the reason the default plan prices no starsystem reads at all.
     pub verify_systems: bool,
+    /// `--per-hour`: show the credits-per-hour column the ranking is ordered
+    /// by \[C39\]. Hidden by default, which buys the width for `Stock/Demand`.
+    pub rate: bool,
 
     pub dry_run: bool,
     pub json: bool,
@@ -1257,7 +1260,15 @@ pub const DEFAULT_JUMP_RANGE_LY: f64 = 30.0;
 pub const DEFAULT_MAX_STAR_DISTANCE_LS: f64 = 2_000.0;
 pub const DEFAULT_TOP: f64 = 20.0;
 pub const DEFAULT_MIN_PROFIT: f64 = 1_000.0;
-pub const DEFAULT_MAX_AGE_MINUTES: f64 = 30.0;
+/// Twenty-four hours, matching the daily BGS tick \[C38\].
+///
+/// It was thirty minutes, and thirty minutes was right when a cached price went
+/// straight into the ranking with nothing checking it. It no longer does: the
+/// markets behind the presented routes are re-read live and the routes rescored
+/// before anything is printed, so the cache decides only which candidates get
+/// *considered*, and being a day old is a far smaller error there than paying
+/// for two thousand reads to rank markets nobody will fly to.
+pub const DEFAULT_MAX_AGE_MINUTES: f64 = 1_440.0;
 pub const DEFAULT_RPS: f64 = 4.0;
 /// An hour. Long enough for a thousand markets at four a second with room for
 /// retries, and short enough that a run nobody is watching ends.
@@ -1566,6 +1577,7 @@ pub fn route_config_with_reference(
         verify_systems: cli.switch_value(Flag::VerifySystems, false)?,
         dry_run: cli.switch_value(Flag::DryRun, false)?,
         json: cli.switch_value(Flag::Json, false)?,
+        rate: cli.switch_value(Flag::PerHour, false)?,
         detail: cli.switch_value(Flag::Detail, false)?,
         verbose: cli.switch_value(Flag::Verbose, false)?,
         include_illegal: cli.switch_value(Flag::IncludeIllegal, false)?,

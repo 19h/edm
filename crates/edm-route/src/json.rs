@@ -184,6 +184,8 @@ const fn caveat(caveat: Caveat) -> &'static str {
         Caveat::DemandUnpublished => "demandUnpublished",
         Caveat::StaleListing => "staleListing",
         Caveat::BulkPriceEstimated => "bulkPriceEstimated",
+        Caveat::PricedFromCache => "pricedFromCache",
+        Caveat::CarrierSourceDoesNotRestock => "carrierSourceDoesNotRestock",
         Caveat::JumpGraphUnmodelled => "jumpGraphUnmodelled",
         Caveat::CreditCapBinds => "creditCapBinds",
         Caveat::SingleHopNotRepeatable => "singleHopNotRepeatable",

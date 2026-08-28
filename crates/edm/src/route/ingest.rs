@@ -75,32 +75,120 @@ pub fn markets_with_candidates<S: std::hash::BuildHasher>(
     let mut built = Vec::with_capacity(listings.len());
 
     for listing in listings {
+        if let Some(market) = one_market(
+            &listing,
+            stations,
+            floors,
+            candidate_demand_prices,
+            &mut commodities,
+            &mut crossing,
+        ) {
+            built.push(market);
+        }
+        // `listing` is dropped here, which is the entire reason this function
+        // takes the vector by value. See the module note: the payloads are
+        // ~2.3 GiB at five thousand markets and the graph build is about to
+        // want a gigabyte and a half of its own.
+    }
+
+    (built, commodities, crossing)
+}
+
+/// The same ingest over borrowed listings, for a caller that still needs them.
+///
+/// `--quick` does: it computes the per-commodity best-live table from the
+/// snapshots after ranking, and re-reads a handful of markets in between. It
+/// already holds every listing across that span, so borrowing costs it nothing
+/// — where the full sweep's whole memory argument is that it does not.
+pub fn markets_from_listings<S: std::hash::BuildHasher>(
+    listings: &[Listing],
+    stations: &[ArdentStation],
+    floors: &RowFloors,
+    candidate_demand_prices: &HashMap<(i64, i64), i64, S>,
+) -> (Vec<Market>, Commodities, Crossing) {
+    let mut commodities = Commodities::new();
+    let mut crossing = Crossing::default();
+    let mut built = Vec::with_capacity(listings.len());
+
+    for listing in listings {
+        if let Some(market) = one_market(
+            listing,
+            stations,
+            floors,
+            candidate_demand_prices,
+            &mut commodities,
+            &mut crossing,
+        ) {
+            built.push(market);
+        }
+    }
+
+    (built, commodities, crossing)
+}
+
+/// Rebuild one market from a freshly read listing, against an **existing**
+/// commodity interner \[C38\].
+///
+/// The interner is shared on purpose. `Commodities::intern` is append-only, so
+/// reusing it keeps every `CommodityId` stable; building a fresh one would
+/// renumber them and silently invalidate the commodity recorded on every leg of
+/// every route already found.
+///
+/// The caller must write the result back **at the same index**, because a
+/// `RouteLeg` addresses a market by its position in the vector.
+pub fn remake_market<S: std::hash::BuildHasher>(
+    listing: &Listing,
+    stations: &[ArdentStation],
+    floors: &RowFloors,
+    candidate_demand_prices: &HashMap<(i64, i64), i64, S>,
+    commodities: &mut Commodities,
+) -> Option<Market> {
+    let mut crossing = Crossing::default();
+    one_market(
+        listing,
+        stations,
+        floors,
+        candidate_demand_prices,
+        commodities,
+        &mut crossing,
+    )
+}
+
+fn one_market<S: std::hash::BuildHasher>(
+    listing: &Listing,
+    stations: &[ArdentStation],
+    floors: &RowFloors,
+    candidate_demand_prices: &HashMap<(i64, i64), i64, S>,
+    commodities: &mut Commodities,
+    crossing: &mut Crossing,
+) -> Option<Market> {
+    {
         let Some(snapshot) = listing.snapshot() else {
             crossing.unparsed += 1;
-            continue;
+            return None;
         };
         let Some(market_id) = exact(listing.market_id).filter(|id| *id > 0) else {
             crossing.invalid_identity += 1;
-            continue;
+            return None;
         };
         let Some(station) = stations.iter().find(|s| s.market_id == listing.market_id) else {
             crossing.invalid_identity += 1;
-            continue;
+            return None;
         };
         let Some(system_address) = exact(station.system_address).filter(|id| *id > 0) else {
             crossing.invalid_identity += 1;
-            continue;
+            return None;
         };
         let coords = station.coordinates;
         if !coords.x.is_finite() || !coords.y.is_finite() || !coords.z.is_finite() {
             crossing.invalid_identity += 1;
-            continue;
+            return None;
         }
         let rows: Vec<RawCommodity> = snapshot
             .commodities
             .iter()
             .filter_map(|row| {
-                let mut raw = raw_commodity(row, &mut crossing)?;
+                let mut raw = raw_commodity(row, crossing)?;
                 let Some(commodity_id) = exact(row.id) else {
                     crossing.non_integral += 1;
                     return None;
@@ -112,7 +200,7 @@ pub fn markets_with_candidates<S: std::hash::BuildHasher>(
             })
             .collect();
 
-        built.push(Market::from_rows(
+        Some(Market::from_rows(
             MarketIdentity {
                 market_id,
                 station: listing.station_name.clone(),
@@ -126,13 +214,11 @@ pub fn markets_with_candidates<S: std::hash::BuildHasher>(
                 arrival_ls: station.distance_to_arrival.unwrap_or(0.0),
             },
             &rows,
-            &mut commodities,
+            commodities,
             floors,
             &mut crossing.rows,
-        ));
+        ))
     }
-
-    (built, commodities, crossing)
 }
 
 /// How many of these listings the optimiser can actually price.

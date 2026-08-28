@@ -144,6 +144,11 @@ pub enum Flag {
     /// market's ~20 KB, and near Sol there is roughly one starport per system.
     /// What it buys is a market Ardent has never seen, which is real but rare.
     VerifySystems,
+    /// `--per-hour`: restore the credits-per-hour column \[C39\].
+    ///
+    /// The ranking is ordered by it either way; hidden, it buys the width for
+    /// `Stock/Demand`, which says whether the rate means anything.
+    PerHour,
 }
 
 /// Which flag table a parse resolves names against.
@@ -158,7 +163,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 87] = [
+    pub const ALL: [Self; 88] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -246,6 +251,7 @@ impl Flag {
         Self::Verbose,
         Self::IncludeIllegal,
         Self::VerifySystems,
+        Self::PerHour,
     ];
 
     /// How many distinct flags exist; the width of an [`crate::cli::Args`] slot
@@ -325,6 +331,12 @@ impl Flag {
             // `--carriers` already exists and means exactly what route wants.
             "includecarriers" => Self::Carriers,
             "carrieraccess" => Self::CarrierAccess,
+            // NOT `rate`: that is already a base-table alias for
+            // `--concurrency` (see `resolve`), and a route-only name is only
+            // consulted after the base table has missed — so spelling it
+            // `rate` here would be dead code, and a user typing `--rate`
+            // would silently set the worker count instead.
+            "perhour" | "creditsperhour" | "showrate" => Self::PerHour,
             _ => return None,
         })
     }
@@ -398,6 +410,7 @@ impl Flag {
             Self::Verbose => "--verbose",
             Self::IncludeIllegal => "--include-illegal",
             Self::VerifySystems => "--verify-systems",
+            Self::PerHour => "--per-hour",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the
             // canonical key, which for these is already the documented

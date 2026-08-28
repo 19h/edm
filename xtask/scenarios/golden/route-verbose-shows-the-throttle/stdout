@@ -45,12 +45,14 @@ enumerating systems within 10 Ly of Sol...
    every price below was read live from the game-internal API during this run
    2 priced listings have no underlying market timestamp; retrieval time was not substituted
 == BEST ROUND TRIPS ================================================================================
-+---+----------------------------+----------------+-----+--------------+--------+----------------+
-| # | Route                      | Cargo          |  Ly |         Cr/h |    Lap | Claim          |
-+===+============================+================+=====+==============+========+================+
-| 1 | Galileo (Sol) > Titan City | Gold > Silver  | 0.0 | 68,001,197/h | 4m 33s | proved optimal |
-+---+----------------------------+----------------+-----+--------------+--------+----------------+
-   columns hidden to fit 100 cols: Profit
++---+----------------------------+----------------+--------------+--------------+----------------+
+| # | Route                      | Cargo          |       Profit | Stock/Demand | Claim          |
++===+============================+================+==============+==============+================+
+| 1 | Galileo (Sol) > Titan City | Gold > Silver  | 5,174,400 cr |  5,000/7,000 | proved optimal |
++---+----------------------------+----------------+--------------+--------------+----------------+
+   columns hidden to fit 100 cols: Lap, Ly
+   ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
+   above it and still take longer to fly
    market observations are ageing independently; another commander may have traded them since
    distances are straight lines; the real jump graph may be longer
    permits, allegiance and landing-pad availability are not modelled

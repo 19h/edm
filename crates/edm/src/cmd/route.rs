@@ -983,43 +983,323 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
     clippy::too_many_arguments,
     reason = "orchestration boundary keeps ranking inputs explicit"
 )]
-fn rank(
-    out: &crate::out::Out,
+/// The one line a verification pass prints.
+///
+/// It names the rounds because the round count is the visible sign of the loop
+/// doing its job — a second round means the first one demoted something and
+/// promoted a route nobody had measured yet.
+fn verify_note(verified: Verified) -> String {
+    use std::fmt::Write as _;
+
+    let n = |value: usize| edm_core::js::format_integer(value as f64);
+    let mut text = format!(
+        "verified {} {} live over {} {}",
+        n(verified.markets),
+        if verified.markets == 1 { "market" } else { "markets" },
+        n(verified.rounds),
+        if verified.rounds == 1 { "round" } else { "rounds" },
+    );
+    if verified.dropped > 0 {
+        let _ = write!(
+            text,
+            "; {} {} did not survive their real prices",
+            n(verified.dropped),
+            if verified.dropped == 1 { "route" } else { "routes" },
+        );
+    }
+    if verified.incomplete {
+        text.push_str("; the round cap stopped it, so some routes below were not re-read");
+    }
+    text
+}
+
+/// What the verification pass cost and what it changed \[C38\].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Verified {
+    pub rounds: usize,
+    /// Markets re-read live during verification.
+    pub markets: usize,
+    /// Routes that stopped being routes once their real prices arrived.
+    pub dropped: usize,
+    /// True when the loop stopped on its round cap rather than on agreement,
+    /// so the presented list may still contain a route nobody measured.
+    pub incomplete: bool,
+}
+
+/// How many verify rounds a run may take.
+///
+/// Simulated over a 700-market region, a fully verified top-20 converged in
+/// four rounds. Eight is that with room, and it is a backstop rather than a
+/// budget: `--max-requests` and `--deadline` are the real bounds, and a run
+/// that hits this cap says so rather than presenting an unverified route as a
+/// verified one.
+const MAX_VERIFY_ROUNDS: usize = 8;
+
+/// Re-read the markets behind the ranked routes, re-price, and repeat until the
+/// presented list is one that was actually measured \[C38\].
+///
+/// **Why this exists.** Ranking from cached or index prices is biased, and not
+/// mildly: measured over a 21-day pair of cache generations, the best hop per
+/// commodity chosen on the old prices was worse than predicted **90.5%** of the
+/// time, realising a median of 53% of the promised spread. That is winner's
+/// curse — the ranker picks extremes, and extremes are disproportionately the
+/// stale-optimistic errors. It shrinks with a shorter cache lifetime and never
+/// disappears, because the maximum of N noisy estimates is biased upward at any
+/// noise level.
+///
+/// **Why it loops.** Re-pricing the top can demote a route, which promotes one
+/// that was never measured. The loop closes when every route in the presented
+/// list has been read live this run. It terminates because the live set only
+/// grows and is finite; the same simulation converged in four rounds having
+/// read 6.7% of the region.
+///
+/// **What it cannot do.** Rescoring only demotes. A route the first ranking
+/// buried is never discovered here, so the claim is "these routes, correctly
+/// ordered at today's prices", which is what `Route::mark_rescored` records.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a verify round needs the transport, the pacer, the instance it is re-pricing, the stations behind it, and the live set it is closing over"
+)]
+async fn verify_ranked<H, C, E, F, T>(
+    cx: &acquire::Cx<'_, H, C, E, F, T>,
+    pacer: &Pacer<'_, C, T, E>,
     config: &RouteConfig,
-    acquired: acquire::Acquired,
+    ranked: &mut Ranked,
     stations: &[ardent::ArdentStation],
     candidate_demand_prices: &HashMap<(i64, i64), i64>,
-    coverage: &RouteCoverage,
-    opportunities: SpecialOpportunities,
-    quick: Option<&QuickProvenance>,
-    carrier_access: Option<access::Report>,
+    live: &mut std::collections::HashSet<u64>,
+    note: &dyn Fn(String),
+) -> (Verified, Vec<acquire::Listing>)
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+{
+    let mut report = Verified::default();
+    let mut fresh: Vec<acquire::Listing> = Vec::new();
+    let floors = ingest::floors(config);
+
+    for _ in 0..MAX_VERIFY_ROUNDS {
+        let stale: Vec<f64> = ranked
+            .market_ids()
+            .into_iter()
+            .filter(|id| !live.contains(&id.to_bits()))
+            .collect();
+        if stale.is_empty() {
+            return (report, fresh);
+        }
+
+        let jobs: Vec<crate::route::pool::Job> = stale
+            .iter()
+            .filter_map(|id| {
+                let station = stations.iter().find(|s| s.market_id == *id)?;
+                Some(crate::route::pool::Job::Market {
+                    market_id: *id,
+                    station: station.station_name.clone(),
+                    system: station.system_name.clone(),
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return (report, fresh);
+        }
+
+        report.rounds += 1;
+        note(format!(
+            "verifying {} {} behind the best routes (round {})...",
+            edm_core::js::format_integer(jobs.len() as f64),
+            if jobs.len() == 1 { "market" } else { "markets" },
+            report.rounds,
+        ));
+
+        let acquired = acquire::sweep(
+            cx,
+            pacer,
+            acquire::Prepared {
+                cached: Vec::new(),
+                to_poll: jobs,
+                hits: crate::route::cache::Hits::default(),
+            },
+            &[],
+        )
+        .await;
+
+        // Patch in place. The index is the identity as far as every route is
+        // concerned, so a market is replaced where it stands or not at all.
+        for listing in &acquired.listings {
+            live.insert(listing.market_id.to_bits());
+            let Some(slot) = ranked
+                .markets
+                .iter()
+                .position(|market| market.market_id as f64 == listing.market_id)
+            else {
+                continue;
+            };
+            if let Some(rebuilt) = ingest::remake_market(
+                listing,
+                stations,
+                &floors,
+                candidate_demand_prices,
+                &mut ranked.commodities,
+            ) {
+                ranked.markets[slot] = rebuilt;
+            }
+        }
+        report.markets += acquired.listings.len();
+        fresh.extend(acquired.listings.iter().cloned());
+
+        let before = ranked.routes().len();
+        ranked.rescore(config);
+        report.dropped += before.saturating_sub(ranked.routes().len());
+
+        // Nothing was read, so nothing will change on the next pass either.
+        if acquired.listings.is_empty() {
+            break;
+        }
+    }
+
+    report.incomplete = ranked
+        .market_ids()
+        .iter()
+        .any(|id| !live.contains(&id.to_bits()));
+    (report, fresh)
+}
+
+/// A solved instance, kept whole so the caller can re-price it before it is
+/// rendered \[C38\].
+///
+/// `rank` used to ingest, solve and print in one pass and drop everything on
+/// the way out. Splitting it is what makes the verify pass possible: the market
+/// vector has to survive, because every `RouteLeg` addresses a market by its
+/// index into it.
+pub(super) struct Ranked {
+    pub solution: edm_route::Solution,
+    pub markets: Vec<edm_route::model::Market>,
+    pub commodities: edm_route::model::Commodities,
+    pub crossing: ingest::Crossing,
+    pub kind: RouteKind,
+}
+
+impl std::fmt::Debug for Ranked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ranked")
+            .field("markets", &self.markets.len())
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Ranked {
+    /// The routes of the shape that was asked for.
+    pub(super) fn routes(&self) -> &[edm_route::report::Route] {
+        match self.kind {
+            RouteKind::SingleHop => &self.solution.single,
+            RouteKind::RoundTrip => &self.solution.round_trip,
+            RouteKind::Loop { .. } => &self.solution.loops,
+        }
+    }
+
+    fn routes_mut(&mut self) -> &mut Vec<edm_route::report::Route> {
+        match self.kind {
+            RouteKind::SingleHop => &mut self.solution.single,
+            RouteKind::RoundTrip => &mut self.solution.round_trip,
+            RouteKind::Loop { .. } => &mut self.solution.loops,
+        }
+    }
+
+    /// Every distinct market id the current routes touch, both ends of every
+    /// leg.
+    ///
+    /// `RankKey::stations` is built from each leg's `from` only, so for a
+    /// single hop it names the seller and not the buyer. Walking the legs is
+    /// the form that is correct for all three shapes.
+    pub(super) fn market_ids(&self) -> Vec<f64> {
+        let mut ids: Vec<f64> = Vec::new();
+        for route in self.routes() {
+            for leg in &route.legs {
+                for index in [leg.from, leg.to] {
+                    if let Some(market) = self.markets.get(index as usize) {
+                        let id = market.market_id as f64;
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        ids
+    }
+
+    /// Re-price the current routes against the market vector as it now stands.
+    pub(super) fn rescore(&mut self, config: &RouteConfig) {
+        let (time, ship, limits) = (time_model(config), ship(config), limits(config));
+        let routes = std::mem::take(self.routes_mut());
+        *self.routes_mut() = edm_route::rescore::rescore(&self.markets, time, &ship, &limits, routes);
+    }
+}
+
+/// Ingest and solve over borrowed listings, for a caller that still needs
+/// them afterwards.
+pub(super) fn solve_ranked_from(
+    config: &RouteConfig,
+    listings: &[acquire::Listing],
+    stations: &[ardent::ArdentStation],
+    candidate_demand_prices: &HashMap<(i64, i64), i64>,
     watch: edm_route::watch::Watch<'_>,
-) {
-    // By value: `ingest::markets` drops each payload as it builds its `Market`,
-    // and at five thousand markets those payloads are ~2.3 GiB that would
-    // otherwise stay resident through the graph build.
-    let (markets, commodities, crossing) = ingest::markets_with_candidates(
-        acquired.listings,
+) -> Ranked {
+    let (markets, commodities, crossing) = ingest::markets_from_listings(
+        listings,
         stations,
         &ingest::floors(config),
         candidate_demand_prices,
     );
-    // Not under `--json`: a diagnostic in the middle of the stream is exactly
-    // what R76 does to the ported commands, and C28 says route's document is
-    // one well-formed document or nothing.
-    if crossing.non_integral > 0 && !config.json {
-        out.line(&format!(
-            "{} commodity rows carried a non-integral price or quantity and were skipped",
-            edm_core::js::format_integer(f64::from(crossing.non_integral))
-        ));
-    }
-    if crossing.invalid_identity > 0 && !config.json {
-        out.line(&format!(
-            "{} listings lacked a stable market/system identity or finite coordinates and were skipped",
-            edm_core::js::format_integer(f64::from(crossing.invalid_identity))
-        ));
-    }
+    finish_solve(
+        config,
+        markets,
+        commodities,
+        crossing,
+        !candidate_demand_prices.is_empty(),
+        watch,
+    )
+}
 
+/// Ingest and solve. Prints nothing.
+fn solve_ranked(
+    config: &RouteConfig,
+    listings: Vec<acquire::Listing>,
+    stations: &[ardent::ArdentStation],
+    candidate_demand_prices: &HashMap<(i64, i64), i64>,
+    watch: edm_route::watch::Watch<'_>,
+) -> Ranked {
+    // By value: `ingest::markets` drops each payload as it builds its `Market`,
+    // and at five thousand markets those payloads are ~2.3 GiB that would
+    // otherwise stay resident through the graph build.
+    let (markets, commodities, crossing) = ingest::markets_with_candidates(
+        listings,
+        stations,
+        &ingest::floors(config),
+        candidate_demand_prices,
+    );
+    finish_solve(
+        config,
+        markets,
+        commodities,
+        crossing,
+        !candidate_demand_prices.is_empty(),
+        watch,
+    )
+}
+
+fn finish_solve(
+    config: &RouteConfig,
+    markets: Vec<edm_route::model::Market>,
+    commodities: edm_route::model::Commodities,
+    crossing: ingest::Crossing,
+    bulk_estimated: bool,
+    watch: edm_route::watch::Watch<'_>,
+) -> Ranked {
     // Only the shape that was asked for — and it is *searched* for, not merely
     // printed. `solve` used to run all three every time, so a plain
     // `edm route Sol --radius 100`, whose default shape is a round trip, spent
@@ -1038,7 +1318,7 @@ fn rank(
         edm_route::Wanted::only(kind),
         watch,
     );
-    if !candidate_demand_prices.is_empty() {
+    if bulk_estimated {
         for route in solution
             .single
             .iter_mut()
@@ -1048,42 +1328,114 @@ fn rank(
             route.mark_bulk_price_estimated();
         }
     }
-    let routes = match kind {
-        RouteKind::SingleHop => &solution.single,
-        RouteKind::RoundTrip => &solution.round_trip,
-        RouteKind::Loop { .. } => &solution.loops,
-    };
+    Ranked {
+        solution,
+        markets,
+        commodities,
+        crossing,
+        kind,
+    }
+}
 
+/// Print a solved instance.
+fn render_ranked(
+    out: &crate::out::Out,
+    config: &RouteConfig,
+    ranked: &Ranked,
+    coverage: &RouteCoverage,
+    opportunities: SpecialOpportunities,
+    quick: Option<&QuickProvenance>,
+    carrier_access: Option<access::Report>,
+) {
+    let crossing = &ranked.crossing;
+    // Not under `--json`: a diagnostic in the middle of the stream is exactly
+    // what R76 does to the ported commands, and C28 says route's document is
+    // one well-formed document or nothing.
+    if crossing.non_integral > 0 && !config.json {
+        out.line(&format!(
+            "{} commodity rows carried a non-integral price or quantity and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.non_integral))
+        ));
+    }
+    if crossing.invalid_identity > 0 && !config.json {
+        out.line(&format!(
+            "{} listings lacked a stable market/system identity or finite coordinates and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.invalid_identity))
+        ));
+    }
+
+    let routes = ranked.routes();
     if config.json {
         // All three keys are always present, but only the requested one is
         // populated — a key that appears and disappears with a flag is the
         // harder thing to consume, and searching the other two would cost
         // minutes for output nobody asked for.
         let document = edm_route::json::document(
-            &solution,
-            &markets,
-            &commodities,
-            coverage_json(coverage, &crossing, opportunities, quick, carrier_access),
+            &ranked.solution,
+            &ranked.markets,
+            &ranked.commodities,
+            coverage_json(coverage, crossing, opportunities, quick, carrier_access),
         );
         out.document(&document.stringify(2));
         return;
     }
 
-    out.emit(&view::ranking(kind, routes, &markets, &commodities));
+    out.emit(&view::ranking_with(
+        ranked.kind,
+        routes,
+        &ranked.markets,
+        &ranked.commodities,
+        config.rate,
+    ));
     // The ranking names stations; `edm trade` wants a market id. Without this
     // the answer stops one step short of being usable.
     out.emit(&view::trade_commands(
         routes,
-        &markets,
-        &commodities,
+        &ranked.markets,
+        &ranked.commodities,
         config.cargo.map(|tons| tons as i64),
     ));
 
     if config.detail {
         for route in routes {
-            out.emit(&view::legs(route, &markets, &commodities));
+            out.emit(&view::legs(route, &ranked.markets, &ranked.commodities));
         }
     }
+}
+
+/// Ingest, solve and print, with no verification pass in between.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the composition of solve_ranked and render_ranked needs both argument sets"
+)]
+fn rank(
+    out: &crate::out::Out,
+    config: &RouteConfig,
+    acquired: acquire::Acquired,
+    stations: &[ardent::ArdentStation],
+    candidate_demand_prices: &HashMap<(i64, i64), i64>,
+    coverage: &RouteCoverage,
+    opportunities: SpecialOpportunities,
+    quick: Option<&QuickProvenance>,
+    carrier_access: Option<access::Report>,
+    watch: edm_route::watch::Watch<'_>,
+) {
+    let ranked = solve_ranked(
+        config,
+        acquired.listings,
+        stations,
+        candidate_demand_prices,
+        watch,
+    );
+    render_ranked(
+        out,
+        config,
+        &ranked,
+        coverage,
+        opportunities,
+        quick,
+        carrier_access,
+    );
 }
 
 /// The coverage block, as JSON.

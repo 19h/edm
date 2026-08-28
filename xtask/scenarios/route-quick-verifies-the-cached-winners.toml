@@ -1,0 +1,82 @@
+# route-quick-verifies-the-cached-winners
+why = "C38, and the measurement that forced it. `--quick` used to poll every nominated market and never read the price cache — `Cache::get` was handed a refresh-mode cache, so the `--max-age` passed one line above it was dead code. Ranking from cache instead is only safe because the winners are then re-read: measured over a 21-day pair of cache generations, the best hop per commodity chosen on stale prices was worse than predicted 90.5% of the time and realised a median 53% of the promised spread, because a ranker picks extremes and extremes are disproportionately the stale-optimistic errors. Here the run is served entirely from a warm cache (`run-twice`, so the second pass finds the first pass's writes) and the two markets behind the winning hop are re-read live and the routes rescored. The assertions that matter: the sweep sends nothing, the verify pass sends exactly two, and the coverage block says the prices were read live — because after verification they were."
+argv = ["route", "Sol", "--radius", "20", "--quick", "1", "--item", "gold", "--qty", "100", "--cargo", "784", "--shape", "one-way", "--rps", "8", "--concurrency", "1", "--max-age", "1440"]
+oracle = "none"
+run-twice = true
+expect-frontier-requests = 2
+
+[env]
+EDM_JITTER = "0"
+
+[[route]]
+path = "/v2/system/name/Sol"
+
+[[route.reply]]
+status = 200
+payload-file = "payloads/ardent-sol.json"
+headers = [["Content-Type", "application/json"]]
+
+[[route]]
+path = "/v2/commodities"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[{"commodityName":"gold"}]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/exports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009403,"stationName":"Pricier Dock","stationType":"Orbis","distanceToArrival":150,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"buyPrice":9400,"stock":6000,"stockBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold/nearby/imports"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[
+ {"commodityName":"gold","marketId":3229009405,"stationName":"Modest Reach","stationType":"Coriolis","distanceToArrival":30,"maxLandingPadSize":3,"systemAddress":7267755828641,"systemName":"Alpha Centauri","systemX":3.03125,"systemY":-0.09375,"systemZ":3.15625,"sellPrice":19000,"demand":9000,"demandBracket":3}
+]
+"""
+
+[[route]]
+path = "/v2/system/name/Sol/commodity/name/gold"
+
+[[route.reply]]
+status = 200
+headers = [["Content-Type", "application/json"]]
+payload = """
+[]
+"""
+
+# Two replies each: the first run's sweep fills the cache, the second run's
+# verify pass re-reads the same two markets because they are what the winning
+# hop is made of.
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009403&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-source.json"
+
+[[route]]
+path = "/2.0/elite/market/list"
+envelope = "marketId=3229009405&"
+
+[[route.reply]]
+status = 200
+encode = "game_api"
+payload-file = "payloads/market-gold-sink.json"

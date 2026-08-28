@@ -41,28 +41,67 @@ pub const ROUTE_FIELD_COLUMNS: &[Column] = &[
 /// cell was elided mid-system-name and the commodity appeared only under
 /// `--detail` — which made twenty proved-optimal routes unusable.
 ///
-/// **`Rate` and `Claim` both have priority zero, so neither is ever dropped.**
-/// That is the same rule `Route::rate` enforces in Rust — the number is only
-/// reachable together with the guarantee that qualifies it — carried into the
-/// table, where it is otherwise very easy to lose. The first live run of this
-/// command dropped `Claim` to fit an ordinary 100-column terminal and printed
-/// twenty rates with no statement of what was proved about any of them, which
-/// is the failure this arrangement exists to prevent. `Cr/h lap 1` goes first
-/// because it is the same quantity measured differently.
+/// **`Claim` has priority zero and is never dropped.** That is the rule
+/// `Route::rate` enforces in Rust — a rate is only reachable together with the
+/// guarantee that qualifies it — carried into the table, where it is otherwise
+/// very easy to lose. The first live run of this command dropped `Claim` to fit
+/// an ordinary 100-column terminal and printed twenty rates with no statement
+/// of what was proved about any of them, which is the failure this arrangement
+/// exists to prevent.
+///
+/// **`Cr/h` is not shown by default \[C39\].** The routes are still *ordered*
+/// by it, and `--per-hour` puts it back. It was hidden because it is the column
+/// that most often means nothing: it annualises a hop whose supply is a fixed
+/// pot. A fleet carrier's stock was put there by one commander and does not
+/// regenerate, so "credits per hour" describes a lap that can be flown exactly
+/// once — and carriers are frequently the most profitable row in the table. The
+/// number is still in `--json`, and hiding it buys the width for `Stock/Demand`,
+/// which is the pair that says where the profit actually came from and whether
+/// it will be there twice.
+///
+/// Because the ordering is by a column that is no longer displayed, the table
+/// says so in a note. `Profit` and `Lap` do not reconstruct it: the rate of a
+/// single hop is measured over the first lap, including the approach, while
+/// `Lap` is the cycle.
 pub const ROUTE_COLUMNS: &[Column] = &[
     Column::new("rank", "#").right(),
     Column::new("route", "Route").min_width(24),
     Column::new("cargo", "Cargo").min_width(14),
+    // What the seller has against what the buyer will take, for the leg that
+    // binds the route. The pair is the answer to "why is the profit this and
+    // not more", and it is what tells a 499-ton carrier hop from a 150,000-ton
+    // station one that reads identically in every other column.
+    // `Profit` is priority zero now that `Cr/h` is gone. It used to be the
+    // third thing dropped, which was right while the rate was the headline; the
+    // headline is the profit, and a ranking that fits in a hundred columns by
+    // discarding the amount of money involved is not a ranking.
+    Column::new("profit", "Profit").right(),
+    Column::new("quantity", "Stock/Demand").right().priority(1),
     // Total distance flown per lap. A round trip's is the out-and-back, which
     // is what you actually fly; `--detail` and `--json` carry it per leg.
-    Column::new("distance", "Ly").right().priority(1),
-    Column::new("profit", "Profit").right().priority(3),
-    Column::new("rate", "Cr/h").right(),
+    Column::new("distance", "Ly").right().priority(2),
     // No `Cr/h lap 1` column. It is the same quantity measured over the
     // approach as well, useful and secondary, and at any real terminal width it
     // was thirteen characters taken from `Cargo` — which is the thing a reader
     // cannot act without. It is in `--json`.
-    Column::new("time", "Lap").right().priority(2),
+    Column::new("time", "Lap").right().priority(3),
+    Column::new("claim", "Claim"),
+];
+
+/// The same table with the rate restored, for `--per-hour` \[C39\].
+///
+/// A separate constant rather than a runtime filter because a `Column` set is a
+/// `&'static [Column]` everywhere else in the renderer, and the two orderings
+/// are worth reading side by side.
+pub const ROUTE_COLUMNS_WITH_RATE: &[Column] = &[
+    Column::new("rank", "#").right(),
+    Column::new("route", "Route").min_width(24),
+    Column::new("cargo", "Cargo").min_width(14),
+    Column::new("profit", "Profit").right(),
+    Column::new("quantity", "Stock/Demand").right().priority(1),
+    Column::new("distance", "Ly").right().priority(2),
+    Column::new("rate", "Cr/h").right(),
+    Column::new("time", "Lap").right().priority(3),
     Column::new("claim", "Claim"),
 ];
 

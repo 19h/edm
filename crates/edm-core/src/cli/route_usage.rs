@@ -117,7 +117,13 @@ Spending
                            loop search, which gets whatever the sweep did not
                            spend. A search stopped by it reports the best route
                            it found and says it did not prove it
-  --max-age <minutes>      reuse cached prices younger than this, default {max_age}
+  --max-age <minutes>      rank from cached prices younger than this, default
+                           {max_age}. It bounds only which markets are
+                           *considered*: the markets behind the routes actually
+                           printed are re-read live and the ranking redone, so a
+                           day-old cache costs recall, never accuracy. Fleet
+                           carriers are never served from it at any age — their
+                           quantities drain in a way a station's demand does not
   --no-cache               ignore the cache entirely   --refresh   re-poll everything
   --cache-dir <path>       default $XDG_CACHE_HOME/edm/route
   --ardent-queries <n>     enumeration budget, default {ardent}
@@ -146,6 +152,12 @@ Output
   it says where it has got to and what the best rate so far is, once it has been
   working for more than a couple of seconds.
   --json                   one document, for piping; silences the progress lines
+  --per-hour               show the credits-per-hour column. The ranking is
+                           ordered by it either way; it is hidden so the table
+                           has room for Stock/Demand, and because it is the
+                           column that most often means nothing — it annualises
+                           a lap whose supply may be a fleet carrier's fixed
+                           pot, which does not restock
   --detail                 expand every leg of every route
   --verbose, -v            say what the pacer is doing too: throttles, retries
                            and the delay each one waited, rate changes, and the

@@ -1,0 +1,72 @@
+resolving "Sol" through Ardent for quick lookup...
+scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 1 best hop of at least 100 t to buy and 100 published t of demand, for 1 commodity...
+== QUICK LOOKUP  2 hop-ranked candidates (up to 1 best hop per commodity; 100 t seller / 100 t published-buyer minimum) 
++------------+--------+--------+-------+------------+--------------+----------------+
+| Commodity  | Market |  Price |  Tons |  Market ID | Station      | System         |
++============+========+========+=======+============+==============+================+
+| gold       | sells  |  9,400 | 6,000 | 3229009403 | Pricier Dock | Alpha Centauri |
+| gold       | buys   | 19,000 | 9,000 | 3229009405 | Modest Reach | Alpha Centauri |
++------------+--------+--------+-------+------------+--------------+----------------+
+   Ardent returns a price-index prefix, not a complete regional survey; hops are scored by estimated
+   credits per hour (spread × cargo / travel time) after local station filters, and Ardent's
+   1,000-row per-side page cap still applies before that
+== ROUTE PLAN ======================================================================================
++----------------------------+----------------------------------------------------+
+| Field                      | Value                                              |
++============================+====================================================+
+| reference                  | Sol                                                |
+| radius                     | 20 Ly price index (3 Ardent queries; not regional) |
+| systems                    | not enumerated (commodity price index)             |
+| price rows considered      | 2 (Ardent)                                         |
+| markets to poll            | 0                                                  |
+| cached and still fresh     | 2                                                  |
+| game-internal API requests | 0  (one per market)                                |
+| estimated transfer         | 0-0 KB  (prior: 500 KB/system, 20 KB/market)       |
+| pacing                     | 8 req/s                                            |
+| estimated wall clock       | 0s                                                 |
+| ceiling                    | 0 of 2,000   (--max-requests to raise)             |
++----------------------------+----------------------------------------------------+
+[1/2] Pricier Dock (Alpha Centauri)  HTTP -  2 tradable
+[2/2] Modest Reach (Alpha Centauri)  HTTP -  2 tradable
+verifying 2 markets behind the best routes (round 1)...
+verified 2 markets live over 1 round
+== ROUTE COVERAGE ==================================================================================
++----------------+--------------+
+| Field          | Value        |
++================+==============+
+| markets polled | 2 of 2       |
+| markets priced | 2            |
+| requests sent  | 2            |
+| elapsed        | <ELAPSED>    |
++----------------+--------------+
+   every price below was read live from the game-internal API during this run
+   2 priced listings have no underlying market timestamp; retrieval time was not substituted
+== BEST LIVE PRICES  where to buy and sell each commodity, read live this run ======================
++------------+--------+--------+-------+--------+--------------+----------------+-----+
+| Commodity  | Market |  Price |  Tons |  Index | Station      | System         |  Ly |
++============+========+========+=======+========+==============+================+=====+
+| Gold       | sells  |  9,000 | 5,000 |  9,400 | Pricier Dock | Alpha Centauri | 4.4 |
+| Gold       | buys   | 11,500 | 7,000 | 19,000 | Modest Reach | Alpha Centauri | 4.4 |
++------------+--------+--------+-------+--------+--------------+----------------+-----+
+   best among the markets this run polled, which Ardent's price index chose: a market its index does
+   not carry cannot appear here, however good its price
+== BEST SINGLE HOPS ================================================================================
++---+------------------------------------+----------------+--------------+-------------------------+
+| # | Route                              | Cargo          |       Profit | Claim                   |
++===+====================================+================+==============+=========================+
+| 1 | Pricier Dock (Alpha Centauri) > M~ | Gold           | 1,960,000 cr | verified, best of these |
++---+------------------------------------+----------------+--------------+-------------------------+
+   columns hidden to fit 100 cols: Lap, Ly, Stock/Demand
+   ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
+   above it and still take longer to fly
+   market observations are ageing independently; another commander may have traded them since
+   distances are straight lines; the real jump graph may be longer
+   a single hop has no steady rate: flying it repeatedly means returning empty
+   permits, allegiance and landing-pad availability are not modelled
+   times come from a calibrated model, not from your ship
+== TRADE COMMANDS ==================================================================================
+   run each where it says; --top controls how many routes are listed here
+
+  1  Pricier Dock (Alpha Centauri) > Modest Reach
+       at Pricier Dock                 edm trade --market-id 3229009403 --type buy --item Gold --fill --cargo 784
+       at Modest Reach                 edm trade --market-id 3229009405 --type sell --item Gold --qty 784

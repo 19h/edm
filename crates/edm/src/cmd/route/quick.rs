@@ -32,8 +32,8 @@ use crate::cmd::{App, CmdResult};
 use crate::net::HttpTransport;
 use crate::ports::{Clock, Entropy, Fs, Timer};
 use crate::route::access::{self, AccessIndex};
-use crate::route::acquire::{self, Prepared};
-use crate::route::cache::{Cache, Hits};
+use crate::route::acquire;
+use crate::route::cache::Cache;
 use crate::route::pacer::Pacer;
 use crate::route::pool::Job;
 use crate::route::relay::Relayed;
@@ -326,6 +326,27 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             .collect(),
         best_live: Vec::new(),
     };
+    // Free, and before the gate, because the cache decides what the sweep
+    // actually costs. `acquire::prepare` is file reads only.
+    //
+    // Two caches, deliberately. `read_cache` honours `--max-age` and is what
+    // seeds the ranking; `write_cache` is refresh-mode and is what the sweep
+    // and the verify pass poll through, because a market re-read seconds ago
+    // must not come back out of the entry that read just wrote \[C38\].
+    let read_cache = super::cache_for(app, config);
+    let write_cache = Cache::new(
+        read_cache.root().to_path_buf(),
+        config.max_age_minutes,
+        config.cache,
+        true,
+    );
+    let prepared = acquire::prepare(
+        &read_cache,
+        &app.ports.fs,
+        &stations,
+        app.ports.clock.now_ms(),
+    );
+
     let survey = super::Survey {
         complete_to_ly: config.radius_ly,
         price_index: true,
@@ -341,7 +362,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             systems_to_read: 0,
             stations_known: considered,
             markets_to_poll: selected_markets,
-            cached_fresh: 0,
+            cached_fresh: prepared.hits.fresh,
         },
         exclusions,
     };
@@ -350,21 +371,9 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         return Ok(());
     }
 
-    // A quick lookup promises live verification, not an answer pulled from a
-    // previous route run. The normal cache is still written after a successful
-    // read, which warms a later full survey; `--no-cache` still disables even
-    // that write. This also means `--eddn` always has a fresh observation to
-    // publish rather than silently suppressing a requested relay behind a hit.
-    let configured_cache = super::cache_for(app, config);
-    let cache = Cache::new(
-        configured_cache.root().to_path_buf(),
-        config.max_age_minutes,
-        config.cache,
-        true,
-    );
     let started_ms = app.ports.clock.now_ms();
 
-    let relayed_log = Relayed::new(cache.root(), config.eddn_max_age_minutes);
+    let relayed_log = Relayed::new(write_cache.root(), config.eddn_max_age_minutes);
     let eddn_options = config
         .eddn
         .then(|| edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials))
@@ -422,7 +431,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         nonce_override: stamp_overrides.nonce,
         frontier_time_override: stamp_overrides.frontier_time,
         request_time_override: stamp_overrides.request_time,
-        cache: &cache,
+        cache: &write_cache,
         relayed: &relay_tally,
         eddn: eddn.as_ref(),
         workers: config.workers as usize,
@@ -433,22 +442,108 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         trace: (config.verbose && !config.quiet).then_some(&trace as crate::route::pool::Trace<'_>),
         total,
     };
-    let prepared = Prepared {
-        cached: Vec::new(),
-        to_poll: stations
-            .iter()
-            .map(|station| Job::Market {
-                market_id: station.market_id,
-                station: station.station_name.clone(),
-                system: station.system_name.clone(),
-            })
-            .collect(),
-        hits: Hits::default(),
-    };
+    // The price index selected the candidates, but only live listings may enter
+    // the graph. Keep both directions on the same quantity floor and restrict
+    // ingest to the explicitly named commodities.
+    let mut rank_config = config.clone();
+    rank_config.min_supply = seller_minimum;
+    rank_config.min_demand = buyer_minimum;
+    // `ingest::floors` reads this to decide which live rows may be ranked, and
+    // it compares against the payload's own symbol. The typed spelling would
+    // reject every row of a commodity whose display name is not its id.
+    if let Some(settings) = rank_config.quick.as_mut() {
+        settings.commodities.clone_from(&wanted);
+    }
+    let deadline_ms = started_ms + config.deadline_seconds * 1_000.0;
+    let clock = &app.ports.clock;
+    let expired = || clock.now_ms() >= deadline_ms;
+    let watch = edm_route::watch::Watch::unlimited().until(&expired);
+
     let acquired = acquire::sweep(&cx, &pacer, prepared, &[]).await;
+    // The verify rounds re-use the same transport, pacer and write cache, but
+    // not the progress reporter: its `[k/N]` counter belongs to the sweep, and
+    // a second pass restarting it at 1 would read as the sweep beginning again.
+    // The rounds announce themselves instead.
+    let verify_cx = acquire::Cx {
+        report: None,
+        trace: None,
+        ..cx
+    };
+
+    let acquire::Acquired {
+        mut listings,
+        unreached: acquired_unreached,
+        cache: acquired_cache,
+        tally: acquired_tally,
+        relayed: acquired_relayed,
+    } = acquired;
+
+    // Which markets this run actually measured. Everything else came out of the
+    // cache and is a candidate for verification.
+    let mut live: std::collections::HashSet<u64> = listings
+        .iter()
+        .filter(|listing| !listing.from_cache)
+        .map(|listing| listing.market_id.to_bits())
+        .collect();
+
+    let no_candidates = std::collections::HashMap::new();
+    let mut ranked = super::solve_ranked_from(
+        &rank_config,
+        &listings,
+        &stations,
+        &no_candidates,
+        watch,
+    );
+
+    // Re-read the markets behind the ranked routes until the presented list is
+    // one that was measured rather than estimated \[C38\]. A cold cache makes
+    // this a no-op: everything is already live.
+    let (verified, fresh) = super::verify_ranked(
+        &verify_cx,
+        &pacer,
+        &rank_config,
+        &mut ranked,
+        &stations,
+        &no_candidates,
+        &mut live,
+        &note,
+    )
+    .await;
+    // Fold the fresh reads back over the seed listings, so the coverage block
+    // and the per-commodity table below describe the same prices the routes
+    // were finally ranked on.
+    let verified_markets = fresh.len();
+    for listing in fresh {
+        match listings
+            .iter_mut()
+            .find(|held| held.market_id == listing.market_id)
+        {
+            Some(held) => *held = listing,
+            None => listings.push(listing),
+        }
+    }
+    if verified.rounds > 0 {
+        note(super::verify_note(verified));
+    }
+
+    let acquired = acquire::Acquired {
+        listings,
+        unreached: acquired_unreached,
+        // A market read live during verification is no longer a cache hit, and
+        // the coverage note keys its "came from the cache" sentence on exactly
+        // this number.
+        cache: crate::route::cache::Hits {
+            fresh: acquired_cache.fresh.saturating_sub(verified_markets),
+            ..acquired_cache
+        },
+        tally: acquired_tally,
+        relayed: acquired_relayed,
+    };
+
     let at_ms = app.ports.clock.now_ms();
     let coverage = coverage_of(
         &acquired,
+        verified_markets,
         selected_markets,
         config.eddn,
         pacer.spent(),
@@ -478,34 +573,15 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     }
     provenance.best_live = best;
 
-    // The price index selected the candidates, but only the live listings may
-    // enter the graph. Keep both directions on the same quantity floor and
-    // restrict ingest to the explicitly named commodities.
-    let mut rank_config = config.clone();
-    rank_config.min_supply = seller_minimum;
-    rank_config.min_demand = buyer_minimum;
-    // `ingest::floors` reads this to decide which live rows may be ranked, and
-    // it compares against the payload's own symbol. The typed spelling would
-    // reject every row of a commodity whose display name is not its id.
-    if let Some(settings) = rank_config.quick.as_mut() {
-        settings.commodities.clone_from(&wanted);
-    }
     let unreached = !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
-    let deadline_ms = started_ms + config.deadline_seconds * 1_000.0;
-    let clock = &app.ports.clock;
-    let expired = || clock.now_ms() >= deadline_ms;
-    let watch = edm_route::watch::Watch::unlimited().until(&expired);
-    super::rank(
+    super::render_ranked(
         out,
         &rank_config,
-        acquired,
-        &stations,
-        &std::collections::HashMap::new(),
+        &ranked,
         &coverage,
         super::SpecialOpportunities::default(),
         Some(&provenance),
         docking_report,
-        watch,
     );
 
     // A 410 is a reached answer, exactly as it is in a full survey. A failed
@@ -543,6 +619,9 @@ pub(crate) struct BestLive {
     pub station: String,
     pub system: String,
     pub distance_ly: f64,
+    /// Whether this price was reused from the local cache rather than read
+    /// during this run \[C38\]. The table's own heading turns on it.
+    pub from_cache: bool,
 }
 
 /// Reduce the live listings to one best seller and one best buyer per commodity.
@@ -603,6 +682,7 @@ fn best_live_prices(
                     continue;
                 }
                 let found = BestLive {
+                    from_cache: listing.from_cache,
                     commodity: commodity.clone(),
                     // Frontier's payload spells this `LowTemperatureDiamond`.
                     // The ranking below prints "Low Temperature Diamond", and
@@ -1473,9 +1553,22 @@ fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String])
             ]));
         }
     }
+    // The heading is decided by the rows, not by the mode. `--quick` used to
+    // assert "read live this run" unconditionally, which was true only while it
+    // polled every market it ranked; a cache-seeded run must not inherit the
+    // claim \[C38\].
+    let cached = best.iter().filter(|entry| entry.from_cache).count();
+    let title = if cached == 0 {
+        "BEST LIVE PRICES  where to buy and sell each commodity, read live this run".to_owned()
+    } else {
+        format!(
+            "BEST PRICES  where to buy and sell each commodity; {} of {} read live this run",
+            edm_core::js::format_integer((best.len() - cached) as f64),
+            edm_core::js::format_integer(best.len() as f64),
+        )
+    };
     let mut blocks = vec![Block::Table {
-        title: "BEST LIVE PRICES  where to buy and sell each commodity, read live this run"
-            .to_owned(),
+        title,
         columns: columns::QUICK_LIVE_COLUMNS,
         rows,
     }];
@@ -1483,9 +1576,15 @@ fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String])
         "best among the markets this run polled, which Ardent's price index chose: a market its index does not carry cannot appear here, however good its price"
             .to_owned(),
     ));
+    if cached > 0 {
+        blocks.push(Block::Note(
+            "the rest were reused from the local cache; only the markets behind the ranked routes below are re-read live, so a row here can be older than the route it supports"
+                .to_owned(),
+        ));
+    }
     if best.iter().any(|entry| entry.index_price.is_none()) {
         blocks.push(Block::Note(
-            "a blank index price means this side of the market was not what nominated it; the live price is still a live read"
+            "a blank index price means this side of the market was not what nominated it"
                 .to_owned(),
         ));
     }
@@ -1493,8 +1592,13 @@ fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String])
 }
 
 /// The subset coverage a quick lookup can honestly claim.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a coverage block is a report of what happened, and each argument is one measured fact it states"
+)]
 fn coverage_of(
     acquired: &acquire::Acquired,
+    verified_markets: usize,
     markets_found: usize,
     eddn_enabled: bool,
     spent: crate::route::pacer::Spent,
@@ -1522,7 +1626,12 @@ fn coverage_of(
         });
     RouteCoverage {
         markets_found,
-        markets_polled: acquired.tally.markets_polled + acquired.tally.markets_absent,
+        // The verify pass polls too, and its reads are the ones the ranked
+        // routes are actually made of. Leaving them out let a fully cache-seeded
+        // run report "0 of 4" polled in the same block as four requests sent.
+        markets_polled: acquired.tally.markets_polled
+            + acquired.tally.markets_absent
+            + verified_markets,
         markets_priced: super::ingest::priced(&acquired.listings),
         markets_failed: acquired.tally.markets_failed,
         markets_absent: acquired.tally.markets_absent,

@@ -179,7 +179,19 @@ pub fn prepare<F: Fs>(cache: &Cache, fs: &F, markets: &[ArdentStation], now_ms: 
         ..Prepared::default()
     };
     for market in markets {
-        let lookup = cache.get(fs, market.market_id, now_ms);
+        // **A fleet carrier is never served from the cache** \[C38\]. Measured
+        // over a 21-day pair of cache generations: a carrier's *price* is no
+        // less stable than a station's (8.9% vs 11.3% moved more than a
+        // quarter), but a carrier row is 3x more likely to have stopped
+        // covering a full hold — 4.8% against 1.6% — because a carrier order is
+        // a fixed pot one commander set and it drains, where a station's demand
+        // regenerates. Quantity is what decides whether a hop is real, so the
+        // one field cache cannot be trusted on is the one that matters.
+        let lookup = if edm_core::ardent::is_carrier(market.station_type.as_deref()) {
+            crate::route::cache::Lookup::Skipped
+        } else {
+            cache.get(fs, market.market_id, now_ms)
+        };
         match lookup {
             crate::route::cache::Lookup::Fresh(entry)
                 if edm_core::domain::parse_market_snapshot(&entry.payload).is_some() =>

@@ -42,6 +42,18 @@ pub fn ranking(
     markets: &[Market],
     commodities: &Commodities,
 ) -> Vec<Block<'static>> {
+    ranking_with(kind, routes, markets, commodities, false)
+}
+
+/// The ranking table, optionally with the credits-per-hour column \[C39\].
+#[must_use]
+pub fn ranking_with(
+    kind: RouteKind,
+    routes: &[Route],
+    markets: &[Market],
+    commodities: &Commodities,
+    show_rate: bool,
+) -> Vec<Block<'static>> {
     if routes.is_empty() {
         return vec![
             Block::Heading(title(kind).to_owned()),
@@ -54,30 +66,44 @@ pub fn ranking(
         .enumerate()
         .map(|(index, route)| {
             let rate = route.rate();
-            Row::Data(vec![
+            let mut cells: Vec<std::borrow::Cow<'static, str>> = vec![
                 js::format_integer((index + 1) as f64).into(),
                 stops(route, markets).into(),
                 cargo(route, commodities).into(),
-                js::to_fixed_1(route.legs.iter().map(|leg| leg.distance_ly).sum()).into(),
                 money(route.profit.0).into(),
+                quantities(route, markets).into(),
+                js::to_fixed_1(route.legs.iter().map(|leg| leg.distance_ly).sum()).into(),
+            ];
+            if show_rate {
                 // A single hop has no steady state — repeating it means flying
-                // back empty — so it has only a first-lap rate. Printing a dash
-                // there hid the number the ranking is *by*, and the profit
-                // column alone then looked unsorted: 48,400,352 above
-                // 48,389,264 above 48,253,744 above 48,389,264 again. The
-                // caveat says what the number is not.
-                per_hour(rate.steady.unwrap_or(rate.first_lap)).into(),
-                duration(route.cycle_millis.0).into(),
-                claim(rate.guarantee).into(),
-            ])
+                // back empty — so it has only a first-lap rate.
+                cells.push(per_hour(rate.steady.unwrap_or(rate.first_lap)).into());
+            }
+            cells.push(duration(route.cycle_millis.0).into());
+            cells.push(claim(rate.guarantee).into());
+            Row::Data(cells)
         })
         .collect();
 
     let mut blocks = vec![Block::Table {
         title: title(kind).to_owned(),
-        columns: columns::ROUTE_COLUMNS,
+        columns: if show_rate {
+            columns::ROUTE_COLUMNS_WITH_RATE
+        } else {
+            columns::ROUTE_COLUMNS
+        },
         rows,
     }];
+    // The ordering key is not on screen, and `Profit` over `Lap` does not
+    // reproduce it — a single hop's rate is measured over the first lap,
+    // approach included, where `Lap` is the cycle. Saying so costs one line and
+    // is the difference between a sorted table and one that looks broken.
+    if !show_rate {
+        blocks.push(Block::Note(
+            "ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one above it and still take longer to fly"
+                .to_owned(),
+        ));
+    }
 
     // One line per distinct caveat across the whole ranking, not per route:
     // they are properties of the model, and repeating them under every row
@@ -86,6 +112,52 @@ pub fn ranking(
         blocks.push(Block::Note(explain(caveat).to_owned()));
     }
     blocks
+}
+
+/// What the seller has, against what the buyer will take, for the leg that
+/// binds the route \[C39\].
+///
+/// One pair rather than one per leg, because the table has one row per route:
+/// the binding leg is the one whose units are smallest, which is the leg that
+/// decided the profit. For a single hop that is the only leg.
+///
+/// A destination that publishes a bracket and no tonnage reads `?` rather than
+/// a number — the optimiser assumes a full hold there, and printing that
+/// assumption as if it were a measurement is what the `demand unpublished`
+/// caveat exists to prevent.
+fn quantities(route: &Route, markets: &[Market]) -> String {
+    let Some(leg) = route
+        .legs
+        .iter()
+        .min_by_key(|leg| leg.choice.units.0)
+    else {
+        return "-".to_owned();
+    };
+    let stock = markets
+        .get(leg.from as usize)
+        .and_then(|market| {
+            market
+                .supply
+                .iter()
+                .find(|row| row.commodity == leg.choice.commodity)
+        })
+        .map_or_else(|| "?".to_owned(), |row| js::format_integer(row.stock.0 as f64));
+    let demand = markets
+        .get(leg.to as usize)
+        .and_then(|market| {
+            market
+                .demand
+                .iter()
+                .find(|row| row.commodity == leg.choice.commodity)
+        })
+        .map_or_else(
+            || "?".to_owned(),
+            |row| match row.qty {
+                crate::model::DemandQty::Published(tons) => js::format_integer(tons.0 as f64),
+                crate::model::DemandQty::Unpublished => "?".to_owned(),
+            },
+        );
+    format!("{stock}/{demand}")
 }
 
 /// Every leg of one route, for `--detail`.
@@ -326,6 +398,12 @@ fn claim(guarantee: Guarantee) -> String {
                 js::format_integer(upper.credits_per_hour_floor() as f64)
             )
         }
+        // A rescored route *was* measured — what narrowed is the ordering
+        // claim, not the price. Collapsing it into "best found" would report
+        // the stronger fact as the weaker one.
+        Guarantee::Heuristic {
+            reason: crate::report::HeuristicReason::RescoredAfterSearch,
+        } => "verified, best of these".to_owned(),
         Guarantee::Heuristic { .. } => "best found".to_owned(),
     }
 }
@@ -380,6 +458,12 @@ fn explain(caveat: Caveat) -> &'static str {
         }
         Caveat::BulkPriceEstimated => {
             "destination prices use an empirical cargo-quantity estimate, not an executable quote"
+        }
+        Caveat::PricedFromCache => {
+            "at least one price here was reused from the local cache, not read during this run"
+        }
+        Caveat::CarrierSourceDoesNotRestock => {
+            "a leg buys from a fleet carrier: that stock was put there by a commander and does not restock, so the rate describes a lap you can fly once"
         }
         Caveat::JumpGraphUnmodelled => {
             "distances are straight lines; the real jump graph may be longer"
@@ -808,18 +892,20 @@ mod open_route_tests {
 
     /// A single hop's rate cell shows the first-lap rate, which is the only one
     /// it has and the one the ranking is by. A dash hid the sort key and left
-    /// the profit column looking unordered.
+    /// the profit column looking unordered. Under `--per-hour`, where the
+    /// column exists at all, that must still hold \[C39\].
     #[test]
     fn a_single_hop_shows_the_rate_it_is_ranked_by() {
         let markets = crate::fixture::round_trip_markets();
         let geometry = crate::fixture::geometry(&markets);
         let hop =
             crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
-        let blocks = ranking(
+        let blocks = ranking_with(
             RouteKind::SingleHop,
             std::slice::from_ref(&hop),
             &markets,
             &crate::fixture::round_trip_commodities(),
+            true,
         );
         let text = blocks
             .iter()
@@ -843,5 +929,44 @@ mod open_route_tests {
             "no dash where the ranking key belongs: {text}"
         );
         assert!(text.contains("/h"), "{text}");
+    }
+
+    /// By default the rate is not on screen, so the table has to say what it is
+    /// ordered by — otherwise the profit column reads as unsorted, which is the
+    /// exact defect the rate column was originally added to fix \[C39\].
+    #[test]
+    fn hiding_the_rate_leaves_the_ordering_stated() {
+        let markets = crate::fixture::round_trip_markets();
+        let geometry = crate::fixture::geometry(&markets);
+        let hop =
+            crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
+        let blocks = ranking(
+            RouteKind::SingleHop,
+            std::slice::from_ref(&hop),
+            &markets,
+            &crate::fixture::round_trip_commodities(),
+        );
+        let notes: Vec<&str> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Note(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            notes.iter().any(|note| note.contains("ordered by credits per hour")),
+            "{notes:?}"
+        );
+    }
+
+    /// The pair that replaced the rate: what the seller has against what the
+    /// buyer will take, for the leg that bound the route.
+    #[test]
+    fn the_quantity_cell_names_both_ends() {
+        let markets = crate::fixture::round_trip_markets();
+        let geometry = crate::fixture::geometry(&markets);
+        let hop =
+            crate::report::Route::single_hop(&geometry, 0, 1, crate::fixture::choice(0, 1_000));
+        assert_eq!(quantities(&hop, &markets), "5,000/7,000");
     }
 }

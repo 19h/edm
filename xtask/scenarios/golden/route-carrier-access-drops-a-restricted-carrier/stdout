@@ -69,13 +69,17 @@ carrier access: 2 carriers, 2 read live, 1 restrict docking
    best among the markets this run polled, which Ardent's price index chose: a market its index does
    not carry cannot appear here, however good its price
 == BEST SINGLE HOPS ================================================================================
-+---+------------------------------+----------------+-----+--------------+--------+----------------+
-| # | Route                        | Cargo          |  Ly |         Cr/h |    Lap | Claim          |
-+===+==============================+================+=====+==============+========+================+
-| 1 | Open Door (Alpha Centauri) ~ | Gold           | 0.0 | 30,421,660/h | 1m 56s | proved optimal |
-+---+------------------------------+----------------+-----+--------------+--------+----------------+
-   columns hidden to fit 100 cols: Profit
++---+------------------------------+----------------+--------------+--------------+----------------+
+| # | Route                        | Cargo          |       Profit | Stock/Demand | Claim          |
++===+==============================+================+==============+==============+================+
+| 1 | Open Door (Alpha Centauri) ~ | Gold           | 1,960,000 cr |  5,000/7,000 | proved optimal |
++---+------------------------------+----------------+--------------+--------------+----------------+
+   columns hidden to fit 100 cols: Lap, Ly
+   ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
+   above it and still take longer to fly
    market observations are ageing independently; another commander may have traded them since
+   a leg buys from a fleet carrier: that stock was put there by a commander and does not restock, so
+   the rate describes a lap you can fly once
    distances are straight lines; the real jump graph may be longer
    a single hop has no steady rate: flying it repeatedly means returning empty
    permits, allegiance and landing-pad availability are not modelled
