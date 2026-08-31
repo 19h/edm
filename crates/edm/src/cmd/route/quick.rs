@@ -586,6 +586,95 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         docking_report,
     );
 
+    // --- --follow: keep re-reading the ranking until told to stop \[C43\] ---
+    //
+    // A round is deliberately the verify pass with the live set cleared: that
+    // code already re-polls exactly the markets behind the ranked routes,
+    // patches them in place by index, and rescores. Nothing here re-solves --
+    // the graph build is 127 s at five thousand markets, so a loop that
+    // re-searched would spend its whole interval searching.
+    if let Some(interval) = config.follow_seconds {
+        // The shortlist as first solved. Every round is re-evaluated against
+        // *this*, not against what survived the previous round, because
+        // `rescore` only ever filters: without the restore, a carrier offline
+        // for one poll would be deleted from the ranking permanently and could
+        // never come back, so a long session would erode to nothing.
+        let baseline = ranked.routes().to_vec();
+        let mut round: usize = 0;
+        loop {
+            if let Some(limit) = config.follow_rounds
+                && round >= limit
+            {
+                note(format!(
+                    "--follow-rounds {} reached",
+                    edm_core::js::format_integer(limit as f64)
+                ));
+                break;
+            }
+            // The only live ceiling this program has. `--max-requests` is
+            // checked at the gate against an *estimate* and never against what
+            // was actually sent, so without this an indefinite loop would be
+            // bounded by nothing at all.
+            let before = pacer.spent();
+            if before.requests as f64 >= config.max_requests {
+                note(format!(
+                    "--max-requests {} reached after {} {}",
+                    edm_core::js::format_integer(config.max_requests),
+                    edm_core::js::format_integer(round as f64),
+                    if round == 1 { "round" } else { "rounds" },
+                ));
+                break;
+            }
+            timer.sleep_ms(interval * 1_000.0).await;
+            round += 1;
+            // A fresh deadline window and a cleared breaker latch. `--deadline`
+            // bounds one sweep, and a session is many sweeps with sleep in
+            // between; the latch is first-trip-wins and never healed, so one
+            // transient outage would otherwise silently kill every later round
+            // while the loop ticked on looking healthy.
+            pacer.begin_round();
+            *ranked.routes_mut() = baseline.clone();
+            live.clear();
+
+            let (verified, _fresh) = super::verify_ranked(
+                &verify_cx,
+                &pacer,
+                &rank_config,
+                &mut ranked,
+                &stations,
+                &no_candidates,
+                &mut live,
+                &note,
+            )
+            .await;
+
+            let spent = pacer.spent();
+            note(format!(
+                "round {}: {} markets re-read, {} requests, {} of {} routes still priced{}",
+                edm_core::js::format_integer(round as f64),
+                edm_core::js::format_integer(verified.markets as f64),
+                edm_core::js::format_integer((spent.requests - before.requests) as f64),
+                edm_core::js::format_integer(ranked.routes().len() as f64),
+                edm_core::js::format_integer(baseline.len() as f64),
+                if pacer.tripped().is_some() {
+                    " (the rate limiter tripped this round)"
+                } else {
+                    ""
+                },
+            ));
+            super::render_ranked(
+                out,
+                &rank_config,
+                &ranked,
+                origin,
+                &coverage,
+                super::SpecialOpportunities::default(),
+                None,
+                None,
+            );
+        }
+    }
+
     // A 410 is a reached answer, exactly as it is in a full survey. A failed
     // or deadline-abandoned live candidate is not a price that merely ranked
     // badly, so make the process status carry that distinction.

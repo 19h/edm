@@ -15,7 +15,7 @@
 //! [`Pacer::acquire`], which is written in two statements for exactly this
 //! reason.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use edm_core::js;
 use edm_core::pace::{
@@ -72,7 +72,16 @@ pub struct Pacer<'a, C, T, E> {
     clock: &'a C,
     timer: &'a T,
     entropy: &'a E,
-    started_ms: f64,
+    /// When the current deadline window opened.
+    ///
+    /// A `Cell` rather than a plain field because `--watch` reopens the window
+    /// each round: `--deadline` means "how long one sweep may take", and a
+    /// watch session is many sweeps with sleeping in between. Left fixed at
+    /// construction, the first round to cross the deadline would retire every
+    /// later round's jobs as `RunDeadline` instantly -- rendering a coverage
+    /// table of zero polled and flipping the exit code, while the loop ticked
+    /// on looking healthy.
+    started_ms: Cell<f64>,
     inner: RefCell<Mutable>,
 }
 
@@ -84,7 +93,7 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
             clock,
             timer,
             entropy,
-            started_ms: now,
+            started_ms: Cell::new(now),
             inner: RefCell::new(Mutable {
                 tokens: BucketState::new(pacing.bucket, now),
                 window: BreakerWindow::default(),
@@ -163,6 +172,31 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
         }
     }
 
+    /// Opens a fresh deadline window and clears the breaker latch \[C43\].
+    ///
+    /// Resets exactly the two pieces of state that are scoped to one sweep and
+    /// nothing else. `--deadline` restarts, because it bounds a sweep rather
+    /// than a session; and `tripped` clears, because the latch is
+    /// first-trip-wins and never healed, so one transient outage in round three
+    /// would otherwise poison every round after it -- each sending zero
+    /// requests, abandoning every job, and re-rendering a stale ranking while
+    /// the loop ticked on looking healthy.
+    ///
+    /// Deliberately kept: the adapted rate and the token bucket's `gate_ms`,
+    /// which carry a `Retry-After` hold-off and twenty-success recovery streak
+    /// across the boundary. Those describe how the *server* is behaving and do
+    /// not become untrue because a round ended. Also kept: `spent`, which stays
+    /// cumulative over the session so a caller can diff it per round and so the
+    /// session ceiling has something to count.
+    ///
+    /// Synchronous on purpose. The module's rule is that no `RefCell` borrow may
+    /// be held across an `.await`; this takes one and drops it before returning,
+    /// so it must never be folded into a helper that also sleeps.
+    pub fn begin_round(&self) {
+        self.started_ms.set(self.clock.now_ms());
+        self.inner.borrow_mut().tripped = None;
+    }
+
     /// Whether the run's own wall-clock budget is spent.
     ///
     /// `--deadline` is documented as how long the whole sweep may take, and the
@@ -175,7 +209,7 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
     /// having been too slow.
     #[must_use]
     pub fn past_deadline(&self) -> bool {
-        self.clock.now_ms() - self.started_ms >= self.pacing.budget.run_deadline_ms
+        self.clock.now_ms() - self.started_ms.get() >= self.pacing.budget.run_deadline_ms
     }
 
     /// Whether the run should keep going at all.
@@ -200,7 +234,7 @@ impl<'a, C: Clock, T: Timer, E: Entropy> Pacer<'a, C, T, E> {
         let verdict =
             self.pacing
                 .budget
-                .verdict(transient, attempts, first_attempt_ms, now, self.started_ms);
+                .verdict(transient, attempts, first_attempt_ms, now, self.started_ms.get());
         if let RetryVerdict::GiveUp(reason) = verdict {
             return Some(reason);
         }
@@ -479,5 +513,59 @@ mod tests {
 
         // The clock is frozen, so these are absolute offsets rather than gaps.
         assert_eq!(timer.delays(), vec![500.0, 1_000.0]);
+    }
+
+    /// `--deadline` bounds one sweep. A watch session is many sweeps with sleep
+    /// between them, so the window has to reopen or every round after the first
+    /// hour retires its jobs instantly \[C43\].
+    #[test]
+    fn beginning_a_round_reopens_the_deadline_window() {
+        let bed = TestBed::default();
+        let entropy = CountingEntropy::default();
+        let mut pacing = Pacing::default();
+        pacing.budget.run_deadline_ms = 1_000.0;
+        let pacer = Pacer::new(pacing, &bed, &bed, &entropy);
+        assert!(!pacer.past_deadline());
+        bed.now.set(1_500.0);
+        assert!(pacer.past_deadline(), "the first window must expire");
+        pacer.begin_round();
+        assert!(
+            !pacer.past_deadline(),
+            "a new round must get a full window, not the remains of the old one"
+        );
+    }
+
+    /// The trip latch is first-trip-wins and nothing ever heals it, so one
+    /// transient outage would poison every later round: zero requests sent,
+    /// every job abandoned, a stale ranking re-rendered, and the loop ticking
+    /// on as though it were working \[C43\].
+    #[test]
+    fn beginning_a_round_clears_the_breaker_latch() {
+        let bed = TestBed::default();
+        let entropy = CountingEntropy::default();
+        let pacer = Pacer::new(Pacing::default(), &bed, &bed, &entropy);
+        // Enough consecutive failures to trip whatever the default breaker is.
+        for _ in 0..500 {
+            pacer.observe_failure();
+        }
+        assert!(pacer.tripped().is_some(), "the breaker must actually trip");
+        pacer.begin_round();
+        assert!(pacer.tripped().is_none(), "a new round starts un-tripped");
+    }
+
+    /// Spend stays cumulative across the boundary: it is what the session
+    /// ceiling counts, and resetting it would make an indefinite loop unbounded.
+    #[test]
+    fn beginning_a_round_keeps_the_spend_total() {
+        let bed = TestBed::default();
+        let entropy = CountingEntropy::default();
+        let pacer = Pacer::new(Pacing::default(), &bed, &bed, &entropy);
+        pacer.observe_ok();
+        pacer.observe_throttled(None);
+        let before = pacer.spent();
+        pacer.begin_round();
+        let after = pacer.spent();
+        assert_eq!(before.throttled, after.throttled);
+        assert_eq!(before.requests, after.requests);
     }
 }

@@ -1,0 +1,5 @@
+# route-follow-refuses-a-json-stream
+why = "C28 says route's document is one well-formed document or nothing, and a follow loop emits one per round. Refusing the combination is the only answer that keeps both promises; silently dropping either one would make `--json | jq` produce a truncated document or an unparseable stream [C43]."
+argv = ["route", "Sol", "--quick", "5", "--item", "gold", "--follow", "60", "--json"]
+oracle = "none"
+expect-frontier-requests = 0

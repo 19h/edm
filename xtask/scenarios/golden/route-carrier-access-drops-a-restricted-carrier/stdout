@@ -75,8 +75,9 @@ carrier access: 2 carriers, 2 read live, 1 restrict docking
 | 1 | Open Door (Alpha Centauri) ~ | Gold           | 1,960,000 cr |  5,000/7,000 | proved optimal |
 +---+------------------------------+----------------+--------------+--------------+----------------+
    columns hidden to fit 100 cols: Lap, Ly, To start
-   ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
-   above it and still take longer to fly
+   ordered by credits per hour on the first lap, which --per-hour shows: that clock starts on
+   approach to the first station, where Lap does not, so two rows can share a Lap and still rank
+   apart. To start is not in it — it is paid once, and a rate is per lap
    market observations are ageing independently; another commander may have traded them since
    a leg buys from a fleet carrier: that stock was put there by a commander and does not restock, so
    the rate describes a lap you can fly once

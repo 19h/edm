@@ -1,0 +1,5 @@
+# route-follow-below-the-floor-is-refused
+why = "The 30-second floor is a limit on what this program will do to somebody else's server, not a guess about what a commander wants: a round re-reads every market in the ranking. Refused rather than clamped, as `--stops` and `--radius` are, because a bound the user asked for and did not get is one they will reason with anyway [C43]."
+argv = ["route", "Sol", "--quick", "5", "--item", "gold", "--follow", "5"]
+oracle = "none"
+expect-frontier-requests = 0

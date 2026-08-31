@@ -1,0 +1,5 @@
+# route-follow-is-refused-not-ignored
+why = "A flag that is accepted and does nothing is worse than one that is rejected: a commander watching a table that will never update concludes the prices are not moving [C43]. `--follow` needs `--quick`, because a full survey re-solves and the graph build alone is minutes at survey scale. `expect-frontier-requests = 0` is the point — the refusal must land on the argv, before Ardent is enumerated, not after a region has been surveyed."
+argv = ["route", "Sol", "--radius", "10", "--follow", "60"]
+oracle = "none"
+expect-frontier-requests = 0

@@ -96,13 +96,20 @@ pub fn ranking_with(
         },
         rows,
     }];
-    // The ordering key is not on screen, and `Profit` over `Lap` does not
-    // reproduce it — a single hop's rate is measured over the first lap,
-    // approach included, where `Lap` is the cycle. Saying so costs one line and
-    // is the difference between a sorted table and one that looks broken.
+    // The ordering key is not on screen and `Profit` over `Lap` does not
+    // reproduce it: a single hop is ranked over its *first* lap, which charges
+    // the supercruise in to the starting station, where `Lap` is the cycle and
+    // charges none. Two rows can therefore show the same `Lap`, and the one
+    // with less profit can still rank higher — which reads as a broken sort
+    // unless the note says where the missing time went. Naming `To start`
+    // matters for the same reason \[C40\]: it is the one number on screen that
+    // looks like it belongs in a rate and is deliberately not in this one.
     if !show_rate {
         blocks.push(Block::Note(
-            "ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one above it and still take longer to fly"
+            "ordered by credits per hour on the first lap, which --per-hour shows: that clock \
+             starts on approach to the first station, where Lap does not, so two rows can share \
+             a Lap and still rank apart. To start is not in it — it is paid once, and a rate is \
+             per lap"
                 .to_owned(),
         ));
     }

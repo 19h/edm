@@ -166,7 +166,20 @@ impl<E: Entropy> Entropy for PinnedJitter<'_, E> {
     }
 
     fn jitter_unit(&self) -> f64 {
-        self.unit
+        // Fall through when nothing was pinned. Every production call site
+        // builds this with `jitter.unwrap_or(f64::NAN)`, and returning that NaN
+        // unconditionally disabled retry backoff everywhere: `backoff_ms`
+        // multiplies by `unit.clamp(0, 1)`, NaN propagates through the clamp,
+        // and `js_max(delay, 0.0)` then yields 0 — so a failing job was requeued
+        // instantly, eight times, with no wait at all. The existing
+        // `zero_jitter_retires_on_the_attempt_cap_instead` test hides this: it
+        // pins 0.0 rather than leaving the unit unset, so it exercises a
+        // deliberate no-delay case and never the production one.
+        if self.unit.is_finite() {
+            self.unit
+        } else {
+            self.inner.jitter_unit()
+        }
     }
 }
 
@@ -323,5 +336,44 @@ mod tests {
         let first = entropy.nonce_bytes();
         let second = entropy.nonce_bytes();
         assert_ne!(first, second);
+    }
+
+    /// The bug this guards: every production call site builds `PinnedJitter`
+    /// with `jitter.unwrap_or(f64::NAN)`, and returning that NaN unconditionally
+    /// disabled retry backoff across the whole program. `backoff_ms` multiplies
+    /// by `unit.clamp(0, 1)`, NaN survives the clamp, and `js_max(delay, 0.0)`
+    /// then yields 0 -- so a failing job was requeued instantly, eight times,
+    /// with no wait at all. Nothing caught it because the only nearby test pins
+    /// 0.0, which is a deliberate no-delay case and not the production one.
+    #[test]
+    fn an_unpinned_jitter_falls_through_to_real_entropy() {
+        let inner = CountingEntropy::default();
+        let pinned = PinnedJitter {
+            inner: &inner,
+            unit: f64::NAN,
+        };
+        let unit = pinned.jitter_unit();
+        assert!(
+            unit.is_finite(),
+            "an unset EDM_JITTER must not poison the backoff with NaN, got {unit}"
+        );
+        assert!((0.0..1.0).contains(&unit), "a jitter unit is a [0, 1) sample, got {unit}");
+    }
+
+    /// And pinning still pins, because that is what retry scenarios assert on.
+    #[test]
+    fn a_pinned_jitter_is_returned_verbatim() {
+        let inner = CountingEntropy::default();
+        let pinned = PinnedJitter {
+            inner: &inner,
+            unit: 0.25,
+        };
+        assert!((pinned.jitter_unit() - 0.25).abs() < f64::EPSILON);
+        // Zero is a real pin, not "unset": it must survive the fall-through.
+        let zero = PinnedJitter {
+            inner: &inner,
+            unit: 0.0,
+        };
+        assert_eq!(zero.jitter_unit(), 0.0);
     }
 }

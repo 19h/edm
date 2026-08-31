@@ -63,8 +63,9 @@ scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 
 | 1 | Galileo (Sol) > Titan City | Gold > Silver  | 3,292,800 cr |  5,000/7,000 | proved optimal |
 +---+----------------------------+----------------+--------------+--------------+----------------+
    columns hidden to fit 100 cols: Lap, Ly, To start
-   ordered by credits per hour, which --per-hour shows: a row can hold more profit than the one
-   above it and still take longer to fly
+   ordered by credits per hour on the first lap, which --per-hour shows: that clock starts on
+   approach to the first station, where Lap does not, so two rows can share a Lap and still rank
+   apart. To start is not in it — it is paid once, and a rate is per lap
    market observations are ageing independently; another commander may have traded them since
    distances are straight lines; the real jump graph may be longer
    permits, allegiance and landing-pad availability are not modelled

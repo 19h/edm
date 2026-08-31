@@ -137,6 +137,24 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // past the ceiling is a fact about the argv and cannot become acceptable
     // once the region is known, so enumerating first spends minutes of Ardent
     // queries to reach a conclusion that was available immediately.
+    // Refused, never ignored. A flag that is accepted and does nothing is worse
+    // than one that is rejected: the commander watches a table that will never
+    // update and concludes the prices are not moving \[C43\].
+    if config.follow_seconds.is_some() {
+        if config.quick.is_none() {
+            return Err("--follow needs --quick: a full survey re-solves from scratch, and the \
+                        graph build alone is minutes at survey scale. --quick already ranks from \
+                        Ardent's free index and verifies the winners live, which is what a round \
+                        repeats"
+                .to_owned());
+        }
+        if config.json {
+            return Err("--follow cannot be combined with --json: route's document is one \
+                        well-formed document or nothing (C28), and a loop emits one per round. \
+                        Run without --json to watch, or without --follow to capture"
+                .to_owned());
+        }
+    }
     if let Some(refusal) = plan::preflight(config) {
         plan::refuse(out, config, &refusal);
         return Ok(());
@@ -1202,7 +1220,7 @@ impl Ranked {
         }
     }
 
-    fn routes_mut(&mut self) -> &mut Vec<edm_route::report::Route> {
+    pub(super) fn routes_mut(&mut self) -> &mut Vec<edm_route::report::Route> {
         match self.kind {
             RouteKind::SingleHop => &mut self.solution.single,
             RouteKind::RoundTrip => &mut self.solution.round_trip,

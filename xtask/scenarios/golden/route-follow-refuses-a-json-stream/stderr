@@ -1,0 +1,1 @@
+--follow cannot be combined with --json: route's document is one well-formed document or nothing (C28), and a loop emits one per round. Run without --json to watch, or without --follow to capture

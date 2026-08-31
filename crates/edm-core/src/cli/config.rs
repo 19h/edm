@@ -1221,6 +1221,22 @@ pub struct RouteConfig {
     /// optimiser is pure and has no clock of its own, so `cmd::route` reads
     /// this one on its behalf — see `edm_route::watch`.
     pub deadline_seconds: f64,
+    /// `--follow <seconds>`: re-poll the ranked routes' markets and re-probe
+    /// their carriers every this many seconds, forever, instead of printing
+    /// once and exiting \[C43\].
+    ///
+    /// Not `--watch`, which is taken and ported: it is the boolean retry switch
+    /// on `trade` and `market`, and giving one spelling two meanings across
+    /// commands is how a flag becomes a trap.
+    ///
+    /// `--deadline` bounds a single round rather than the session, because a
+    /// session is many sweeps with sleep between them; `--max-requests` becomes
+    /// the session bound and is enforced live, which is the only thing that
+    /// makes an indefinite loop safe to offer.
+    pub follow_seconds: Option<f64>,
+    /// `--follow-rounds <n>`: stop after this many rounds. `None` means run
+    /// until the request ceiling or the user kills it.
+    pub follow_rounds: Option<usize>,
     pub max_requests: f64,
     pub confirmed: bool,
     pub max_age_minutes: f64,
@@ -1300,6 +1316,34 @@ pub const DEFAULT_EDDN_MAX_AGE_MINUTES: f64 = 30.0;
 /// and the refusal breaker is the real protection.
 pub const DEFAULT_EDDN_RPS: f64 = 2.0;
 pub const DEFAULT_DEADLINE_SECONDS: f64 = 3_600.0;
+
+/// The shortest `--follow` interval the program will accept, in seconds.
+///
+/// Thirty seconds is not a guess about what a commander wants; it is a floor on
+/// what this program will do to somebody else's server. A round re-reads every
+/// market in the ranking and re-probes every carrier in it, so a ten-second
+/// interval on a twenty-route ranking is several requests a second sustained
+/// indefinitely against the game-internal API. Carrier verdicts cache for
+/// fifteen minutes anyway, so below this the extra rounds mostly re-read prices
+/// that have not moved.
+pub const MIN_FOLLOW_SECONDS: f64 = 30.0;
+
+/// `--follow`, refused rather than clamped, as `--stops` and `--radius` are.
+pub fn follow_seconds(cli: &Cli<'_>) -> Result<Option<f64>, CliError> {
+    let Some(value) = cli.optional_decimal(Flag::Follow)? else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value < MIN_FOLLOW_SECONDS {
+        return Err(format!(
+            "--follow must be at least {} seconds: a round re-reads every market in the ranking, \
+             and carrier docking verdicts are cached for {} minutes anyway",
+            js::js_number(MIN_FOLLOW_SECONDS),
+            js::js_number(15.0),
+        )
+        .into());
+    }
+    Ok(Some(value))
+}
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
 /// Read the opt-in quick lookup mode.
@@ -1567,6 +1611,19 @@ pub fn route_config_with_reference(
         deadline_seconds: cli
             .optional_decimal(Flag::Deadline)?
             .unwrap_or(DEFAULT_DEADLINE_SECONDS),
+        follow_seconds: follow_seconds(cli)?,
+        follow_rounds: {
+            let asked = cli.optional_number(Flag::FollowRounds)?;
+            match asked {
+                None => None,
+                Some(value) if value >= 1.0 && value.is_finite() => Some(value as usize),
+                Some(_) => {
+                    return Err("--follow-rounds must be a whole number of rounds, at least 1"
+                        .to_owned()
+                        .into());
+                }
+            }
+        },
         max_requests: cli
             .optional_number(Flag::MaxRequests)?
             .unwrap_or(crate::spend::DEFAULT_MAX_REQUESTS),

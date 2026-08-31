@@ -1,0 +1,2 @@
+--follow must be at least 30 seconds: a round re-reads every market in the ranking, and carrier docking verdicts are cached for 15 minutes anyway
+

@@ -118,6 +118,12 @@ pub enum Flag {
     /// `--stops <n>`: how many markets one disposal may spread across
     /// \[C41\]. It is the exact search bound, so it is visible.
     Stops,
+    /// `--follow <seconds>`: re-read the ranking on this interval instead of
+    /// printing once \[C43\]. Not `--watch`, which is the ported boolean retry
+    /// switch and already means something else.
+    Follow,
+    /// `--follow-rounds <n>`: stop after this many rounds \[C43\].
+    FollowRounds,
 
     // `BOOLEAN_FLAGS` (`game-internal-api.ts:871-891`), in source order. The first
     // of these is the arity boundary; keep `DryRun` first.
@@ -182,7 +188,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 91] = [
+    pub const ALL: [Self; 93] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -246,6 +252,8 @@ impl Flag {
         Self::From,
         Self::Worth,
         Self::Stops,
+        Self::Follow,
+        Self::FollowRounds,
         Self::DryRun,
         Self::FullUrl,
         Self::Json,
@@ -362,6 +370,8 @@ impl Flag {
             // `rate` here would be dead code, and a user typing `--rate`
             // would silently set the worker count instead.
             "perhour" | "creditsperhour" | "showrate" => Self::PerHour,
+            "follow" => Self::Follow,
+            "followrounds" | "rounds" => Self::FollowRounds,
             _ => return None,
         })
     }
@@ -439,6 +449,8 @@ impl Flag {
             Self::IncludeIllegal => "--include-illegal",
             Self::VerifySystems => "--verify-systems",
             Self::PerHour => "--per-hour",
+            Self::Follow => "--follow",
+            Self::FollowRounds => "--follow-rounds",
 
             // Not in `FLAG_DISPLAY`: the `?? flag` fallback prints the
             // canonical key, which for these is already the documented

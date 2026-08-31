@@ -116,7 +116,19 @@ Spending
                            retried for longer than the run has left — and the
                            loop search, which gets whatever the sweep did not
                            spend. A search stopped by it reports the best route
-                           it found and says it did not prove it
+                           it found and says it did not prove it. Under --follow
+                           it bounds one round, not the session
+  --follow <s>             with --quick: instead of printing once, re-read the
+                           markets behind the ranked routes every <s> seconds
+                           and print the ranking again. Minimum {min_follow}s —
+                           a round re-reads every market in the ranking. Each
+                           round re-evaluates the whole original shortlist, so a
+                           route that a dead market removed can come back when
+                           it restocks. --max-requests becomes the session
+                           ceiling and is enforced live; there is no other bound
+                           unless you set one. Not --watch, which is the retry
+                           switch on `trade` and `market`
+  --follow-rounds <n>      stop after n rounds rather than at the ceiling
   --max-age <minutes>      rank from cached prices younger than this, default
                            {max_age}. It bounds only which markets are
                            *considered*: the markets behind the routes actually
@@ -188,6 +200,7 @@ Examples
         confirm = n(spend::CONFIRM_THRESHOLD),
         rps = n(config::DEFAULT_RPS),
         deadline = n(config::DEFAULT_DEADLINE_SECONDS),
+        min_follow = n(config::MIN_FOLLOW_SECONDS),
         max_age = n(config::DEFAULT_MAX_AGE_MINUTES),
         eddn_age = n(config::DEFAULT_EDDN_MAX_AGE_MINUTES),
         eddn_rps = n(config::DEFAULT_EDDN_RPS),
