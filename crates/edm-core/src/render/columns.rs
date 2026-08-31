@@ -298,11 +298,16 @@ pub const QUICK_LOOKUP_COLUMNS: &[Column] = &[
     Column::new("side", "Market").priority(2),
     Column::new("price", "Price").right(),
     Column::new("volume", "Tons").right(),
-    Column::new("marketId", "Market ID").right().priority(3),
+    // The market id is a copy-paste convenience and the TRADE COMMANDS block
+    // below already carries it; how far away the station is decides whether the
+    // row is worth reading at all, so it outranks the id when the table has to
+    // shed columns \[C44\].
+    Column::new("marketId", "Market ID").right().priority(4),
     Column::new("station", "Station")
         .min_width(12)
         .max_width(30),
     Column::new("system", "System").max_width(28).priority(1),
+    Column::new("distance", "Ly").right().priority(3),
 ];
 
 /// The answer `edm route --quick` was asked for: per commodity, the best place

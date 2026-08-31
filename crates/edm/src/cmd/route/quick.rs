@@ -282,6 +282,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             seller_minimum,
             buyer_minimum,
             quick.markets_per_side,
+            &centre.coordinates,
         );
         // Only reachable when the shape was asked for by name: the config layer
         // already defaults a one-commodity lookup to a single hop. Say it here,
@@ -1511,6 +1512,7 @@ fn emit_candidates(
     seller_minimum: f64,
     buyer_minimum: f64,
     per_side: usize,
+    centre: &edm_core::domain::id64::Coordinates,
 ) {
     let floor = format!(
         "{} t seller / {} t published-buyer minimum",
@@ -1546,6 +1548,10 @@ fn emit_candidates(
                 edm_core::js::js_number(station.market_id),
                 station.station_name.clone(),
                 station.system_name.clone(),
+                edm_core::js::to_fixed_1(edm_route::time::distance_ly(
+                    *centre,
+                    station.coordinates,
+                )),
             ])
         })
         .collect();

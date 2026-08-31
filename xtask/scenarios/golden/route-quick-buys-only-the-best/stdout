@@ -1,14 +1,14 @@
 resolving "Sol" through Ardent for quick lookup...
 scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 1 best hop of at least 100 t to buy and 100 published t of demand, for 2 commodities...
 == QUICK LOOKUP  4 hop-ranked candidates (up to 1 best hop per commodity; 100 t seller / 100 t published-buyer minimum) 
-+------------+--------+--------+-------+-----------+--------------+--------+
-| Commodity  | Market |  Price |  Tons | Market ID | Station      | System |
-+============+========+========+=======+===========+==============+========+
-| gold       | sells  |  9,000 | 5,000 | 128016384 | Galileo      | Sol    |
-| gold       | buys   | 11,500 | 7,000 | 128016576 | Titan City   | Sol    |
-| silver     | sells  |  4,500 | 6,000 | 128016576 | Titan City   | Sol    |
-| silver     | buys   |  6,200 | 9,000 | 128016384 | Galileo      | Sol    |
-+------------+--------+--------+-------+-----------+--------------+--------+
++------------+--------+--------+-------+-----------+--------------+--------+-----+
+| Commodity  | Market |  Price |  Tons | Market ID | Station      | System |  Ly |
++============+========+========+=======+===========+==============+========+=====+
+| gold       | sells  |  9,000 | 5,000 | 128016384 | Galileo      | Sol    | 0.0 |
+| gold       | buys   | 11,500 | 7,000 | 128016576 | Titan City   | Sol    | 0.0 |
+| silver     | sells  |  4,500 | 6,000 | 128016576 | Titan City   | Sol    | 0.0 |
+| silver     | buys   |  6,200 | 9,000 | 128016384 | Galileo      | Sol    | 0.0 |
++------------+--------+--------+-------+-----------+--------------+--------+-----+
    2 of these rows name a market another row already names; each market is read once, so 2 are
    polled
    Ardent returns a price-index prefix, not a complete regional survey; hops are scored by estimated

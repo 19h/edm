@@ -1,12 +1,12 @@
 resolving "Sol" through Ardent for quick lookup...
 scoring Ardent seller/buyer pairs by estimated credits per hour and keeping the 1 best hop of at least 100 t to buy and 100 published t of demand, for 1 commodity...
 == QUICK LOOKUP  2 hop-ranked candidates (up to 1 best hop per commodity; 100 t seller / 100 t published-buyer minimum) 
-+------------+--------+--------+-------+------------+--------------+----------------+
-| Commodity  | Market |  Price |  Tons |  Market ID | Station      | System         |
-+============+========+========+=======+============+==============+================+
-| gold       | sells  |  9,400 | 6,000 | 3229009403 | Pricier Dock | Alpha Centauri |
-| gold       | buys   | 19,000 | 9,000 | 3229009405 | Modest Reach | Alpha Centauri |
-+------------+--------+--------+-------+------------+--------------+----------------+
++------------+--------+--------+-------+------------+--------------+----------------+-----+
+| Commodity  | Market |  Price |  Tons |  Market ID | Station      | System         |  Ly |
++============+========+========+=======+============+==============+================+=====+
+| gold       | sells  |  9,400 | 6,000 | 3229009403 | Pricier Dock | Alpha Centauri | 4.4 |
+| gold       | buys   | 19,000 | 9,000 | 3229009405 | Modest Reach | Alpha Centauri | 4.4 |
++------------+--------+--------+-------+------------+--------------+----------------+-----+
    Ardent returns a price-index prefix, not a complete regional survey; hops are scored by estimated
    credits per hour (spread × cargo / travel time) after local station filters, and Ardent's
    1,000-row per-side page cap still applies before that
