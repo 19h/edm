@@ -717,6 +717,27 @@ fn local_commander_state<F: Fs>(
     ports: &Ports<impl Clock, impl Entropy, F>,
     out: &Out,
 ) -> Option<edm_core::domain::commander::CommanderState> {
+    local_commander_state_inner(cli, ports, Some(out))
+}
+
+/// The same read, without the warnings.
+///
+/// `--follow` re-reads the journal every round to notice the ship moving, and
+/// the malformed-observation warning is a property of the file rather than of
+/// this read: printing it once is information, printing it sixty-eight times is
+/// noise that buries the ranking \[C49\].
+pub(super) fn reload_commander_state<F: Fs>(
+    cli: &Cli<'_>,
+    ports: &Ports<impl Clock, impl Entropy, F>,
+) -> Option<edm_core::domain::commander::CommanderState> {
+    local_commander_state_inner(cli, ports, None)
+}
+
+fn local_commander_state_inner<F: Fs>(
+    cli: &Cli<'_>,
+    ports: &Ports<impl Clock, impl Entropy, F>,
+    out: Option<&Out>,
+) -> Option<edm_core::domain::commander::CommanderState> {
     let home = cli
         .env("HOME")
         .or_else(|| cli.env("USERPROFILE"))
@@ -739,7 +760,10 @@ fn local_commander_state<F: Fs>(
         }
         match crate::commander::load_directory(&ports.fs, &directory) {
             Ok(state) => {
-                if !state.warnings.is_empty() && !out.is_json() {
+                if let Some(out) = out
+                    && !state.warnings.is_empty()
+                    && !out.is_json()
+                {
                     out.line(&format!(
                         "warning: local commander state ignored {} malformed or inconsistent observations",
                         state.warnings.len(),
@@ -747,10 +771,15 @@ fn local_commander_state<F: Fs>(
                 }
                 return Some(state);
             }
-            Err(_) if out.is_json() => {}
-            Err(_) => out.line(
-                "warning: a local Elite Dangerous journal directory could not be read; trying other locations",
-            ),
+            Err(_) => {
+                if let Some(out) = out
+                    && !out.is_json()
+                {
+                    out.line(
+                        "warning: a local Elite Dangerous journal directory could not be read; trying other locations",
+                    );
+                }
+            }
         }
     }
     None

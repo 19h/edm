@@ -128,6 +128,9 @@ Spending
                            ceiling and is enforced live; there is no other bound
                            unless you set one. Not --watch, which is the retry
                            switch on `trade` and `market`
+                           Each round re-reads your journal, so To start tracks
+                           the ship as you fly; with --from-here the loop stops
+                           when you leave the station its routes depart from
   --follow-rounds <n>      stop after n rounds rather than at the ceiling
   --max-age <minutes>      rank from cached prices younger than this, default
                            {max_age}. It bounds only which markets are

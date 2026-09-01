@@ -664,6 +664,12 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         // never come back, so a long session would erode to nothing.
         let baseline = ranked.routes().to_vec();
         let mut round: usize = 0;
+        // Where the ship was when this shortlist was built. Re-read from the
+        // journal each round: it is a local file, so noticing a jump costs
+        // nothing \[C49\].
+        let mut pinned_at = commander
+            .and_then(edm_core::domain::commander::CommanderState::current_market_id);
+        let mut origin = origin;
         // Consecutive rounds in which the whole shortlist came back unpriced.
         let mut barren_rounds: usize = 0;
         // The ingest counters describe the *first* solve. Re-printing them under
@@ -704,6 +710,40 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             pacer.begin_round();
             *ranked.routes_mut() = baseline.clone();
             live.clear();
+
+            // Follow the ship. The approach column is measured from wherever
+            // the commander now is, so `To start` stays true as they fly rather
+            // than freezing at the distance it was when the run began.
+            let now_state = crate::cmd::reload_commander_state(&app.cli, &app.ports);
+            if let Some(state) = now_state.as_ref() {
+                if let Some(xyz) = state
+                    .current_system
+                    .as_ref()
+                    .and_then(|seen| seen.value.coordinates)
+                {
+                    origin = Some(edm_core::domain::id64::Coordinates {
+                        x: xyz[0],
+                        y: xyz[1],
+                        z: xyz[2],
+                    });
+                }
+                // With the origin pinned, moving invalidates the whole
+                // shortlist: every route departs from a station the ship has
+                // left. Rescoring would keep printing hops from the old berth,
+                // which is worse than stopping, because they still price.
+                let now_at = state.current_market_id();
+                if config.from_here && now_at != pinned_at {
+                    note(
+                        "you have moved: every route in this list departs from the station you \
+                         were docked at, so the list no longer applies. Re-run to search from \
+                         where you are now"
+                            .to_owned(),
+                    );
+                    pinned_at = now_at;
+                    break;
+                }
+                pinned_at = now_at;
+            }
 
             let (verified, _fresh) = super::verify_ranked(
                 &verify_cx,
