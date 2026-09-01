@@ -656,7 +656,13 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             // with it.
             let message = parsed.misread.as_ref().unwrap_or(&error).to_string();
             out.error_paragraph(&message);
-            out.line(&cli::usage());
+            // And the help that explains it comes from the same table as the
+            // complaint. Printing the ported usage after a route-only flag's
+            // error says the flag does not exist \[C45\].
+            out.line(&match parsed.misread_command.as_deref() {
+                Some(command) => cli::usage_for(command),
+                None => cli::usage(),
+            });
             out.set_exit(EXIT_USAGE);
             return;
         }
@@ -811,6 +817,22 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             "sell" => edm_core::cli::sell::sell_usage(),
             _ => cli::route_usage(),
         });
+        return;
+    }
+
+    // `--follow` is route's alone. Parsed by the shared extended table, it
+    // would otherwise be accepted and ignored everywhere else -- and a flag
+    // that is accepted and does nothing is worse than one that is rejected:
+    // the commander watches a table that will never update and concludes the
+    // prices are not moving \[C43\].
+    if args.command != "route"
+        && matches!(cli.optional_decimal(Flag::Follow), Ok(Some(_)))
+    {
+        out.error(&format!(
+            "--follow is a route option; `edm {}` prints once. Use `edm route --quick ... --follow <s>`",
+            args.command
+        ));
+        out.set_exit(EXIT_FAILURE);
         return;
     }
 

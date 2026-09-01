@@ -83,6 +83,26 @@ pub struct Parsed {
     /// wrong answer to print, in the same way and for the same reason that
     /// `parsed.route` is consulted before it.
     pub misread: Option<ArgError>,
+    /// Which extension the misread belongs to, when there is one.
+    ///
+    /// The complaint comes from the extended table, so the help that explains
+    /// it has to come from the same place. Printing the ported `usage()` after
+    /// a route-only flag's error tells the reader the flag does not exist --
+    /// reported from a live run where `--follow` with no value printed the Bun
+    /// help, which has never mentioned it \[C45\].
+    pub misread_command: Option<String>,
+}
+
+/// The help text a command should print, ported or extended.
+#[must_use]
+pub fn usage_for(command: &str) -> String {
+    match command {
+        "eddn" => super::cli::feed::feed_usage(),
+        "vendor" => super::cli::vendor::vendor_usage(),
+        "sell" => super::cli::sell::sell_usage(),
+        "route" => route_usage(),
+        _ => usage(),
+    }
 }
 
 /// Parses against both tables and decides which reading governs.
@@ -104,11 +124,11 @@ pub fn parse_dispatch(argv: &[String]) -> Parsed {
     // which is the direction that matters: a leading bare word is always the
     // command, so a ported command's argv can never reach this and no pinned
     // message can change.
-    let misread = match (&extended, argv.first()) {
+    let (misread, misread_command) = match (&extended, argv.first()) {
         (Err(error), Some(first)) if is_extended_command(&first.to_ascii_lowercase()) => {
-            Some(error.clone())
+            (Some(error.clone()), Some(first.to_ascii_lowercase()))
         }
-        _ => None,
+        _ => (None, None),
     };
     let route = extended
         .ok()
@@ -117,6 +137,7 @@ pub fn parse_dispatch(argv: &[String]) -> Parsed {
         base: parse(argv),
         route,
         misread,
+        misread_command,
     }
 }
 
@@ -126,6 +147,40 @@ mod dispatch_tests {
 
     fn argv(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|token| (*token).to_owned()).collect()
+    }
+
+    /// The complaint and the help have to come from the same table. A
+    /// route-only flag's error printed under the ported usage tells the reader
+    /// the flag does not exist -- which is what `--follow` with no value did
+    /// \[C45\].
+    #[test]
+    fn a_misread_extension_names_the_command_whose_help_explains_it() {
+        for (tokens, expected) in [
+            (&["route", "--follow"][..], "route"),
+            (&["sell", "--worth"][..], "sell"),
+            (&["vendor", "--radius"][..], "vendor"),
+            (&["eddn", "--rps"][..], "eddn"),
+        ] {
+            let parsed = parse_dispatch(&argv(tokens));
+            assert_eq!(
+                parsed.misread_command.as_deref(),
+                Some(expected),
+                "{tokens:?}"
+            );
+            assert!(
+                usage_for(expected).contains(&format!("edm {expected}"))
+                    || expected == "eddn",
+                "{expected} must have its own help"
+            );
+        }
+    }
+
+    /// And a ported command keeps the ported help, byte for byte: R49 pins it.
+    #[test]
+    fn a_ported_flag_error_carries_no_extension_command() {
+        let parsed = parse_dispatch(&argv(&["trade", "--qty"]));
+        assert!(parsed.misread_command.is_none());
+        assert!(parsed.misread.is_none());
     }
 
     /// A route-only flag left without its value used to be reported as unknown,

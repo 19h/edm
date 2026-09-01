@@ -1714,6 +1714,11 @@ fn ship(config: &RouteConfig) -> ShipConfig {
 
 fn limits(config: &RouteConfig) -> Limits {
     Limits {
+        objective: if config.by_profit {
+            edm_route::time::Objective::Profit
+        } else {
+            edm_route::time::Objective::Rate
+        },
         top_n: config.top,
         min_profit: Credits(config.min_profit as i64),
         max_stops: match config.shape {

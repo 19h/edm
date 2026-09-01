@@ -456,6 +456,9 @@ pub enum FillPolicy {
 /// Everything that narrows the search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// What "best" means: credits per hour, or credits per run with distance
+    /// ignored \[C47\].
+    pub objective: crate::time::Objective,
     /// How many routes to report per shape.
     pub top_n: usize,
     /// How much wider than `top_n` the shortlist handed to credit rethreading
@@ -492,6 +495,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            objective: crate::time::Objective::default(),
             top_n: 20,
             shortlist_factor: 4,
             min_profit: Credits(0),

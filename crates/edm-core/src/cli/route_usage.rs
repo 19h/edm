@@ -171,6 +171,14 @@ Output
                            a region 300 Ly away does not move the ship. The
                            approach is not part of the lap or the rate — the
                            model starts its clock in the source system
+  --by-profit              order by credits per run and ignore travel time
+                           entirely (aliases --ignore-distance, --raw-profit).
+                           The default ranks by credits per hour, so a rich hop
+                           three hundred light years out loses to a thin one
+                           next door; this is the flag for when the flying is
+                           not the constraint — a hauler already heading that
+                           way, or a hold that has to be filled once. Ly and
+                           To start are still shown, they just stop deciding
   --per-hour               show the credits-per-hour column. The ranking is
                            ordered by it either way; it is hidden so the table
                            has room for Stock/Demand, and because it is the

@@ -104,7 +104,20 @@ pub fn ranking_with(
     // unless the note says where the missing time went. Naming `To start`
     // matters for the same reason \[C40\]: it is the one number on screen that
     // looks like it belongs in a rate and is deliberately not in this one.
-    if !show_rate {
+    // The objective is read off the routes rather than passed in: it is a
+    // property of the search that produced them, and the key already carries it
+    // so the heap could honour it \[C47\].
+    let by_profit = routes
+        .first()
+        .is_some_and(|route| route.rank.objective == crate::time::Objective::Profit);
+    if by_profit {
+        blocks.push(Block::Note(
+            "ordered by credits per run, with travel time ignored (--by-profit). Ly and To start \
+             are shown but do not affect the order, so a row far away can outrank a nearer one \
+             that pays less"
+                .to_owned(),
+        ));
+    } else if !show_rate {
         blocks.push(Block::Note(
             "ordered by credits per hour on the first lap, which --per-hour shows: that clock \
              starts on approach to the first station, where Lap does not, so two rows can share \

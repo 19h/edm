@@ -166,7 +166,7 @@ pub fn solve(
     wanted: Wanted,
     watch: Watch<'_>,
 ) -> Solution {
-    let geometry = Geometry::new(markets, time);
+    let geometry = Geometry::ranked_by(markets, time, limits.objective);
     let pools = Pools::from_markets(markets);
     // Built only for the shapes that read it. `single::solve` works off the
     // pools alone, so a one-way search used to pay for the whole trade graph

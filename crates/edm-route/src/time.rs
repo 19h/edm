@@ -144,6 +144,20 @@ fn ceil_millis(sec: f64) -> Millis {
     Millis(ms as i64)
 }
 
+/// What "best" means when routes are ordered \[C47\].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Objective {
+    /// Credits per hour over the first lap: the default, and the only one that
+    /// answers "what should I fly".
+    #[default]
+    Rate,
+    /// Credits per run, with travel time ignored entirely. Answers the
+    /// different question "where is the most money in one trip", which is the
+    /// right one when the flying is not the constraint -- a hauler already
+    /// heading that way, or a hold that must be filled once.
+    Profit,
+}
+
 /// Distances and times over a fixed set of markets.
 ///
 /// Bundled so the solvers can build a route without ever naming a floating
@@ -154,13 +168,34 @@ pub struct Geometry<'a> {
     pub markets: &'a [Market],
     /// The model in force.
     pub time: TimeModel,
+    /// How routes built from this geometry are ordered.
+    ///
+    /// Carried here rather than passed to every constructor because `Geometry`
+    /// is `Copy` and already reaches `Route::single_hop` and `Route::cycle`,
+    /// which is where a `RankKey` is built. The alternative was widening two
+    /// public signatures and every call of them.
+    pub objective: Objective,
 }
 
 impl<'a> Geometry<'a> {
     /// Binds a model to a market set.
     #[must_use]
     pub fn new(markets: &'a [Market], time: TimeModel) -> Self {
-        Self { markets, time }
+        Self {
+            markets,
+            time,
+            objective: Objective::Rate,
+        }
+    }
+
+    /// The same geometry, ordering routes by `objective`.
+    #[must_use]
+    pub fn ranked_by(markets: &'a [Market], time: TimeModel, objective: Objective) -> Self {
+        Self {
+            markets,
+            time,
+            objective,
+        }
     }
 
     /// Separation of two markets' systems, in light years.

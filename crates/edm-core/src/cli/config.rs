@@ -1233,6 +1233,9 @@ pub struct RouteConfig {
     /// session is many sweeps with sleep between them; `--max-requests` becomes
     /// the session bound and is enforced live, which is the only thing that
     /// makes an indefinite loop safe to offer.
+    /// `--by-profit`: order by credits per run and ignore travel time entirely
+    /// \[C47\].
+    pub by_profit: bool,
     pub follow_seconds: Option<f64>,
     /// `--follow-rounds <n>`: stop after this many rounds. `None` means run
     /// until the request ceiling or the user kills it.
@@ -1611,6 +1614,7 @@ pub fn route_config_with_reference(
         deadline_seconds: cli
             .optional_decimal(Flag::Deadline)?
             .unwrap_or(DEFAULT_DEADLINE_SECONDS),
+        by_profit: cli.switch_value(Flag::ByProfit, false)?,
         follow_seconds: follow_seconds(cli)?,
         follow_rounds: {
             let asked = cli.optional_number(Flag::FollowRounds)?;

@@ -449,6 +449,13 @@ fn leg_caveats(legs: &[RouteLeg], markets: &[crate::model::Market]) -> Vec<Cavea
 /// list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RankKey {
+    /// Which of the two orderings below applies \[C47\].
+    ///
+    /// Stored on the key rather than consulted at the sort, because the search
+    /// heap in `single`/`round` keeps its best N *by this key*: a high-profit,
+    /// low-rate route would be evicted mid-search and never reach a display
+    /// sort that wanted it.
+    pub objective: crate::time::Objective,
     /// The rate this route is ranked by: the steady rate where one exists, the
     /// first-lap rate where it does not.
     pub rate: Ratio,
@@ -493,6 +500,7 @@ impl RankKey {
         let stations = (0..n).map(|i| ids[(i + shift) % n]).collect();
         let commodities = (0..n).map(|i| goods[(i + shift) % n]).collect();
         Self {
+            objective: geometry.objective,
             rate,
             profit,
             millis,
@@ -503,10 +511,25 @@ impl RankKey {
 }
 
 impl Ord for RankKey {
+    /// Greater is better, under whichever objective the key carries.
+    ///
+    /// Both orderings end in the same absolute tie-break, so a shuffled input
+    /// permutation still produces an identical ranking. Comparing two keys
+    /// built under *different* objectives is meaningless, and cannot happen:
+    /// the objective comes from the geometry, and one search has one geometry.
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.rate
-            .cmp(&other.rate)
-            .then(self.profit.cmp(&other.profit))
+        let head = match self.objective {
+            crate::time::Objective::Rate => self
+                .rate
+                .cmp(&other.rate)
+                .then(self.profit.cmp(&other.profit)),
+            // Distance ignored: the whole point is that a route two hundred
+            // light years out and one next door compare on credits alone. Time
+            // still breaks an exact tie, because between two identical payouts
+            // the shorter flight is strictly better.
+            crate::time::Objective::Profit => self.profit.cmp(&other.profit),
+        };
+        head
             // Less time is better, so the comparison inverts here.
             .then(other.millis.cmp(&self.millis))
             // And the tie-break prefers the lower market id, deterministically.
@@ -604,6 +627,7 @@ mod tests {
     #[test]
     fn the_rank_key_is_a_total_order_that_ends_in_station_ids() {
         let base = RankKey {
+            objective: crate::time::Objective::Rate,
             rate: Ratio {
                 credits: 1,
                 millis: 1,
@@ -676,5 +700,61 @@ mod tests {
             }
         );
         assert!(route.caveats.contains(&super::Caveat::BulkPriceEstimated));
+    }
+
+    /// The whole point of the flag: a route that pays more wins even when it
+    /// takes far longer, which is exactly what the rate objective refuses
+    /// \[C47\].
+    #[test]
+    fn by_profit_prefers_the_bigger_payout_over_the_faster_lap() {
+        let quick = RankKey {
+            objective: crate::time::Objective::Profit,
+            rate: Ratio::new(Credits(1_000), Millis(1_000)),
+            profit: Credits(1_000),
+            millis: Millis(1_000),
+            stations: vec![1, 2],
+            commodities: vec![0],
+        };
+        let rich = RankKey {
+            profit: Credits(10_000),
+            millis: Millis(600_000),
+            rate: Ratio::new(Credits(10_000), Millis(600_000)),
+            stations: vec![3, 4],
+            ..quick.clone()
+        };
+        assert!(rich > quick, "profit must win when distance is ignored");
+
+        // And under the default objective the fast one wins, unchanged.
+        let quick_rate = RankKey {
+            objective: crate::time::Objective::Rate,
+            ..quick
+        };
+        let rich_rate = RankKey {
+            objective: crate::time::Objective::Rate,
+            ..rich
+        };
+        assert!(
+            quick_rate > rich_rate,
+            "the rate objective must still prefer the faster lap"
+        );
+    }
+
+    /// Equal payouts still break toward less flying: between two identical
+    /// credits the shorter trip is strictly better.
+    #[test]
+    fn by_profit_breaks_an_exact_tie_toward_the_shorter_flight() {
+        let near = RankKey {
+            objective: crate::time::Objective::Profit,
+            rate: Ratio::new(Credits(5_000), Millis(1_000)),
+            profit: Credits(5_000),
+            millis: Millis(1_000),
+            stations: vec![1, 2],
+            commodities: vec![0],
+        };
+        let far = RankKey {
+            millis: Millis(900_000),
+            ..near.clone()
+        };
+        assert!(near > far);
     }
 }

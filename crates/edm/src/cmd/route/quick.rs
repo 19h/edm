@@ -68,6 +68,14 @@ struct SideSelection {
     clippy::too_many_lines,
     reason = "the sequence is the safety contract: free index, filters, priced gate, live reads, then rank"
 )]
+/// How many consecutive empty rounds end a `--follow` session \[C46\].
+///
+/// Three rather than one, because a single round can come back empty from a
+/// transient failure -- a market that timed out is a market whose route drops
+/// for that round only. Three in a row is the candidate set being genuinely
+/// gone, not a bad read.
+const BARREN_ROUNDS_BEFORE_STOPPING: usize = 3;
+
 pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
@@ -602,6 +610,12 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         // never come back, so a long session would erode to nothing.
         let baseline = ranked.routes().to_vec();
         let mut round: usize = 0;
+        // Consecutive rounds in which the whole shortlist came back unpriced.
+        let mut barren_rounds: usize = 0;
+        // The ingest counters describe the *first* solve. Re-printing them under
+        // every round would restate a number the re-reads never recomputed, so
+        // they are cleared once they have been shown.
+        ranked.crossing = crate::route::ingest::Crossing::default();
         loop {
             if let Some(limit) = config.follow_rounds
                 && round >= limit
@@ -673,6 +687,28 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
                 None,
                 None,
             );
+
+            // A follow round re-prices a fixed candidate set; it never
+            // re-nominates. So when every route dies at once -- which is what
+            // happens when a whole ranking shares one buyer and that buyer's
+            // order is filled or withdrawn -- no later round can recover it,
+            // and the loop would otherwise re-read the same dead markets
+            // forever to print "no profitable hop". Stop and say why, rather
+            // than spend the ceiling proving it repeatedly \[C46\].
+            if ranked.routes().is_empty() {
+                barren_rounds += 1;
+                if barren_rounds >= BARREN_ROUNDS_BEFORE_STOPPING {
+                    note(format!(
+                        "the whole shortlist has been unpriced for {} rounds: every route in it \
+                         has lost a side, and --follow re-prices the routes it was given rather \
+                         than nominating new ones. Re-run to search again",
+                        edm_core::js::format_integer(barren_rounds as f64),
+                    ));
+                    break;
+                }
+            } else {
+                barren_rounds = 0;
+            }
         }
     }
 

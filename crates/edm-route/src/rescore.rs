@@ -39,7 +39,7 @@ pub fn rescore(
     limits: &Limits,
     routes: Vec<Route>,
 ) -> Vec<Route> {
-    let geometry = Geometry::new(markets, time);
+    let geometry = Geometry::ranked_by(markets, time, limits.objective);
     let mut rescored: Vec<Route> = routes
         .into_iter()
         .filter_map(|route| reprice(&geometry, markets, ship, limits, &route))
