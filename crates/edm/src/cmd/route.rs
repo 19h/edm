@@ -1267,13 +1267,29 @@ pub(super) fn solve_ranked_from(
     stations: &[ardent::ArdentStation],
     candidate_demand_prices: &HashMap<(i64, i64), i64>,
     watch: edm_route::watch::Watch<'_>,
+    depart_from: &[f64],
 ) -> Ranked {
-    let (markets, commodities, crossing) = ingest::markets_from_listings(
+    let (mut markets, commodities, crossing) = ingest::markets_from_listings(
         listings,
         stations,
         &ingest::floors(config),
         candidate_demand_prices,
     );
+    // `--from-here` \[C48\]. Pinning the origin by *removing supply* rather
+    // than by filtering finished routes is what makes it exact: a post-filter
+    // would run the search over every seller in the region, truncate to
+    // `top_n`, and only then discard the ones that did not start here -- so a
+    // route from this station would be dropped before it was ever seen
+    // whenever twenty better ones existed elsewhere, which is the normal case.
+    // With no supply anywhere else, every hop the solver can build already
+    // departs from here, and `top_n` means what it says.
+    if !depart_from.is_empty() {
+        for market in &mut markets {
+            if !depart_from.contains(&(market.market_id as f64)) {
+                market.supply.clear();
+            }
+        }
+    }
     finish_solve(
         config,
         markets,

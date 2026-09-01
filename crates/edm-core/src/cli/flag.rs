@@ -175,6 +175,7 @@ pub enum Flag {
     /// `Stock/Demand`, which says whether the rate means anything.
     PerHour,
     ByProfit,
+    FromHere,
 }
 
 /// Which flag table a parse resolves names against.
@@ -189,7 +190,7 @@ pub enum Table {
 
 impl Flag {
     /// Every flag, in discriminant order.
-    pub const ALL: [Self; 94] = [
+    pub const ALL: [Self; 95] = [
         Self::MarketId,
         Self::CmdrId,
         Self::MachineId,
@@ -284,6 +285,7 @@ impl Flag {
         Self::VerifySystems,
         Self::PerHour,
         Self::ByProfit,
+        Self::FromHere,
     ];
 
     /// How many distinct flags exist; the width of an [`crate::cli::Args`] slot
@@ -373,6 +375,7 @@ impl Flag {
             // would silently set the worker count instead.
             "perhour" | "creditsperhour" | "showrate" => Self::PerHour,
             "byprofit" | "ignoredistance" | "rawprofit" => Self::ByProfit,
+            "fromhere" | "departhere" | "here" => Self::FromHere,
             "follow" => Self::Follow,
             "followrounds" | "rounds" => Self::FollowRounds,
             _ => return None,
@@ -453,6 +456,7 @@ impl Flag {
             Self::VerifySystems => "--verify-systems",
             Self::PerHour => "--per-hour",
             Self::ByProfit => "--by-profit",
+            Self::FromHere => "--from-here",
             Self::Follow => "--follow",
             Self::FollowRounds => "--follow-rounds",
 

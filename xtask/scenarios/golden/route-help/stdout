@@ -150,6 +150,15 @@ Output
                            a region 300 Ly away does not move the ship. The
                            approach is not part of the lap or the rate — the
                            model starts its clock in the source system
+  --from-here              every route must depart from the market you are
+                           docked at, taken from the journal; undocked, from any
+                           market in your current system (aliases --here,
+                           --depart-here). Answers what you can load right now,
+                           which the region-wide ranking cannot: it nominates by
+                           price, so the berth under your ship is almost never
+                           in any commodity's top page. The origin is pinned by
+                           removing supply everywhere else, so --top counts
+                           routes from here rather than routes it kept
   --by-profit              order by credits per run and ignore travel time
                            entirely (aliases --ignore-distance, --raw-profit).
                            The default ranks by credits per hour, so a rich hop

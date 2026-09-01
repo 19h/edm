@@ -106,6 +106,50 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     ));
     let centre = super::resolve(&ardent, &config.reference).await?;
 
+    // `--from-here`: which markets a route may depart from \[C48\]. Docked, it
+    // is the one market under the ship; undocked, every market in the current
+    // system, because "here" is then a system and not a berth. Ardent's system
+    // markets page is free, so this costs no Frontier request.
+    let mut depart_stations: Vec<edm_core::ardent::ArdentStation> = Vec::new();
+    if config.from_here {
+        let mut here = ardent.system_markets(&centre).await.unwrap_or_default();
+        edm_core::ardent::place(&mut here, centre.address, centre.coordinates);
+        let docked =
+            commander.and_then(edm_core::domain::commander::CommanderState::current_market_id);
+        if let Some(id) = docked
+            && let Some(mine) = here.iter().find(|s| s.market_id == id as f64)
+        {
+            depart_stations.push(mine.clone());
+        } else {
+            depart_stations = here;
+        }
+        if depart_stations.is_empty() {
+            return Err(format!(
+                "--from-here found no market to depart from: the journal does not say you are \
+                 docked, and Ardent lists no market in {}",
+                centre.name
+            ));
+        }
+    }
+    let depart_from: Vec<f64> = depart_stations.iter().map(|s| s.market_id).collect();
+    // Say what was pinned. "No profitable hop" is a very different answer
+    // depending on whether it means "nothing here sells anything worth hauling"
+    // or "I could not work out where here is", and without this line the two
+    // are indistinguishable \[C48\].
+    if !depart_stations.is_empty() {
+        note(match depart_stations.as_slice() {
+            [only] => format!(
+                "--from-here: every route departs from {} ({})",
+                only.station_name, only.system_name
+            ),
+            many => format!(
+                "--from-here: not docked, so every route departs from one of the {} markets in {}",
+                edm_core::js::format_integer(many.len() as f64),
+                centre.name,
+            ),
+        });
+    }
+
     // Resolve every --item, and expand every --category, against Ardent's own
     // catalogue before spending a query on either. An id Ardent does not index
     // answers `200 []`, exactly like a region with no stock, so without this
@@ -309,11 +353,20 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     // A market can sell Gold, buy Silver, and occur in both price pages. It is
     // one live listing and one possible EDDN message, never two paid polls.
     let mut seen = HashSet::new();
-    let stations = candidates
+    let mut stations = candidates
         .iter()
         .filter(|candidate| seen.insert(candidate.price.station.market_id.to_bits()))
         .map(|candidate| candidate.price.station.clone())
         .collect::<Vec<_>>();
+    // The station being departed from has to be *read*, not merely allowed:
+    // Ardent nominates by price, so the market under the ship is usually not in
+    // any commodity's top page, and clearing every other market's supply would
+    // then leave the search with no seller at all.
+    for station in &depart_stations {
+        if seen.insert(station.market_id.to_bits()) {
+            stations.push(station.clone());
+        }
+    }
 
     let selected_markets = stations.len();
     let mut provenance = super::QuickProvenance {
@@ -503,6 +556,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         &stations,
         &no_candidates,
         watch,
+        &depart_from,
     );
 
     // Re-read the markets behind the ranked routes until the presented list is

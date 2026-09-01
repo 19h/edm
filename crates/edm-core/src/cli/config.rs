@@ -1235,6 +1235,9 @@ pub struct RouteConfig {
     /// makes an indefinite loop safe to offer.
     /// `--by-profit`: order by credits per run and ignore travel time entirely
     /// \[C47\].
+    /// `--from-here`: every route must depart from the market the commander is
+    /// docked at, or from their current system when undocked \[C48\].
+    pub from_here: bool,
     pub by_profit: bool,
     pub follow_seconds: Option<f64>,
     /// `--follow-rounds <n>`: stop after this many rounds. `None` means run
@@ -1614,6 +1617,7 @@ pub fn route_config_with_reference(
         deadline_seconds: cli
             .optional_decimal(Flag::Deadline)?
             .unwrap_or(DEFAULT_DEADLINE_SECONDS),
+        from_here: cli.switch_value(Flag::FromHere, false)?,
         by_profit: cli.switch_value(Flag::ByProfit, false)?,
         follow_seconds: follow_seconds(cli)?,
         follow_rounds: {
