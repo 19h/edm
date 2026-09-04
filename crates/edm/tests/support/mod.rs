@@ -221,6 +221,29 @@ pub(crate) fn drive_with_env_and_files(
     extra: Vec<(String, String)>,
     files: Vec<(PathBuf, String)>,
 ) -> Run {
+    drive_inner(argv, http, extra, files, false)
+}
+
+/// As [`drive_with_env_and_files`], with tokio's clock paused so that every
+/// sleep — a `--follow` interval, a pacer gap, a retry backoff — resolves the
+/// instant the runtime is otherwise idle. A loop of thirty-second rounds
+/// completes in milliseconds and the sequence of what it did is unchanged.
+pub(crate) fn drive_with_paused_time(
+    argv: &[&str],
+    http: &FakeHttp,
+    extra: Vec<(String, String)>,
+    files: Vec<(PathBuf, String)>,
+) -> Run {
+    drive_inner(argv, http, extra, files, true)
+}
+
+fn drive_inner(
+    argv: &[&str],
+    http: &FakeHttp,
+    extra: Vec<(String, String)>,
+    files: Vec<(PathBuf, String)>,
+    paused_time: bool,
+) -> Run {
     let argv: Vec<String> = argv.iter().map(|token| (*token).to_owned()).collect();
     // `EnvSnapshot` is first-wins per name \[R55\], so the caller's overrides go
     // in front of the defaults.
@@ -248,7 +271,12 @@ pub(crate) fn drive_with_env_and_files(
             .enable_time()
             .build()
             .expect("a current-thread runtime");
-        runtime.block_on(cmd::run(parsed, &env, http, &ports, &out, &overrides));
+        runtime.block_on(async {
+            if paused_time {
+                tokio::time::pause();
+            }
+            cmd::run(parsed, &env, http, &ports, &out, &overrides).await;
+        });
         out.flush();
         out.exit_code()
     });

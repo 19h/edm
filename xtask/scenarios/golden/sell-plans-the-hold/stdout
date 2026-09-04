@@ -19,13 +19,16 @@ reading 3 buyers live...
 +---+--------------------------------+-----+------------+-------+--------+---------------+
    sells 1,232 t for 61,600,000 cr over 2m 42s, at 1 stop
 == WHAT ELSE YOU COULD DO ==========================================================================
-+--------------+--------------------+-------+---------------+--------+------------------+
-| Plan         | Stops at           |  Sold |       Credits |   Time |       Extra pays |
-+==============+====================+=======+===============+========+==================+
-| recommended  | Takes The Lot      | 1,232 | 61,600,000 cr | 2m 42s |                - |
-| most credits | Far And Rich       | 1,232 | 73,920,000 cr | 9m 27s | 109,511,111 cr/h |
-+--------------+--------------------+-------+---------------+--------+------------------+
++--------------+-----------------------+-------+-------+---------------+--------+------------------+
+| Plan         | Stops at              |    Ly |  Sold |       Credits |   Time |       Extra pays |
++==============+=======================+=======+=======+===============+========+==================+
+| recommended  | Takes The Lot (Alpha~ |   4.4 | 1,232 | 61,600,000 cr | 2m 42s |                - |
+| most credits | Far And Rich (Long W~ | 300.0 | 1,232 | 73,920,000 cr | 9m 27s | 109,511,111 cr/h |
++--------------+-----------------------+-------+-------+---------------+--------+------------------+
    columns hidden to fit 100 cols: Stops, Cr/h
    your bar is 1,372,506,545 cr/h (--worth); an extra stop is taken only when it beats that
 == TRADE COMMANDS ==================================================================================
-  at Takes The Lot                edm trade --market-id 3229009410 --type sell --item Tritium --qty 1232
+  at Takes The Lot (Alpha Centauri)  edm trade --market-id 3229009410 --type sell --item Tritium --qty 1232
+
+  most credits instead (12,320,000 more, 6m 45s longer):
+  at Far And Rich (Long Way)         edm trade --market-id 3229009412 --type sell --item Tritium --qty 1232

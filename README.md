@@ -99,6 +99,32 @@ demand, defaulting to a tenth of the hold. And `--quick` defaults `--shape` to
 hop can outpay a metals round trip even when gold is in that class. Pass
 `--shape round-trip` when you want a return cargo.
 
+## Drive it interactively
+
+`edm ui` is a full-screen front end over the same three searches. Fill in the
+form (system, items, radius, cargo, the shape and every flag `edm route` and
+`edm sell` take), watch it run, and pin the route you mean to fly. A pinned
+route is kept fresh on its own in the background: every one of its markets is
+re-read live on the interval, the docking access of any carrier on it is
+checked, and the detail screen shows stock, demand, prices, brackets, how old
+each read is and how far the ship is from the first stop. The results list can
+be re-read too, and the sell plan re-planned as the hold empties.
+
+```bash
+edm ui
+edm ui --follow 45 --max-requests 500
+edm ui --rps 2 --cache-dir ~/.cache/edm-alt
+```
+
+The form completes system and station names from your journal, from the
+systems around the ship and from Ardent's station search, and commodity names
+from Ardent's catalogue. A sweep that would need `--yes` on the command line
+asks in a modal instead, with the same plan table. `--max-requests` is the
+ceiling for the whole session, counted live across every search and refresh.
+Nothing in the UI transacts: the detail screen shows the `edm trade` commands
+for a route and copies them to the clipboard through the terminal (OSC 52).
+Pins and the last search persist under the cache directory.
+
 ## How a route search works
 
 The complete route-search path is:
@@ -204,6 +230,32 @@ higher. Add `--detail` to retain sold-out premium slots and Frontier's raw
 prototype names. JSON output also preserves each decoded vendor payload for
 shape inspection and downstream tools.
 
+## List combat zones
+
+`edm cz` reads the game-internal starsystem payload the system map uses —
+including the Frontline Solutions overlay — and lists space conflict zones with
+their Low / Med / High intensity, the two factions fighting, and distance from
+the arrival star.
+
+With no target, it uses the commander's current system from the latest local
+journal. By default the search stays in that one system; add `--radius N` to
+enumerate every known system within N light years using the same cap-aware
+Ardent discovery as `edm route`. Regional searches refuse more than 2,000
+Frontier reads by default and require `--yes` above 250 reads.
+
+```bash
+edm cz
+edm cz Arangorii
+edm cz --radius 20
+edm cz Sol --radius 15 --json
+edm cz Sol --radius 15 --settlements --yes
+```
+
+`--settlements` also includes on-foot settlement warzones, named from the
+settlement itself. `--detail` adds each zone's body-site id and gameplay name.
+
+## Execute controlled trades
+
 ## Execute controlled trades
 
 Buy or sell by commodity name or ID. `edm` can look up the current price, clamp
@@ -265,8 +317,8 @@ Provide credentials as flags or environment variables:
 | `--machine-token` | `MACHINE_TOKEN` | Exactly 80 characters |
 | `--auth-token` | `AUTH_TOKEN` | Exactly 2024 characters |
 
-Run `edm help`, `edm route --help`, `edm vendor --help`, or `edm eddn --help` for
-the complete option reference.
+Run `edm help`, `edm route --help`, `edm vendor --help`, `edm cz --help`, or
+`edm eddn --help` for the complete option reference.
 
 ## Protocol research
 

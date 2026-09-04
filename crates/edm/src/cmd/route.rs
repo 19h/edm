@@ -40,7 +40,7 @@ use crate::route::ingest;
 use crate::route::pacer::{Pacer, Pacing};
 use crate::route::plan::{self, Survey};
 
-mod quick;
+pub(crate) mod quick;
 
 /// Above this many markets, the cache pre-pass says it is happening.
 ///
@@ -54,7 +54,7 @@ const CACHE_NOTE_THRESHOLD: usize = 500;
 const DIGEST_SOURCE: &str = "frontier-daily-digest-v1";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct SpecialOpportunities {
+pub(crate) struct SpecialOpportunities {
     rescue_systems: usize,
     colonisation_markets: usize,
     stateful_markets: usize,
@@ -67,7 +67,7 @@ struct SpecialOpportunities {
 /// price-index prefix that happened to yield the same number of markets as a
 /// small regional survey is still not a complete regional answer.
 #[derive(Clone, Debug)]
-pub(super) struct QuickProvenance {
+pub(crate) struct QuickProvenance {
     pub commodities: Vec<String>,
     pub markets_per_side: usize,
     pub seller_minimum: f64,
@@ -95,7 +95,7 @@ pub(super) struct QuickProvenance {
 /// 330 ms each serially. Sixteen rather than more because this is somebody
 /// else's free service and the gain past it is small — the win is going from
 /// one to sixteen, not from sixteen to sixty-four.
-const ARDENT_CONCURRENCY: usize = 16;
+pub(crate) const ARDENT_CONCURRENCY: usize = 16;
 
 /// How long the optimiser may work in silence before it starts saying so.
 ///
@@ -103,13 +103,13 @@ const ARDENT_CONCURRENCY: usize = 16;
 /// and printing anyway would put three lines of scaffolding under every small
 /// run — including the parity harness's, whose output is compared byte for
 /// byte. Above it the run is one a user is waiting on.
-const SOLVE_QUIET_MS: f64 = 2_000.0;
+pub(crate) const SOLVE_QUIET_MS: f64 = 2_000.0;
 
 /// The floor on the gap between two search progress lines.
 ///
 /// The graph build reports every few thousand supply rows, which at five
 /// thousand markets is tens of times a second. A terminal is not a log.
-const SOLVE_LINE_MS: f64 = 500.0;
+pub(crate) const SOLVE_LINE_MS: f64 = 500.0;
 
 /// Run the command.
 #[expect(
@@ -117,18 +117,32 @@ const SOLVE_LINE_MS: f64 = 500.0;
     reason = "one linear sequence, and the order is the safeguard: everything free \
               and shown before anything is spent. Splitting it hides that."
 )]
-pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the command, plus who answers its gate and who runs its solve: the console for `edm route`, the screen for `edm ui`"
+)]
+pub async fn run<H, C, E, F, T, G, S>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     commander: Option<&edm_core::domain::commander::CommanderState>,
     timer: &T,
-) -> CmdResult {
+    gate: &G,
+    solver: &S,
+) -> CmdResult
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+    G: plan::Gate,
+    S: Solver,
+{
     let out = app.out;
     // Everything else this run writes goes to stderr from here on \[C28\].
     if config.json {
         out.stdout_is_a_document();
     }
-    let ardent = ArdentClient::new(app.http, &app.overrides.ardent_base);
 
     // Nothing below this point may run on a name that was never resolved: an
     // enumeration centred on the wrong system is a complete, confident answer
@@ -184,8 +198,18 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                 .to_owned(),
         );
     }
+    // One pacer for the whole run, whichever search it is: one bucket, one
+    // breaker window, one `Spent` \[C37\]. `EDM_JITTER` pins the backoff
+    // fraction so a retry scenario's attempt count is reproducible \[C29\];
+    // unset, this is the real entropy. Each search opens its deadline window
+    // with `begin_round` where its first paid request can happen.
+    let entropy = crate::ports::PinnedJitter {
+        inner: &app.ports.entropy,
+        unit: app.overrides.jitter.unwrap_or(f64::NAN),
+    };
+    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
     if config.quick.is_some() {
-        return quick::run(app, config, commander, timer).await;
+        return quick::run(app, config, commander, timer, &pacer, &entropy, gate).await;
     }
     if config.verify_systems && config.radius_ly > edm_core::consts::MARKETDATA_DISTANCE_LY_FALLBACK
     {
@@ -196,6 +220,192 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         return Ok(());
     }
 
+    let Some(found) = survey(app, config, commander, timer, &pacer, &entropy, gate, solver).await?
+    else {
+        return Ok(());
+    };
+    render_ranked(
+        out,
+        config,
+        &found.ranked,
+        found.origin,
+        &found.coverage,
+        found.opportunities,
+        None,
+        found.carrier_access,
+    );
+
+    // Set, not merely raised. `exchange::send` assigns exit 1 for every non-2xx
+    // it sees, which is R75 and is exactly right for the ported commands — but
+    // a route sweep *expects* some non-2xx: HTTP 410 means a station has no
+    // commodity market, which is an answer, not a failure. Route decides its
+    // own exit code from what it actually reached, and it is the last word.
+    //
+    // A market in radius that was never read is not a market that ranked badly,
+    // and that is the one thing this code reports.
+    out.set_exit(if found.unreached || found.coverage.breaker_tripped {
+        crate::out::EXIT_FAILURE
+    } else {
+        0
+    });
+    Ok(())
+}
+
+/// What a survey established, kept whole so it can be rendered, re-priced or
+/// shown on a screen \[C53\].
+pub(crate) struct SurveySearch {
+    pub ranked: Ranked,
+    pub coverage: RouteCoverage,
+    pub origin: Option<edm_core::domain::id64::Coordinates>,
+    pub opportunities: SpecialOpportunities,
+    pub carrier_access: Option<access::Report>,
+    /// A market in radius that was never read.
+    pub unreached: bool,
+    /// The markets the ranking was solved over.
+    pub stations: Vec<ardent::ArdentStation>,
+}
+
+/// Who runs the solve.
+///
+/// The console runs it inline and prints its progress; a full-screen UI runs
+/// it on a thread of its own, because the graph build is minutes at survey
+/// scale and a screen that cannot redraw for minutes is a hung screen
+/// \[C53\]. The instance crosses as owned data either way.
+#[allow(async_fn_in_trait)]
+pub trait Solver {
+    async fn solve(&self, request: SolveRequest) -> Ranked;
+}
+
+/// Everything a solve needs, owned.
+#[derive(Debug)]
+pub struct SolveRequest {
+    pub config: RouteConfig,
+    pub listings: Vec<acquire::Listing>,
+    pub stations: Vec<ardent::ArdentStation>,
+    pub candidate_demand_prices: HashMap<(i64, i64), i64>,
+    /// Absolute wall-clock the search may not run past, in the run's clock.
+    pub deadline_ms: f64,
+}
+
+/// The console's solve: inline, with throttled progress lines.
+pub struct ConsoleSolver<'a, C: Clock> {
+    pub out: &'a crate::out::Out,
+    pub clock: &'a C,
+    /// `--quiet` or `--json`: no progress lines at all.
+    pub quiet: bool,
+}
+
+impl<C: Clock> std::fmt::Debug for ConsoleSolver<'_, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleSolver")
+            .field("quiet", &self.quiet)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<C: Clock> Solver for ConsoleSolver<'_, C> {
+    async fn solve(&self, request: SolveRequest) -> Ranked {
+        let out = self.out;
+        let clock = self.clock;
+        let deadline_ms = request.deadline_ms;
+        let search_expired = || clock.now_ms() >= deadline_ms;
+        // Progress is throttled here rather than in the pure crate, because only
+        // this side owns a clock — and the rule needs one. A line is worth showing
+        // once the search has been silent long enough for the silence to be the
+        // problem, and a radius-10 sweep solves in under a millisecond and would
+        // otherwise gain three lines of noise. Measured 2026-08-06: a radius-100
+        // sweep spends 127 s in the graph build and up to minutes in a single
+        // Dinkelbach round, so this threshold never delays a report anyone is
+        // waiting for.
+        let solving_since = std::cell::Cell::new(f64::NAN);
+        let last_line_ms = std::cell::Cell::new(f64::NEG_INFINITY);
+        // Whether a build counter has been shown, which is the only condition under
+        // which finishing one is worth a line.
+        let build_shown = std::cell::Cell::new(false);
+        let report_progress = |event: edm_route::watch::Event| {
+            let now = clock.now_ms();
+            if solving_since.get().is_nan() {
+                solving_since.set(now);
+            }
+            // Never throttled: `Abandoned` withdraws a claim, and a withdrawn claim
+            // nobody saw is worse than no progress line at all.
+            //
+            // A *completed* build is urgent for the opposite reason — it is the
+            // line that says a counter stopped because the phase ended rather than
+            // because it hung — but only when a counter was shown. The closing
+            // report arrives microseconds after the previous one, so the throttle
+            // suppressed it every time and a real radius-100 run watched the count
+            // stop at 119/154; making it unconditional instead gave a two-market
+            // sweep a build line it had no reason to print.
+            let urgent = match event {
+                edm_route::watch::Event::Abandoned => true,
+                edm_route::watch::Event::Building { done, total, .. } => {
+                    done == total && build_shown.get()
+                }
+                _ => false,
+            };
+            if !urgent
+                && (now - solving_since.get() < SOLVE_QUIET_MS
+                    || now - last_line_ms.get() < SOLVE_LINE_MS)
+            {
+                return;
+            }
+            last_line_ms.set(now);
+            if matches!(event, edm_route::watch::Event::Building { .. }) {
+                build_shown.set(true);
+            }
+            out.progress(&view::progress(event));
+        };
+        let watch = edm_route::watch::Watch::unlimited().until(&search_expired);
+        // Under `--json` stdout is one document \[C28\], so there is nowhere for a
+        // progress line to go.
+        let watch = if self.quiet {
+            watch
+        } else {
+            watch.reporting(&report_progress)
+        };
+        solve_ranked(
+            &request.config,
+            request.listings,
+            &request.stations,
+            &request.candidate_demand_prices,
+            watch,
+        )
+    }
+}
+
+/// A full survey: enumerate, gate, sweep, solve. Prints its progress and its
+/// plan; the ranking is returned rather than printed, and `None` means the run
+/// ended at a gate.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear sequence, and the order is the safety contract: free enumeration, the filters, the priced gates, the live reads, then the solve"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the command's environment, the shared pacer, and who answers its gate and runs its solve"
+)]
+pub(crate) async fn survey<H, C, E, F, T, G, S>(
+    app: &App<'_, H, C, E, F>,
+    config: &RouteConfig,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
+    timer: &T,
+    pacer: &Pacer<'_, C, T, crate::ports::PinnedJitter<'_, E>>,
+    entropy: &crate::ports::PinnedJitter<'_, E>,
+    gate: &G,
+    solver: &S,
+) -> Result<Option<SurveySearch>, String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+    G: plan::Gate,
+    S: Solver,
+{
+    let out = app.out;
+    let ardent = ArdentClient::new(app.http, &app.overrides.ardent_base);
     let note = |text: String| {
         if !config.quiet {
             out.line(&text);
@@ -313,6 +523,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             };
             match plan::gate(
                 out,
+                gate,
                 config,
                 &crawl_survey,
                 SizePrior {
@@ -320,9 +531,11 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
                     system_bytes: 1.5 * 1024.0 * 1024.0,
                     ..SizePrior::default()
                 },
-            ) {
+            )
+            .await
+            {
                 plan::Decision::Sweep(_) => {}
-                plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+                plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(None),
                 // `Stage::Final` never yields it; naming it is what makes that
                 // a compile-time fact rather than a comment.
                 plan::Decision::Skipped(_) => unreachable!("this gate is final"),
@@ -403,13 +616,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // \[C37\]. Validated here so a malformed `--nonce` fails before anything is
     // sent, not on the hundredth probe.
     let stamp_overrides = app.stamp_overrides()?;
-    // `EDM_JITTER` pins the backoff fraction so a retry scenario's attempt
-    // count is reproducible \[C29\]. Unset, this is the real entropy.
-    let entropy = crate::ports::PinnedJitter {
-        inner: &app.ports.entropy,
-        unit: app.overrides.jitter.unwrap_or(f64::NAN),
-    };
-    let pacer = Pacer::new(pacing(config), &app.ports.clock, timer, &entropy);
+    pacer.begin_round();
 
     let cache = cache_for(app, config);
     // Its own priced phase, gated before a single probe is built \[C37\].
@@ -421,8 +628,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         app,
         config,
         &cache,
-        &pacer,
+        pacer,
         &stamp_overrides,
+        gate,
         &enumeration,
         digest_requests,
         &mut selection,
@@ -431,7 +639,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     )
     .await?
     {
-        PhaseOutcome::Stop => return Ok(()),
+        PhaseOutcome::Stop => return Ok(None),
         PhaseOutcome::Went(report) => report,
     };
 
@@ -510,9 +718,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     } else {
         SizePrior::default()
     };
-    let decision = plan::gate(out, config, &survey, prior);
+    let decision = plan::gate(out, gate, config, &survey, prior).await;
     if !decision.proceeds() {
-        return Ok(());
+        return Ok(None);
     }
 
     let started_ms = route_started_ms;
@@ -661,9 +869,9 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
             },
             exclusions: selection.exclusions.clone(),
         };
-        match plan::gate(out, config, &exact_survey, prior) {
+        match plan::gate(out, gate, config, &exact_survey, prior).await {
             plan::Decision::Sweep(_) => {}
-            plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(()),
+            plan::Decision::Stopped(_) | plan::Decision::Refused(_) => return Ok(None),
             plan::Decision::Skipped(_) => unreachable!("this gate is final"),
         }
     }
@@ -744,7 +952,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
         timer,
         // The pinned wrapper, which delegates `nonce_bytes` untouched — so the
         // nonces are still the real thing and only the jitter is fixed.
-        entropy: &entropy,
+        entropy,
         fs: &app.ports.fs,
         out,
         origin: &app.overrides.origin,
@@ -771,7 +979,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // authoritative read; the rest were emptied by the filter and a 500 KB
     // payload would confirm nothing.
     let systems: Vec<(String, f64)> = Vec::new();
-    let acquired = acquire::sweep(&sweep_cx, &pacer, prepared, &systems).await;
+    let acquired = acquire::sweep(&sweep_cx, pacer, prepared, &systems).await;
 
     let at_ms = app.ports.clock.now_ms();
     let coverage = coverage_of(&Measured {
@@ -813,8 +1021,8 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // Read before `rank` consumes the listings; the ranking cannot change it.
     let unreached = !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
 
-    // The optimiser has no clock and no output. Both are lent to it here, and
-    // `edm_route::watch` explains why they cannot be anywhere else.
+    // The optimiser has no clock and no output. Both are lent to it by the
+    // solver, and `edm_route::watch` explains why they cannot be anywhere else.
     //
     // `--deadline` is the *run's* budget, and the search is part of the run:
     // "how long the whole sweep may take" already reads as a limit on the
@@ -825,96 +1033,29 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
     // left is what the optimiser gets; when that is nothing, the search hands
     // back the best route it holds and claims nothing about it.
     let deadline_ms = started_ms + config.deadline_seconds * 1000.0;
-    let clock = &app.ports.clock;
-    let search_expired = || clock.now_ms() >= deadline_ms;
-    // Progress is throttled here rather than in the pure crate, because only
-    // this side owns a clock — and the rule needs one. A line is worth showing
-    // once the search has been silent long enough for the silence to be the
-    // problem, and a radius-10 sweep solves in under a millisecond and would
-    // otherwise gain three lines of noise. Measured 2026-08-06: a radius-100
-    // sweep spends 127 s in the graph build and up to minutes in a single
-    // Dinkelbach round, so this threshold never delays a report anyone is
-    // waiting for.
-    let solving_since = std::cell::Cell::new(f64::NAN);
-    let last_line_ms = std::cell::Cell::new(f64::NEG_INFINITY);
-    // Whether a build counter has been shown, which is the only condition under
-    // which finishing one is worth a line.
-    let build_shown = std::cell::Cell::new(false);
-    let report_progress = |event: edm_route::watch::Event| {
-        let now = clock.now_ms();
-        if solving_since.get().is_nan() {
-            solving_since.set(now);
-        }
-        // Never throttled: `Abandoned` withdraws a claim, and a withdrawn claim
-        // nobody saw is worse than no progress line at all.
-        //
-        // A *completed* build is urgent for the opposite reason — it is the
-        // line that says a counter stopped because the phase ended rather than
-        // because it hung — but only when a counter was shown. The closing
-        // report arrives microseconds after the previous one, so the throttle
-        // suppressed it every time and a real radius-100 run watched the count
-        // stop at 119/154; making it unconditional instead gave a two-market
-        // sweep a build line it had no reason to print.
-        let urgent = match event {
-            edm_route::watch::Event::Abandoned => true,
-            edm_route::watch::Event::Building { done, total, .. } => {
-                done == total && build_shown.get()
-            }
-            _ => false,
-        };
-        if !urgent
-            && (now - solving_since.get() < SOLVE_QUIET_MS
-                || now - last_line_ms.get() < SOLVE_LINE_MS)
-        {
-            return;
-        }
-        last_line_ms.set(now);
-        if matches!(event, edm_route::watch::Event::Building { .. }) {
-            build_shown.set(true);
-        }
-        out.progress(&view::progress(event));
-    };
-    let watch = edm_route::watch::Watch::unlimited().until(&search_expired);
-    // Under `--json` stdout is one document \[C28\], so there is nowhere for a
-    // progress line to go.
-    let watch = if config.quiet {
-        watch
-    } else {
-        watch.reporting(&report_progress)
-    };
-
-    rank(
-        out,
-        config,
-        acquired,
-        &selection.keep,
-        &candidate_demand_prices,
-        &coverage,
+    let origin = approach_origin(&ardent, config, commander).await?;
+    let ranked = solver
+        .solve(SolveRequest {
+            config: config.clone(),
+            listings: acquired.listings,
+            stations: selection.keep.clone(),
+            candidate_demand_prices,
+            deadline_ms,
+        })
+        .await;
+    Ok(Some(SurveySearch {
+        ranked,
+        coverage,
+        origin,
         opportunities,
-        None,
         carrier_access,
-        approach_origin(&ardent, config, commander).await?,
-        watch,
-    );
-
-    // Set, not merely raised. `exchange::send` assigns exit 1 for every non-2xx
-    // it sees, which is R75 and is exactly right for the ported commands — but
-    // a route sweep *expects* some non-2xx: HTTP 410 means a station has no
-    // commodity market, which is an answer, not a failure. Route decides its
-    // own exit code from what it actually reached, and it is the last word.
-    //
-    // A market in radius that was never read is not a market that ranked badly,
-    // and that is the one thing this code reports.
-    out.set_exit(if unreached || coverage.breaker_tripped {
-        crate::out::EXIT_FAILURE
-    } else {
-        0
-    });
-    Ok(())
+        unreached,
+        stations: selection.keep,
+    }))
 }
 
 /// Everything the coverage block is assembled from.
-struct Measured<'a> {
+pub(crate) struct Measured<'a> {
     selection: &'a select::Selection,
     acquired: &'a acquire::Acquired,
     enumeration: &'a discover::Enumeration,
@@ -934,7 +1075,7 @@ struct Measured<'a> {
 }
 
 /// What the run reached, and what it did not.
-fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
+pub(crate) fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
     RouteCoverage {
         systems_total: m.official_systems_total,
         systems_read: m.official_systems_read,
@@ -1007,7 +1148,7 @@ fn coverage_of(m: &Measured<'_>) -> RouteCoverage {
 /// It names the rounds because the round count is the visible sign of the loop
 /// doing its job — a second round means the first one demoted something and
 /// promoted a route nobody had measured yet.
-fn verify_note(verified: Verified) -> String {
+pub(crate) fn verify_note(verified: Verified) -> String {
     use std::fmt::Write as _;
 
     let n = |value: usize| edm_core::js::format_integer(value as f64);
@@ -1034,7 +1175,7 @@ fn verify_note(verified: Verified) -> String {
 
 /// What the verification pass cost and what it changed \[C38\].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct Verified {
+pub(crate) struct Verified {
     pub rounds: usize,
     /// Markets re-read live during verification.
     pub markets: usize,
@@ -1079,7 +1220,7 @@ const MAX_VERIFY_ROUNDS: usize = 8;
     clippy::too_many_arguments,
     reason = "a verify round needs the transport, the pacer, the instance it is re-pricing, the stations behind it, and the live set it is closing over"
 )]
-async fn verify_ranked<H, C, E, F, T>(
+pub(crate) async fn verify_ranked<H, C, E, F, T>(
     cx: &acquire::Cx<'_, H, C, E, F, T>,
     pacer: &Pacer<'_, C, T, E>,
     config: &RouteConfig,
@@ -1193,7 +1334,7 @@ where
 /// the way out. Splitting it is what makes the verify pass possible: the market
 /// vector has to survive, because every `RouteLeg` addresses a market by its
 /// index into it.
-pub(super) struct Ranked {
+pub struct Ranked {
     pub solution: edm_route::Solution,
     pub markets: Vec<edm_route::model::Market>,
     pub commodities: edm_route::model::Commodities,
@@ -1211,8 +1352,20 @@ impl std::fmt::Debug for Ranked {
 }
 
 impl Ranked {
+    /// An instance with no markets and no routes: what a solve that never
+    /// ran answers with.
+    pub(crate) fn empty() -> Self {
+        Self {
+            solution: edm_route::Solution::default(),
+            markets: Vec::new(),
+            commodities: edm_route::model::Commodities::default(),
+            crossing: ingest::Crossing::default(),
+            kind: RouteKind::SingleHop,
+        }
+    }
+
     /// The routes of the shape that was asked for.
-    pub(super) fn routes(&self) -> &[edm_route::report::Route] {
+    pub(crate) fn routes(&self) -> &[edm_route::report::Route] {
         match self.kind {
             RouteKind::SingleHop => &self.solution.single,
             RouteKind::RoundTrip => &self.solution.round_trip,
@@ -1220,7 +1373,7 @@ impl Ranked {
         }
     }
 
-    pub(super) fn routes_mut(&mut self) -> &mut Vec<edm_route::report::Route> {
+    pub(crate) fn routes_mut(&mut self) -> &mut Vec<edm_route::report::Route> {
         match self.kind {
             RouteKind::SingleHop => &mut self.solution.single,
             RouteKind::RoundTrip => &mut self.solution.round_trip,
@@ -1234,7 +1387,7 @@ impl Ranked {
     /// `RankKey::stations` is built from each leg's `from` only, so for a
     /// single hop it names the seller and not the buyer. Walking the legs is
     /// the form that is correct for all three shapes.
-    pub(super) fn market_ids(&self) -> Vec<f64> {
+    pub(crate) fn market_ids(&self) -> Vec<f64> {
         let mut ids: Vec<f64> = Vec::new();
         for route in self.routes() {
             for leg in &route.legs {
@@ -1252,7 +1405,7 @@ impl Ranked {
     }
 
     /// Re-price the current routes against the market vector as it now stands.
-    pub(super) fn rescore(&mut self, config: &RouteConfig) {
+    pub(crate) fn rescore(&mut self, config: &RouteConfig) {
         let (time, ship, limits) = (time_model(config), ship(config), limits(config));
         let routes = std::mem::take(self.routes_mut());
         *self.routes_mut() = edm_route::rescore::rescore(&self.markets, time, &ship, &limits, routes);
@@ -1261,7 +1414,7 @@ impl Ranked {
 
 /// Ingest and solve over borrowed listings, for a caller that still needs
 /// them afterwards.
-pub(super) fn solve_ranked_from(
+pub(crate) fn solve_ranked_from(
     config: &RouteConfig,
     listings: &[acquire::Listing],
     stations: &[ardent::ArdentStation],
@@ -1301,7 +1454,7 @@ pub(super) fn solve_ranked_from(
 }
 
 /// Ingest and solve. Prints nothing.
-fn solve_ranked(
+pub(crate) fn solve_ranked(
     config: &RouteConfig,
     listings: Vec<acquire::Listing>,
     stations: &[ardent::ArdentStation],
@@ -1327,7 +1480,7 @@ fn solve_ranked(
     )
 }
 
-fn finish_solve(
+pub(crate) fn finish_solve(
     config: &RouteConfig,
     markets: Vec<edm_route::model::Market>,
     commodities: edm_route::model::Commodities,
@@ -1377,7 +1530,7 @@ fn finish_solve(
     clippy::too_many_arguments,
     reason = "the rendered answer needs the instance, where the ship is, what the run cost, and every provenance flag the tables state"
 )]
-fn render_ranked(
+pub(crate) fn render_ranked(
     out: &crate::out::Out,
     config: &RouteConfig,
     ranked: &Ranked,
@@ -1391,20 +1544,12 @@ fn render_ranked(
     // Not under `--json`: a diagnostic in the middle of the stream is exactly
     // what R76 does to the ported commands, and C28 says route's document is
     // one well-formed document or nothing.
-    if crossing.non_integral > 0 && !config.json {
-        out.line(&format!(
-            "{} commodity rows carried a non-integral price or quantity and were skipped",
-            edm_core::js::format_integer(f64::from(crossing.non_integral))
-        ));
-    }
-    if crossing.invalid_identity > 0 && !config.json {
-        out.line(&format!(
-            "{} listings lacked a stable market/system identity or finite coordinates and were skipped",
-            edm_core::js::format_integer(f64::from(crossing.invalid_identity))
-        ));
+    if !config.json {
+        for line in crossing_notes(crossing) {
+            out.line(&line);
+        }
     }
 
-    let routes = ranked.routes();
     if config.json {
         // All three keys are always present, but only the requested one is
         // populated — a key that appears and disappears with a flag is the
@@ -1420,65 +1565,57 @@ fn render_ranked(
         return;
     }
 
-    out.emit(&view::ranking_with(
+    out.emit(&ranked_blocks(config, ranked, origin));
+}
+
+/// The ingest counters that precede a ranking, one line each.
+pub(crate) fn crossing_notes(crossing: &ingest::Crossing) -> Vec<String> {
+    let mut lines = Vec::new();
+    if crossing.non_integral > 0 {
+        lines.push(format!(
+            "{} commodity rows carried a non-integral price or quantity and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.non_integral))
+        ));
+    }
+    if crossing.invalid_identity > 0 {
+        lines.push(format!(
+            "{} listings lacked a stable market/system identity or finite coordinates and were skipped",
+            edm_core::js::format_integer(f64::from(crossing.invalid_identity))
+        ));
+    }
+    lines
+}
+
+/// The ranking, its trade commands and, under `--detail`, every route's legs —
+/// as blocks, so a full-screen UI can draw the same answer \[C53\].
+pub(crate) fn ranked_blocks(
+    config: &RouteConfig,
+    ranked: &Ranked,
+    origin: Option<edm_core::domain::id64::Coordinates>,
+) -> Vec<edm_core::render::Block<'static>> {
+    let routes = ranked.routes();
+    let mut blocks = view::ranking_with(
         ranked.kind,
         routes,
         &ranked.markets,
         &ranked.commodities,
         config.rate,
         origin,
-    ));
+    );
     // The ranking names stations; `edm trade` wants a market id. Without this
     // the answer stops one step short of being usable.
-    out.emit(&view::trade_commands(
+    blocks.extend(view::trade_commands(
         routes,
         &ranked.markets,
         &ranked.commodities,
         config.cargo.map(|tons| tons as i64),
     ));
-
     if config.detail {
         for route in routes {
-            out.emit(&view::legs(route, &ranked.markets, &ranked.commodities));
+            blocks.extend(view::legs(route, &ranked.markets, &ranked.commodities));
         }
     }
-}
-
-/// Ingest, solve and print, with no verification pass in between.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the composition of solve_ranked and render_ranked needs both argument sets"
-)]
-fn rank(
-    out: &crate::out::Out,
-    config: &RouteConfig,
-    acquired: acquire::Acquired,
-    stations: &[ardent::ArdentStation],
-    candidate_demand_prices: &HashMap<(i64, i64), i64>,
-    coverage: &RouteCoverage,
-    opportunities: SpecialOpportunities,
-    quick: Option<&QuickProvenance>,
-    carrier_access: Option<access::Report>,
-    origin: Option<edm_core::domain::id64::Coordinates>,
-    watch: edm_route::watch::Watch<'_>,
-) {
-    let ranked = solve_ranked(
-        config,
-        acquired.listings,
-        stations,
-        candidate_demand_prices,
-        watch,
-    );
-    render_ranked(
-        out,
-        config,
-        &ranked,
-        origin,
-        coverage,
-        opportunities,
-        quick,
-        carrier_access,
-    );
+    blocks
 }
 
 /// The coverage block, as JSON.
@@ -1703,7 +1840,7 @@ fn best_live_json(entry: &quick::BestLive) -> edm_core::js::json::JsValue {
 }
 
 /// The travel model, with every constant a flag.
-pub(super) fn time_model(config: &RouteConfig) -> TimeModel {
+pub(crate) fn time_model(config: &RouteConfig) -> TimeModel {
     TimeModel {
         jump_range_ly: config.jump_range_ly,
         ..TimeModel::default()
@@ -1715,7 +1852,7 @@ pub(super) fn time_model(config: &RouteConfig) -> TimeModel {
 /// An omitted `--cargo` or `--credits` means *unbounded*, not zero: the answer
 /// is then the best route the data admits for a ship that can carry it, which
 /// is the right default for "what is out there".
-fn ship(config: &RouteConfig) -> ShipConfig {
+pub(crate) fn ship(config: &RouteConfig) -> ShipConfig {
     ShipConfig {
         cargo: config
             .cargo
@@ -1728,7 +1865,7 @@ fn ship(config: &RouteConfig) -> ShipConfig {
     }
 }
 
-fn limits(config: &RouteConfig) -> Limits {
+pub(crate) fn limits(config: &RouteConfig) -> Limits {
     Limits {
         objective: if config.by_profit {
             edm_route::time::Objective::Profit
@@ -1746,7 +1883,7 @@ fn limits(config: &RouteConfig) -> Limits {
 }
 
 /// The pacing a run is built with.
-pub(super) fn pacing(config: &RouteConfig) -> Pacing {
+pub(crate) fn pacing(config: &RouteConfig) -> Pacing {
     Pacing {
         bucket: Bucket {
             rate: config.rate_per_second,
@@ -1779,7 +1916,7 @@ pub(super) fn pacing(config: &RouteConfig) -> Pacing {
 /// then nothing. **Not** the search centre — searching a region three hundred
 /// light years away does not move the ship, and quietly substituting the centre
 /// would print a confident `0.0` for a route the commander cannot reach today.
-async fn approach_origin<H: HttpTransport>(
+pub(crate) async fn approach_origin<H: HttpTransport>(
     ardent: &ArdentClient<'_, H>,
     config: &RouteConfig,
     commander: Option<&edm_core::domain::commander::CommanderState>,
@@ -1825,12 +1962,13 @@ enum PhaseOutcome {
     clippy::too_many_lines,
     reason = "one linear sequence, and the order is the safeguard: free work, then the gate, then the requests. Splitting it would put the gate and the spend in different functions, which is exactly the arrangement that let an earlier version price one thing and send another"
 )]
-async fn carrier_access_phase<H, C, E, F, J, T>(
+async fn carrier_access_phase<H, C, E, F, J, T, G>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     cache: &Cache,
     pacer: &Pacer<'_, C, T, J>,
     stamp_overrides: &crate::cmd::StampOverrides,
+    gate: &G,
     enumeration: &discover::Enumeration,
     digest_requests: usize,
     selection: &mut edm_core::select::Selection,
@@ -1844,6 +1982,7 @@ where
     F: Fs,
     J: Entropy,
     T: Timer,
+    G: plan::Gate,
 {
     if !config.carrier_access.filters() {
         return Ok(PhaseOutcome::Went(None));
@@ -1891,12 +2030,14 @@ where
         };
         let decision = plan::gate_titled(
             app.out,
+            gate,
             config,
             &survey,
             edm_core::spend::SizePrior::default(),
             "CARRIER ACCESS PLAN",
             plan::Stage::Intermediate,
-        );
+        )
+        .await;
         if decision.ends_the_run() {
             return Ok(PhaseOutcome::Stop);
         }
@@ -2060,7 +2201,7 @@ fn reapply_docking_access<H, C, E, F>(
 /// from `std::env` — first-wins, lossily decoded, and *scrubbed by the parity
 /// harness* \[R55\]. Reading the process environment directly here would give
 /// the cache a home the rest of the program cannot see.
-pub(super) fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
+pub(crate) fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteConfig) -> Cache {
     let root = Cache::locate(
         app.cli.env("XDG_CACHE_HOME"),
         app.cli.env("HOME"),
@@ -2074,7 +2215,7 @@ pub(super) fn cache_for<H, C, E, F>(app: &App<'_, H, C, E, F>, config: &RouteCon
 /// `Lookup::Auto` so `edm route "Jaques Station"` works — but the radius is
 /// measured from the *system*, which is the only thing a light year is a
 /// distance between, and the station name only ever selects it.
-async fn resolve<H: HttpTransport>(
+pub(crate) async fn resolve<H: HttpTransport>(
     ardent: &ArdentClient<'_, H>,
     reference: &str,
 ) -> Result<ReferenceSystem, String> {

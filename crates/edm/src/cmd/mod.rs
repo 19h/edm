@@ -23,6 +23,7 @@
 //! [`edm_core::cli::config`], and nothing here re-derives a value that module
 //! already computes \[R50\].
 
+pub mod cz;
 pub mod feed;
 pub mod market;
 pub mod markets;
@@ -712,7 +713,7 @@ pub async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
 /// gains not a character), its own configuration reader, and no `openSession`
 /// until it is about to spend a request. Keeping it out of `run`'s body is
 /// what makes "route cannot change what `market` does" checkable by reading.
-fn local_commander_state<F: Fs>(
+pub(crate) fn local_commander_state<F: Fs>(
     cli: &Cli<'_>,
     ports: &Ports<impl Clock, impl Entropy, F>,
     out: &Out,
@@ -726,18 +727,19 @@ fn local_commander_state<F: Fs>(
 /// the malformed-observation warning is a property of the file rather than of
 /// this read: printing it once is information, printing it sixty-eight times is
 /// noise that buries the ranking \[C49\].
-pub(super) fn reload_commander_state<F: Fs>(
+pub(crate) fn reload_commander_state<F: Fs>(
     cli: &Cli<'_>,
     ports: &Ports<impl Clock, impl Entropy, F>,
 ) -> Option<edm_core::domain::commander::CommanderState> {
     local_commander_state_inner(cli, ports, None)
 }
 
-fn local_commander_state_inner<F: Fs>(
-    cli: &Cli<'_>,
-    ports: &Ports<impl Clock, impl Entropy, F>,
-    out: Option<&Out>,
-) -> Option<edm_core::domain::commander::CommanderState> {
+/// Every directory the journal might be in, most specific first.
+///
+/// `EDM_JOURNAL_DIR` when set, then the launcher and Proton locations the
+/// home directory implies. The list is data rather than a read so a reader on
+/// another thread can be handed it \[C53\].
+pub(crate) fn journal_candidates(cli: &Cli<'_>) -> Vec<PathBuf> {
     let home = cli
         .env("HOME")
         .or_else(|| cli.env("USERPROFILE"))
@@ -753,8 +755,15 @@ fn local_commander_state_inner<F: Fs>(
         ));
     }
     candidates.dedup();
+    candidates
+}
 
-    for directory in candidates {
+fn local_commander_state_inner<F: Fs>(
+    cli: &Cli<'_>,
+    ports: &Ports<impl Clock, impl Entropy, F>,
+    out: Option<&Out>,
+) -> Option<edm_core::domain::commander::CommanderState> {
+    for directory in journal_candidates(cli) {
         if !ports.fs.exists(&directory) {
             continue;
         }
@@ -785,7 +794,7 @@ fn local_commander_state_inner<F: Fs>(
     None
 }
 
-fn apply_commander_defaults(
+pub(crate) fn apply_commander_defaults(
     cli: &Cli<'_>,
     state: &edm_core::domain::commander::CommanderState,
     config: &mut config::RouteConfig,
@@ -844,21 +853,24 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
             "eddn" => edm_core::cli::feed::feed_usage(),
             "vendor" => edm_core::cli::vendor::vendor_usage(),
             "sell" => edm_core::cli::sell::sell_usage(),
+            "cz" => edm_core::cli::cz::cz_usage(),
+            "ui" => edm_core::cli::ui::ui_usage(),
             _ => cli::route_usage(),
         });
         return;
     }
 
-    // `--follow` is route's alone. Parsed by the shared extended table, it
-    // would otherwise be accepted and ignored everywhere else -- and a flag
-    // that is accepted and does nothing is worse than one that is rejected:
-    // the commander watches a table that will never update and concludes the
-    // prices are not moving \[C43\].
-    if args.command != "route"
+    // `--follow` belongs to route and sell. Parsed by the shared extended
+    // table, it would otherwise be accepted and ignored everywhere else -- and
+    // a flag that is accepted and does nothing is worse than one that is
+    // rejected: the commander watches a table that will never update and
+    // concludes the prices are not moving \[C43\], \[C52\].
+    if !matches!(args.command.as_str(), "route" | "sell" | "ui")
         && matches!(cli.optional_decimal(Flag::Follow), Ok(Some(_)))
     {
         out.error(&format!(
-            "--follow is a route option; `edm {}` prints once. Use `edm route --quick ... --follow <s>`",
+            "--follow is a route and sell option; `edm {}` prints once. Use `edm route --quick ... \
+             --follow <s>` or `edm sell --follow <s>`",
             args.command
         ));
         out.set_exit(EXIT_FAILURE);
@@ -893,6 +905,30 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
         return;
     }
 
+    if args.command == "cz" {
+        let has_explicit_target = !args.positionals.is_empty()
+            || [Flag::Station, Flag::System]
+                .iter()
+                .any(|&flag| args.get(flag).is_some());
+        let current_system = (!has_explicit_target)
+            .then(|| local_commander_state(&cli, ports, out))
+            .flatten()
+            .and_then(|state| state.current_system.map(|location| location.value.name));
+        let app = match App::open(cli, http, ports, out, overrides) {
+            Ok(app) => app,
+            Err(error) => {
+                out.error(&error);
+                out.set_exit(EXIT_FAILURE);
+                return;
+            }
+        };
+        if let Err(error) = cz::run(&app, current_system.as_deref()).await {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+        }
+        return;
+    }
+
     if args.command == "sell" {
         let commander = local_commander_state(&cli, ports, out);
         let config = match edm_core::cli::sell::sell_config(&cli) {
@@ -911,7 +947,31 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
                 return;
             }
         };
-        if let Err(error) = sell::run(&app, &config, commander.as_ref(), &crate::ports::RealTimer).await {
+        if let Err(error) = sell::run(
+            &app,
+            &config,
+            commander.as_ref(),
+            &crate::ports::RealTimer,
+            &crate::route::plan::ConsoleGate,
+        )
+        .await
+        {
+            out.error(&error);
+            out.set_exit(EXIT_FAILURE);
+        }
+        return;
+    }
+
+    if args.command == "ui" {
+        let config = match edm_core::cli::ui::ui_config(&cli) {
+            Ok(config) => config,
+            Err(error) => {
+                out.error_paragraph(error.message());
+                out.set_exit(EXIT_USAGE);
+                return;
+            }
+        };
+        if let Err(error) = crate::tui::run(args, env, http, ports, out, overrides, &config).await {
             out.error(&error);
             out.set_exit(EXIT_FAILURE);
         }
@@ -965,7 +1025,19 @@ async fn extended_command<H: HttpTransport, C: Clock, E: Entropy, F: Fs>(
     // the timer, so a test can still pin the delay sequence, and no ported
     // command grows a type parameter for a seam only this one uses.
     if let Err(error) =
-        route::run(&app, &config, commander.as_ref(), &crate::ports::RealTimer).await
+        route::run(
+            &app,
+            &config,
+            commander.as_ref(),
+            &crate::ports::RealTimer,
+            &crate::route::plan::ConsoleGate,
+            &route::ConsoleSolver {
+                out,
+                clock: &ports.clock,
+                quiet: config.quiet,
+            },
+        )
+        .await
     {
         out.error(&error);
         out.set_exit(EXIT_FAILURE);

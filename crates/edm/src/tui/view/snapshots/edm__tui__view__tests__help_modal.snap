@@ -1,0 +1,34 @@
+---
+source: crates/edm/src/tui/view/tests.rs
+expression: "frame(&state, 100, 30)"
+---
+ edm  1:Search  2:Results  3:Detail  4:Pins  5:Sell  L:Log
+┌ Search ──────────────────────────────────────────────────────────────────────────────────────────┐
+│  Mode                   quick lookup   full survey   sell the hold                               │
+│                                                                                                  │
+│▶ System or station     ▏                                                                         │
+│  Items                 commodities, comma separated                                              │
+│  Category              a commodity category, instead of items                                    │
+│  Hops per commodity    best sellers and buyers kept per commodity, default 5                     │
+│ ┌Keys──────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │Ctrl-C / Ctrl-Q             quit                                                              │ │
+│ │F1 / ?                      this help                                                         │ │
+│ │F2..F7                      search, results, detail, pins, sell, log                          │ │
+│ │1..5, L                     the same, where nothing is being typed                            │ │
+│ │Ctrl-L                      show or hide the log strip                                        │ │
+│ │Esc                         back, or close this                                               │ │
+│ │Tab / Shift-Tab, Up / Down  move between fields                                               │ │
+│ │Space, Left / Right         toggle a switch, cycle a choice                                   │ │
+│ │Enter                       run the search                                                    │ │
+└─│                                                                                              │─┘
+ E│                                                                                              │──
+ed└────────────────────────────────────────────────────────────────────────────────── Esc closes ┘
+where to search from; a station name is resolved to its system
+
+log─────────────────────────────────────────────────────────────────────────────────────────────────
+resolving "Sol" through Ardent for quick lookup...
+warning: something the pipeline said on stderr
+
+
+
+ requests 0 / 2,000  no journal  F1 help  Ctrl-L log  Ctrl-C quit

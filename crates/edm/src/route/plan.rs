@@ -12,6 +12,7 @@
 //! is the ordering, the printing and the exit code — the observable part.
 
 use edm_core::cli::config::RouteConfig;
+use edm_core::render::Block;
 use edm_core::render::views::{self, PlanView};
 use edm_core::spend::{self, Estimate, Refusal, SizePrior, Verdict};
 
@@ -112,44 +113,140 @@ impl Decision {
     }
 }
 
+/// Who answers when a sweep needs consent.
+///
+/// The console cannot ask: it prints the instruction and stops, and the user
+/// re-runs with `--yes`. A full-screen UI can, and does, with the same plan in
+/// a modal \[C53\]. Everything else about the gate — the pricing, the table,
+/// the refusals, the order they appear in — is the same for both.
+#[allow(async_fn_in_trait)]
+pub trait Gate {
+    /// Asked only when the verdict is [`Verdict::NeedsConfirmation`], after
+    /// the plan has been shown. `true` means send.
+    async fn confirm(&self, out: &Out, gated: &Gated) -> bool;
+}
+
+/// The console's answer: say how to consent, mark the run, and decline.
+///
+/// Not an error: the plan is correct and the user simply has not agreed to it
+/// yet. Exit 1 so a script cannot mistake "waiting for consent" for "done",
+/// but the message is an instruction rather than a complaint.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConsoleGate;
+
+impl Gate for ConsoleGate {
+    async fn confirm(&self, out: &Out, gated: &Gated) -> bool {
+        out.line(&spend::confirmation_message(&gated.estimate));
+        out.set_exit(1);
+        false
+    }
+}
+
 /// Price the sweep, show it, and decide.
 ///
 /// The order is fixed and is the observable contract: the plan table is printed
 /// **before** the verdict is announced, so a refusal always comes with the
 /// numbers that caused it rather than instead of them.
-pub fn gate(out: &Out, config: &RouteConfig, survey: &Survey, prior: SizePrior) -> Decision {
-    gate_titled(out, config, survey, prior, "ROUTE PLAN", Stage::Final)
-}
-
-/// The same gate under a caller's own heading, for a phase that is not the
-/// last one.
-pub fn gate_titled(
+pub async fn gate<G: Gate>(
     out: &Out,
+    gate: &G,
     config: &RouteConfig,
     survey: &Survey,
     prior: SizePrior,
-    title: &str,
-    stage: Stage,
 ) -> Decision {
+    gate_titled(out, gate, config, survey, prior, "ROUTE PLAN", Stage::Final).await
+}
+
+/// The gate's arithmetic and its table, decided but not yet shown.
+///
+/// The console gate prints the plan and announces the verdict in a fixed
+/// order; a full-screen UI shows the same plan in a modal and asks for the
+/// same consent \[C53\]. Both consume this, so neither can price a sweep
+/// differently from the other.
+#[derive(Clone, Debug)]
+pub struct Gated {
+    pub estimate: Estimate,
+    pub verdict: Verdict,
+    /// The plan table, empty when the verdict is a radius refusal: the numbers
+    /// would describe a sweep that is not going to happen, and the mistake is
+    /// a typo, not a decision.
+    pub plan: Vec<Block<'static>>,
+}
+
+impl Gated {
+    /// The refusal text, when the verdict is one.
+    #[must_use]
+    pub fn refusal_message(&self, config: &RouteConfig) -> Option<String> {
+        match &self.verdict {
+            Verdict::Refused(refusal) => Some(spend::refusal_message(
+                refusal,
+                &self.estimate,
+                config.radius_ly,
+                config.max_requests,
+            )),
+            Verdict::Proceed | Verdict::NeedsConfirmation => None,
+        }
+    }
+}
+
+/// Price the sweep and draw its plan, printing nothing.
+#[must_use]
+pub fn decide(config: &RouteConfig, survey: &Survey, prior: SizePrior, title: &str) -> Gated {
     let estimate = Estimate::build(
         survey.counts,
         survey.exclusions.clone(),
         config.rate_per_second,
         &prior,
     );
-
-    // A radius past the ceiling is refused before the plan is drawn: the table
-    // would be a page of numbers describing a sweep that is not going to
-    // happen, and the mistake is a typo, not a decision.
-    if let Verdict::Refused(refusal @ Refusal::RadiusTooWide) = spend::verdict(
+    let verdict = spend::verdict(
         &estimate,
         config.radius_ly,
         config.max_requests,
         config.confirmed,
-    ) {
+    );
+    let plan = if matches!(verdict, Verdict::Refused(Refusal::RadiusTooWide)) {
+        Vec::new()
+    } else {
+        views::route_plan(&PlanView {
+            reference: &config.reference,
+            radius_ly: config.radius_ly,
+            complete_to_ly: survey.complete_to_ly,
+            price_index: survey.price_index,
+            ardent_requests: survey.ardent_requests,
+            estimate: &estimate,
+            rate_per_second: config.rate_per_second,
+            max_requests: config.max_requests,
+            prior,
+            title,
+        })
+    };
+    Gated {
+        estimate,
+        verdict,
+        plan,
+    }
+}
+
+/// The same gate under a caller's own heading, for a phase that is not the
+/// last one.
+pub async fn gate_titled<G: Gate>(
+    out: &Out,
+    gate: &G,
+    config: &RouteConfig,
+    survey: &Survey,
+    prior: SizePrior,
+    title: &str,
+    stage: Stage,
+) -> Decision {
+    let gated = decide(config, survey, prior, title);
+
+    // A radius past the ceiling is refused before the plan is drawn: the table
+    // would be a page of numbers describing a sweep that is not going to
+    // happen, and the mistake is a typo, not a decision.
+    if let Verdict::Refused(refusal @ Refusal::RadiusTooWide) = gated.verdict {
         out.error_paragraph(&spend::refusal_message(
             &refusal,
-            &estimate,
+            &gated.estimate,
             config.radius_ly,
             config.max_requests,
         ));
@@ -159,54 +256,38 @@ pub fn gate_titled(
 
     // `aside`, not `emit`: under `--json` stdout is one document and the plan
     // belongs on stderr \[C28\].
-    out.aside(&views::route_plan(&PlanView {
-        reference: &config.reference,
-        radius_ly: config.radius_ly,
-        complete_to_ly: survey.complete_to_ly,
-        price_index: survey.price_index,
-        ardent_requests: survey.ardent_requests,
-        estimate: &estimate,
-        rate_per_second: config.rate_per_second,
-        max_requests: config.max_requests,
-        prior,
-        title,
-    }));
+    out.aside(&gated.plan);
 
-    match spend::verdict(
-        &estimate,
-        config.radius_ly,
-        config.max_requests,
-        config.confirmed,
-    ) {
+    match &gated.verdict {
         Verdict::Refused(refusal) => {
             out.error_paragraph(&spend::refusal_message(
-                &refusal,
-                &estimate,
+                refusal,
+                &gated.estimate,
                 config.radius_ly,
                 config.max_requests,
             ));
             out.set_exit(1);
-            Decision::Refused(refusal)
+            Decision::Refused(refusal.clone())
         }
         Verdict::NeedsConfirmation => {
-            // Not an error: the plan is correct and the user simply has not
-            // agreed to it yet. Exit 1 so a script cannot mistake "waiting for
-            // consent" for "done", but the message is an instruction rather
-            // than a complaint.
-            out.line(&spend::confirmation_message(&estimate));
-            out.set_exit(1);
-            Decision::Stopped(estimate)
+            if gate.confirm(out, &gated).await {
+                Decision::Sweep(gated.estimate)
+            } else {
+                Decision::Stopped(gated.estimate)
+            }
         }
         Verdict::Proceed if config.dry_run => match stage {
-            Stage::Final => Decision::Stopped(estimate),
-            Stage::Intermediate => Decision::Skipped(estimate),
+            Stage::Final => Decision::Stopped(gated.estimate),
+            Stage::Intermediate => Decision::Skipped(gated.estimate),
         },
-        Verdict::Proceed => Decision::Sweep(estimate),
+        Verdict::Proceed => Decision::Sweep(gated.estimate),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
     use edm_core::cli::access::{Cli, EnvSnapshot};
     use edm_core::cli::config::route_config;
@@ -241,9 +322,22 @@ mod tests {
         }
     }
 
+    fn block_on<T>(future: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a current-thread runtime")
+            .block_on(future)
+    }
+
     fn run(argv: &[&str], survey: &Survey) -> (Decision, String) {
         let out = Out::capturing(200, Metric::Utf16, false);
-        let decision = gate(&out, &config(argv), survey, SizePrior::default());
+        let decision = block_on(gate(
+            &out,
+            &ConsoleGate,
+            &config(argv),
+            survey,
+            SizePrior::default(),
+        ));
         (decision, out.captured())
     }
 
@@ -283,12 +377,13 @@ mod tests {
     /// a minute — before being told the ceiling is 100.
     #[test]
     fn a_radius_past_the_ceiling_is_refused_before_any_work() {
-        let over = config(&["route", "Sol", "--radius", "600"]);
+        let over = config(&["route", "Sol", "--radius", "1200"]);
         assert_eq!(preflight(&over), Some(Refusal::RadiusTooWide));
 
         // And nothing at or under it is pre-refused, whatever else is wrong
         // with the command — those answers need the region.
         for argv in [
+            vec!["route", "Sol", "--radius", "1000"],
             vec!["route", "Sol", "--radius", "500"],
             vec!["route", "Sol", "--radius", "200"],
             vec!["route", "Sol"],
@@ -302,9 +397,9 @@ mod tests {
     /// the numbers would describe a sweep that is not going to happen.
     #[test]
     fn a_radius_past_the_ceiling_is_refused_before_the_table() {
-        let (decision, text) = run(&["route", "Sol", "--radius", "600"], &survey(2, 3));
+        let (decision, text) = run(&["route", "Sol", "--radius", "1200"], &survey(2, 3));
         assert_eq!(decision, Decision::Refused(Refusal::RadiusTooWide));
-        assert!(text.contains("exceeds the 500 Ly ceiling"), "{text}");
+        assert!(text.contains("exceeds the 1000 Ly ceiling"), "{text}");
         assert!(!text.contains("ROUTE PLAN"), "no table for a typo\n{text}");
     }
 
@@ -347,5 +442,40 @@ mod tests {
     fn a_sparse_region_proceeds_with_nothing_to_do() {
         let (decision, _) = run(&["route", "Skaudai"], &survey(0, 0));
         assert!(decision.proceeds(), "{decision:?}");
+    }
+
+    /// The decision a full-screen UI reads is the decision the console gate
+    /// acts on, for every verdict the gate can reach \[C53\].
+    #[test]
+    fn decide_agrees_with_the_console_gate() {
+        for (argv, survey) in [
+            (vec!["route", "Sol", "--max-requests", "100"], survey(200, 400)),
+            (vec!["route", "Sol", "--radius", "1200"], survey(2, 3)),
+            (vec!["route", "Sol"], survey(100, 300)),
+            (vec!["route", "Sol", "--yes"], survey(100, 300)),
+            (vec!["route", "Sol"], survey(4, 9)),
+            (vec!["route", "Sol", "--dry-run"], survey(4, 9)),
+        ] {
+            let config = config(&argv);
+            let gated = decide(&config, &survey, SizePrior::default(), "ROUTE PLAN");
+            let out = Out::capturing(200, Metric::Utf16, false);
+            let decision = block_on(gate(&out, &ConsoleGate, &config, &survey, SizePrior::default()));
+            let text = out.captured();
+            match (&gated.verdict, &decision) {
+                (Verdict::Refused(a), Decision::Refused(b)) => assert_eq!(a, b, "{argv:?}"),
+                (Verdict::NeedsConfirmation, Decision::Stopped(_))
+                | (Verdict::Proceed, Decision::Sweep(_) | Decision::Stopped(_)) => {}
+                other => panic!("{argv:?}: {other:?}"),
+            }
+            assert_eq!(gated.estimate.requests, match &decision {
+                Decision::Sweep(e) | Decision::Stopped(e) | Decision::Skipped(e) => e.requests,
+                Decision::Refused(_) => gated.estimate.requests,
+            });
+            // The plan the UI would show is the plan the console showed.
+            assert_eq!(gated.plan.is_empty(), !text.contains("ROUTE PLAN"), "{argv:?}\n{text}");
+            if let Some(message) = gated.refusal_message(&config) {
+                assert!(text.contains(&message), "{argv:?}\n{text}");
+            }
+        }
     }
 }

@@ -1,0 +1,24 @@
+---
+source: crates/edm/src/tui/view/tests.rs
+expression: "frame(&state, 100, 20)"
+---
+ edm  1:Search  2:Results  3:Detail  4:Pins  5:Sell  L:Log
+┌ Results ─────────────────────────────────────────────────────────────────────────────────────────┐
+│no search has run yet: Enter opens the form                                                       │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ requests 0 / 2,000  no journal  F1 help  Ctrl-L log  Ctrl-C quit

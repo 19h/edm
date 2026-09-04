@@ -37,6 +37,14 @@ pub struct SellConfig {
     pub radius_ly: f64,
     pub top: usize,
     pub min_demand: f64,
+    /// `--follow <seconds>`: instead of printing once, re-read the journal and
+    /// every candidate buyer on this interval and plan again \[C52\]. The same
+    /// floor as route's, for the same reason: a round is a sweep of somebody
+    /// else's server.
+    pub follow_seconds: Option<f64>,
+    /// `--follow-rounds <n>`: stop after this many rounds. `None` means run
+    /// until the hold is empty or `--max-requests` is spent.
+    pub follow_rounds: Option<usize>,
 }
 
 /// `--stops`, refused rather than clamped.
@@ -100,6 +108,8 @@ pub fn sell_config(cli: &Cli<'_>) -> Result<SellConfig, CliError> {
             .optional_number(Flag::Top)?
             .unwrap_or(super::config::DEFAULT_TOP) as usize,
         min_demand: cli.optional_decimal(Flag::MinDemand)?.unwrap_or(1.0),
+        follow_seconds: super::config::follow_seconds(cli)?,
+        follow_rounds: super::config::follow_rounds(cli)?,
     })
 }
 
@@ -152,6 +162,18 @@ Spending
   is a price this run did not read.
   --max-requests <n>, --yes, --rps, --deadline, --max-age, --no-cache, --refresh
 
+Following the sale
+  --follow <s>             instead of printing once, re-read your journal and
+                           every candidate buyer every <s> seconds and plan
+                           again. The hold and the origin track the ship: after
+                           each sale the plan is for what is left, from where
+                           you are, and the loop stops when the hold is empty.
+                           Buyers are the ones this search nominated; cargo
+                           taken aboard since is named, not planned. Minimum
+                           {min_follow}s. --max-requests becomes the session
+                           ceiling and is enforced live. Not with --json
+  --follow-rounds <n>      stop after n rounds rather than at the ceiling
+
 Output
   --detail                 every nominated buyer and why it is not in the plan
   --json                   one document
@@ -160,8 +182,10 @@ Examples
   edm sell
   edm sell --worth 50000000 --stops 2
   edm sell --item tritium --radius 60
+  edm sell --follow 60
 ",
         stops = n(DEFAULT_STOPS),
+        min_follow = n(super::config::MIN_FOLLOW_SECONDS),
         max_stops = n(MAX_STOPS),
         radius = n(super::config::DEFAULT_RADIUS_LY),
         max_radius = n(crate::spend::MAX_RADIUS_LY),
@@ -192,5 +216,17 @@ mod tests {
     #[test]
     fn the_help_says_stolen_cargo_is_excluded() {
         assert!(sell_usage().contains("Stolen tons"));
+    }
+
+    /// A loop that re-plans a fixed buyer set cannot plan cargo it never
+    /// nominated buyers for, and the help has to say so before a commander
+    /// loads something new and waits for a plan that will never come \[C52\].
+    #[test]
+    fn the_help_says_what_follow_tracks_and_what_it_cannot() {
+        let text = sell_usage();
+        assert!(text.contains("--follow <s>"), "{text}");
+        assert!(text.contains("stops when the hold is empty"), "{text}");
+        assert!(text.contains("named, not planned"), "{text}");
+        assert!(text.contains("Minimum\n                           30s"), "{text}");
     }
 }

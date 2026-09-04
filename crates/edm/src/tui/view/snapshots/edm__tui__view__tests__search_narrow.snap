@@ -1,0 +1,40 @@
+---
+source: crates/edm/src/tui/view/tests.rs
+expression: "frame(&state, 80, 36)"
+---
+ edm  1:Search  2:Results  3:Detail  4:Pins  5:Sell  L:Log
+┌ Search ──────────────────────────────────────────────────────────────────────┐
+│  Mode                   quick lookup   full survey   sell the hold           │
+│                                                                              │
+│▶ System or station     Sol▏                                                  │
+│  Items                 gold, silver                                          │
+│  Category              a commodity category, instead of items                │
+│  Hops per commodity    best sellers and buyers kept per commodity, default 5 │
+│  Radius (Ly)           default 30 for a survey, 500 for a lookup             │
+│  Cargo (t)             hold size; from the journal when blank                │
+│  Credits               buying power; from the journal when blank             │
+│  Jump range (Ly)       from the journal when blank                           │
+│  Shape                                                                       │
+│  Routes shown          default 20                                            │
+│  Minimum quantity (t)  seller stock and published buyer demand floor         │
+│  Landing pad                                                                 │
+│  Fleet carriers        [ ]                                                   │
+│  Carrier access                                                              │
+│  From here             [ ]                                                   │
+│  Rank by profit        [ ]                                                   │
+│  Show cr/h             [ ]                                                   │
+│  Include illegal       [ ]                                                   │
+│  Request ceiling       nothing is sent above it                              │
+│  Requests per second   default 4                                             │
+│  Cache age (min)       rank from cached prices younger than this             │
+│  Ignore the cache      [ ]                                                   │
+│  Skip confirmation     [ ]                                                   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Enter runs  PgUp/PgDn changes the mode ────────────────────────────────────────
+edm route Sol --item gold, silver --quick 5
+where to search from; a station name is resolved to its system
+
+ requests 0 / 2,000  no journal  F1 help  Ctrl-L log  Ctrl-C quit

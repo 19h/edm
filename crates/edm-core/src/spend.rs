@@ -37,7 +37,13 @@ pub const DEFAULT_MAX_REQUESTS: f64 = 2_000.0;
 /// legs may be. Two markets each within 40 Ly can be 80 Ly apart, so a long-leg
 /// route never needed a wide radius. What a wide radius buys is *more markets*,
 /// which is exactly what the request ceiling is for.
-pub const MAX_RADIUS_LY: f64 = ARDENT_MAX_RADIUS_LY;
+///
+/// Above [`ARDENT_MAX_RADIUS_LY`] a lookup cannot be one query: Ardent clamps
+/// `maxDistance` at 500 Ly and neither refuses nor says so, so the shell beyond
+/// that is covered by tiling several 500 Ly queries centred on systems the
+/// first pass named \[C51\]. The result is a union of prefixes rather than one
+/// prefix, and is reported as such.
+pub const MAX_RADIUS_LY: f64 = 1_000.0;
 /// Ardent's own clamp, which it applies silently.
 pub const ARDENT_MAX_RADIUS_LY: f64 = 500.0;
 /// Ardent's `/nearby` row cap.
@@ -282,12 +288,16 @@ pub fn duration_estimate(seconds: f64) -> String {
     if seconds < 90.0 {
         return format!("{}s", js::format_integer(seconds.ceil()));
     }
-    let minutes = (seconds / 60.0).floor();
+    // Round to whole seconds *before* splitting. Flooring the minutes and
+    // rounding the remainder independently lets the remainder carry to 60
+    // without the minute noticing, so 179.6 s printed as "2m 60s" \[C50\].
+    let whole = js::js_round(seconds);
+    let minutes = (whole / 60.0).floor();
     if minutes < 90.0 {
         return format!(
             "{}m {}s",
             js::format_integer(minutes),
-            js::format_integer(js::js_round(seconds % 60.0))
+            js::format_integer(whole - minutes * 60.0)
         );
     }
     format!(
@@ -501,5 +511,24 @@ mod tests {
         assert_eq!(duration_estimate(90.0), "1m 30s");
         assert_eq!(duration_estimate(3_600.0), "60m 0s");
         assert_eq!(duration_estimate(7_200.0), "2h 0m");
+    }
+
+    /// Flooring the minute and rounding the second independently let the second
+    /// carry to 60 without the minute noticing \[C50\]. Observed live as
+    /// "sells 979 t for 360,183,890 cr over 2m 60s".
+    #[test]
+    fn a_duration_never_shows_sixty_seconds() {
+        for seconds in [179.6, 179.5, 119.6, 239.7, 5399.6, 1799.51] {
+            let text = duration_estimate(seconds);
+            assert!(
+                !text.contains(" 60s"),
+                "{seconds}s rendered as {text}, which is the next minute"
+            );
+        }
+        assert_eq!(duration_estimate(179.6), "3m 0s");
+        assert_eq!(duration_estimate(180.0), "3m 0s");
+        // And the neighbouring cases are unmoved.
+        assert_eq!(duration_estimate(90.0), "1m 30s");
+        assert_eq!(duration_estimate(89.0), "89s");
     }
 }

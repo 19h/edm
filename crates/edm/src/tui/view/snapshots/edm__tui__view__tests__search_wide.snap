@@ -1,0 +1,40 @@
+---
+source: crates/edm/src/tui/view/tests.rs
+expression: "frame(&state, 130, 36)"
+---
+ edm  1:Search  2:Results  3:Detail  4:Pins  5:Sell  L:Log
+┌ Search ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  Mode                   quick lookup   full survey   sell the hold                                                             │
+│                                                                                                                                │
+│▶ System or station     Sol▏                                      Fleet carriers        [ ]                                     │
+│  Items                 gold, silver                              Carrier access                                                │
+│  Category              a commodity category, instead of items    From here             [ ]                                     │
+│  Hops per commodity    best sellers and buyers kept per commodi  Rank by profit        [ ]                                     │
+│  Radius (Ly)           default 30 for a survey, 500 for a looku  Show cr/h             [ ]                                     │
+│  Cargo (t)             hold size; from the journal when blank    Include illegal       [ ]                                     │
+│  Credits               buying power; from the journal when blan  Request ceiling       nothing is sent above it                │
+│  Jump range (Ly)       from the journal when blank               Requests per second   default 4                               │
+│  Shape                                                           Cache age (min)       rank from cached prices younger than thi│
+│  Routes shown          default 20                                Ignore the cache      [ ]                                     │
+│  Minimum quantity (t)  seller stock and published buyer demand   Skip confirmation     [ ]                                     │
+│  Landing pad                                                                                                                   │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ Enter runs  PgUp/PgDn changes the mode ──────────────────────────────────────────────────────────────────────────────────────────
+edm route Sol --item gold, silver --quick 5
+where to search from; a station name is resolved to its system
+
+ requests 0 / 2,000  no journal  F1 help  Ctrl-L log  Ctrl-C quit

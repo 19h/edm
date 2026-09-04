@@ -8,7 +8,11 @@ the most profitable routes in that data. The loop search is exact: it returns
 the best repeatable route there is, not the best one it happened to find.
 
 Search
-  --radius <ly>            default 30, ceiling 500 (Ardent's own clamp).
+  --radius <ly>            default 30, ceiling 1,000. Ardent clamps a single
+                           query at 500 Ly and does not say so, so a wider radius is
+                           covered by tiling several queries centred on systems
+                           the first pass named; the outer shell is then sampled
+                           rather than surveyed, and the table says so.
                            It bounds how far each *market* is from the
                            reference, not how long a leg may be: two markets
                            each within 40 Ly can be 80 Ly apart. A wide radius

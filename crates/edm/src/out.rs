@@ -30,19 +30,36 @@ pub const EXIT_USAGE: u8 = 2;
 /// compare per write against a 64 KiB buffer.
 enum Sink {
     Stdout(BufWriter<std::io::Stdout>),
+    /// Every write handed to a callback instead of a descriptor, tagged with
+    /// the stream it would have gone to. Not `cfg(test)`: `edm ui` runs the
+    /// whole pipeline behind one of these, because in raw mode the terminal is
+    /// the screen and nothing may write to it behind the renderer's back
+    /// \[C53\].
+    Forward(ForwardSink),
     /// Both streams into one buffer, in write order — which is exactly what
     /// `2>&1` produces, and the ordering is itself part of what is under test.
     #[cfg(test)]
     Captured(String),
 }
 
+/// Where a forwarding sink hands each write.
+pub type ForwardSink = Box<dyn Fn(Stream, &str)>;
+
+/// Which descriptor a forwarded write belonged to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
 impl Sink {
-    fn push(&mut self, text: &str) {
+    fn push(&mut self, stream: Stream, text: &str) {
         match self {
             Self::Stdout(writer) => {
                 let _ = writer.write_all(text.as_bytes());
                 let _ = writer.flush();
             }
+            Self::Forward(sink) => sink(stream, text),
             #[cfg(test)]
             Self::Captured(buffer) => buffer.push_str(text),
         }
@@ -89,6 +106,25 @@ impl Out {
         }
     }
 
+    /// An `Out` whose every write is handed to `sink` with the stream it was
+    /// bound for, so a full-screen UI can show the pipeline's own words
+    /// without the pipeline knowing it is not on a console \[C53\].
+    ///
+    /// Everything else is unchanged: `--json`'s document mode still diverts
+    /// ordinary writes to the stderr side, and the exit code still accumulates
+    /// — it is simply never returned from the process.
+    #[must_use]
+    pub fn forwarding(width: usize, metric: Metric, sink: ForwardSink) -> Self {
+        Self {
+            stdout: RefCell::new(Sink::Forward(sink)),
+            exit: Cell::new(0),
+            width,
+            metric,
+            json: false,
+            documentary: Cell::new(false),
+        }
+    }
+
     /// Declare that stdout carries one document and nothing else \[C28\].
     pub fn stdout_is_a_document(&self) {
         self.documentary.set(true);
@@ -98,8 +134,8 @@ impl Out {
     /// mode, and the reason the mode exists.
     pub fn document(&self, text: &str) {
         if let Ok(mut sink) = self.stdout.try_borrow_mut() {
-            sink.push(text);
-            sink.push("\n");
+            sink.push(Stream::Stdout, text);
+            sink.push(Stream::Stdout, "\n");
         }
     }
 
@@ -175,12 +211,17 @@ impl Out {
     /// original's do.
     fn diagnostic(&self, text: &str) {
         self.flush();
-        #[cfg(test)]
-        if let Ok(mut sink) = self.stdout.try_borrow_mut()
-            && matches!(*sink, Sink::Captured(_))
-        {
-            sink.push(text);
-            return;
+        if let Ok(mut sink) = self.stdout.try_borrow_mut() {
+            let forwarded = match &*sink {
+                Sink::Stdout(_) => false,
+                Sink::Forward(_) => true,
+                #[cfg(test)]
+                Sink::Captured(_) => true,
+            };
+            if forwarded {
+                sink.push(Stream::Stderr, text);
+                return;
+            }
         }
         let _ = write!(std::io::stderr(), "{text}");
     }
@@ -216,8 +257,15 @@ impl Out {
             return;
         }
         if let Ok(mut sink) = self.stdout.try_borrow_mut() {
-            sink.push(text);
+            sink.push(Stream::Stdout, text);
         }
+    }
+
+    /// The exit code as assigned so far, for a caller that owns the process
+    /// status itself rather than returning this `Out`'s.
+    #[must_use]
+    pub fn exit_status(&self) -> u8 {
+        self.exit.get()
     }
 }
 
@@ -240,7 +288,7 @@ impl Out {
     #[must_use]
     pub fn captured(&self) -> String {
         match &*self.stdout.borrow() {
-            Sink::Stdout(_) => String::new(),
+            Sink::Stdout(_) | Sink::Forward(_) => String::new(),
             Sink::Captured(buffer) => buffer.clone(),
         }
     }
@@ -281,5 +329,35 @@ mod tests {
         // rather than accumulates.
         out.set_exit(EXIT_USAGE);
         assert_eq!(out.exit.get(), 2);
+    }
+
+    /// A forwarding sink sees every write with the stream it was bound for,
+    /// including the document-mode diversion, and nothing reaches a descriptor.
+    #[test]
+    fn a_forwarding_sink_tags_each_write_with_its_stream() {
+        let seen = std::rc::Rc::new(RefCell::new(Vec::<(Stream, String)>::new()));
+        let log = seen.clone();
+        let out = Out::forwarding(
+            40,
+            Metric::Utf16,
+            Box::new(move |stream, text| log.borrow_mut().push((stream, text.to_owned()))),
+        );
+        out.line("hello");
+        out.error("oops");
+        out.stdout_is_a_document();
+        out.line("diverted");
+        out.document("{}");
+        out.set_exit(EXIT_FAILURE);
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                (Stream::Stdout, "hello\n".to_owned()),
+                (Stream::Stderr, "oops\n".to_owned()),
+                (Stream::Stderr, "diverted\n".to_owned()),
+                (Stream::Stdout, "{}".to_owned()),
+                (Stream::Stdout, "\n".to_owned()),
+            ]
+        );
+        assert_eq!(out.exit_status(), EXIT_FAILURE);
     }
 }

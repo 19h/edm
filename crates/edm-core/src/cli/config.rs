@@ -1350,6 +1350,18 @@ pub fn follow_seconds(cli: &Cli<'_>) -> Result<Option<f64>, CliError> {
     }
     Ok(Some(value))
 }
+
+/// `--follow-rounds`, shared by every command that can follow.
+pub fn follow_rounds(cli: &Cli<'_>) -> Result<Option<usize>, CliError> {
+    match cli.optional_number(Flag::FollowRounds)? {
+        None => Ok(None),
+        Some(value) if value >= 1.0 && value.is_finite() => Ok(Some(value as usize)),
+        Some(_) => Err("--follow-rounds must be a whole number of rounds, at least 1"
+            .to_owned()
+            .into()),
+    }
+}
+
 pub const DEFAULT_ARDENT_QUERIES: f64 = 200.0;
 
 /// Read the opt-in quick lookup mode.
@@ -1620,18 +1632,7 @@ pub fn route_config_with_reference(
         from_here: cli.switch_value(Flag::FromHere, false)?,
         by_profit: cli.switch_value(Flag::ByProfit, false)?,
         follow_seconds: follow_seconds(cli)?,
-        follow_rounds: {
-            let asked = cli.optional_number(Flag::FollowRounds)?;
-            match asked {
-                None => None,
-                Some(value) if value >= 1.0 && value.is_finite() => Some(value as usize),
-                Some(_) => {
-                    return Err("--follow-rounds must be a whole number of rounds, at least 1"
-                        .to_owned()
-                        .into());
-                }
-            }
-        },
+        follow_rounds: follow_rounds(cli)?,
         max_requests: cli
             .optional_number(Flag::MaxRequests)?
             .unwrap_or(crate::spend::DEFAULT_MAX_REQUESTS),

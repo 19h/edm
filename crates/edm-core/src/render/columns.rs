@@ -127,12 +127,16 @@ pub const SELL_ALTERNATIVES_COLUMNS: &[Column] = &[
     // Without this the block is arithmetic about plans the reader cannot see:
     // "most credits, 2 stops, +30 M" names no market, so there is nothing to
     // act on and no way to tell how it differs from the recommendation.
-    Column::new("where", "Stops at").min_width(18),
-    Column::new("stops", "Stops").right().priority(3),
+    // Station *and* system: a callsign like `H7H-75X` names a fleet carrier and
+    // nothing else, so without the system there is no way to find it, and the
+    // alternative becomes a number the reader cannot act on \[C50\].
+    Column::new("where", "Stops at").min_width(18).max_width(64),
+    Column::new("distance", "Ly").right().priority(1),
+    Column::new("stops", "Stops").right().priority(4),
     Column::new("sold", "Sold").right(),
     Column::new("credits", "Credits").right(),
     Column::new("time", "Time").right().priority(1),
-    Column::new("rate", "Cr/h").right().priority(2),
+    Column::new("rate", "Cr/h").right().priority(3),
     Column::new("marginal", "Extra pays").right(),
 ];
 
@@ -273,6 +277,55 @@ pub const VENDOR_MARKET_COLUMNS: &[Column] = &[
     Column::new("type", "Type").max_width(18).priority(2),
 ];
 
+/// Systems a dry-run would inspect for combat zones.
+pub const CZ_PLAN_COLUMNS: &[Column] = &[
+    Column::new("system", "System").min_width(12).max_width(36),
+    Column::new("distance", "Dist (Ly)").right(),
+    Column::new("address", "Address").right().priority(2),
+];
+
+/// Space conflict zones from a starsystem payload.
+pub const CZ_COLUMNS: &[Column] = &[
+    Column::new("system", "System").min_width(12).max_width(28),
+    Column::new("distance", "Dist (Ly)").right(),
+    Column::new("intensity", "Intensity"),
+    Column::new("conflict", "Conflict").priority(2),
+    Column::new("sides", "Sides").min_width(16).max_width(40),
+    Column::new("ls", "Dist (Ls)").right().priority(1),
+];
+
+/// Combat zones including on-foot settlement warzones.
+pub const CZ_SETTLEMENT_COLUMNS: &[Column] = &[
+    Column::new("system", "System").min_width(12).max_width(22),
+    Column::new("location", "Location")
+        .min_width(14)
+        .max_width(32),
+    Column::new("distance", "Dist (Ly)").right(),
+    Column::new("kind", "Kind").priority(4),
+    Column::new("intensity", "Intensity"),
+    Column::new("difficulty", "Diff").priority(2),
+    Column::new("conflict", "Conflict").priority(3),
+    Column::new("sides", "Sides").min_width(12).max_width(32),
+    Column::new("ls", "Dist (Ls)").right().priority(1),
+];
+
+/// `--detail` adds the body-site id and gameplay name.
+pub const CZ_DETAIL_COLUMNS: &[Column] = &[
+    Column::new("system", "System").min_width(12).max_width(20),
+    Column::new("location", "Location")
+        .min_width(12)
+        .max_width(28),
+    Column::new("distance", "Dist (Ly)").right(),
+    Column::new("kind", "Kind").priority(4),
+    Column::new("intensity", "Intensity"),
+    Column::new("difficulty", "Diff").priority(3),
+    Column::new("conflict", "Conflict").priority(5),
+    Column::new("sides", "Sides").min_width(12).max_width(28),
+    Column::new("ls", "Dist (Ls)").right().priority(2),
+    Column::new("site", "Site").right().priority(1),
+    Column::new("gameplay", "Gameplay").max_width(24).priority(6),
+];
+
 /// One Pioneer Supplies item, for the Rust-only `vendor` locator.
 pub const VENDOR_COLUMNS: &[Column] = &[
     Column::new("marketId", "Market ID").right().priority(5),
@@ -353,6 +406,10 @@ pub const ALL: &[(&str, &[Column])] = &[
     ("MARKET_POINT", MARKET_POINT_COLUMNS),
     ("VENDOR_MARKET", VENDOR_MARKET_COLUMNS),
     ("VENDOR", VENDOR_COLUMNS),
+    ("CZ_PLAN", CZ_PLAN_COLUMNS),
+    ("CZ", CZ_COLUMNS),
+    ("CZ_SETTLEMENT", CZ_SETTLEMENT_COLUMNS),
+    ("CZ_DETAIL", CZ_DETAIL_COLUMNS),
     ("QUICK_LOOKUP", QUICK_LOOKUP_COLUMNS),
     ("QUICK_LIVE", QUICK_LIVE_COLUMNS),
     ("SELL", SELL_COLUMNS),

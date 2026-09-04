@@ -179,7 +179,7 @@ fn count_entries(value: Option<&JsValue>) -> usize {
 /// because of the precision loss. Modelling ids as `u64` here would find the
 /// faction "more correctly" and print a different name; we keep the `f64`
 /// comparison. R19.
-fn lookup_faction<'a>(factions: &'a JsObject, id: Option<&JsValue>) -> Option<&'a JsObject> {
+pub(crate) fn lookup_faction<'a>(factions: &'a JsObject, id: Option<&JsValue>) -> Option<&'a JsObject> {
     let id = id?;
     let as_key = match id {
         JsValue::Num(n) => js::js_number(*n),

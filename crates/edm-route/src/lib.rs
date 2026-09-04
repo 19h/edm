@@ -59,6 +59,7 @@ pub mod graph;
 pub mod json;
 pub mod model;
 pub mod num;
+pub mod pin;
 pub mod ratio;
 pub mod report;
 pub mod rescore;

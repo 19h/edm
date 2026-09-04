@@ -326,8 +326,8 @@ fn parity_isolation(root: &Path) -> Result<()> {
     //    TypeScript rejects.
     //
     //    This said `route` when `route` was the only extension. It is the set
-    //    that is meant: `eddn` \[C33\], `vendor` \[C35\] and `sell` \[C41\]
-    //    reach the same arm for the same reason.
+    //    that is meant: `eddn` \[C33\], `vendor` \[C35\], `sell` \[C41\] and
+    //    `cz` reach the same arm for the same reason.
     let scenarios = crate::scenario::load_all(&root.join("xtask").join("scenarios"))?;
     for scenario in &scenarios {
         let dispatched = cli::parse_dispatch(&scenario.argv);

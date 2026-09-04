@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod commander;
+pub mod cz;
 pub mod digest;
 pub mod eddn;
 pub mod id64;

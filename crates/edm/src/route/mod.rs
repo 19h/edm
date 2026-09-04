@@ -19,6 +19,7 @@ pub mod atlas;
 pub mod cache;
 pub mod digest;
 pub mod discover;
+pub mod follow;
 pub mod ingest;
 pub mod marketdata;
 pub mod pacer;

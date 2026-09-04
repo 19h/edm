@@ -157,6 +157,17 @@ impl<'a, H: HttpTransport> ArdentClient<'a, H> {
         })
     }
 
+    /// `/search/station/name/{prefix}` — every station whose name starts with
+    /// `prefix`, with the system each is in. The one prefix search Ardent
+    /// offers, which is why a system-name completion goes through stations
+    /// \[C53\].
+    pub async fn station_matches(&self, prefix: &str) -> Result<Vec<StationMatch>, String> {
+        let payload = self
+            .fetch_json(&ardent::station_search_url(self.base, prefix))
+            .await?;
+        Ok(ardent::parse_station_matches(&payload))
+    }
+
     /// `/system/name/{s}/nearby?maxDistance=R` — the systems Ardent knows
     /// inside a radius, nearest first \[C25\].
     ///

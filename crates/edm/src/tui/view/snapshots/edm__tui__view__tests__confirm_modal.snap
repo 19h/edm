@@ -1,0 +1,34 @@
+---
+source: crates/edm/src/tui/view/tests.rs
+expression: "frame(&state, 100, 30)"
+---
+ edm  1:Search  2:Results  3:Detail  4:Pins  5:Sell  L:Log
+┌ Search ──────────────────────────────────────────────────────────────────────────────────────────┐
+│  Mode                   quick lookup   full survey   sell the hold                               │
+│                                                                                                  │
+│▶ System or station     ▏                                                                         │
+│  Items                 commodities, comma separated                                              │
+│  Category              a commodity category, instead of items                                    │
+│  Hops per commodity    best sellers and buyers kept per commodity, default 5                     │
+│  Radius (Ly)           default 30 for a survey, 500 for a lookup                                 │
+│  Cargo (t)             hold size; from the journal when blank                                    │
+│  Credits               buying power; from the journal when blank                                 │
+│ ┌Send these requests?──────────────────────────────────────────────────────────────────────────┐ │
+│ │== ROUTE PLAN ==                                                                              │ │
+│ │| requests | 300 |                                                                            │ │
+│ │                                                                                              │ │
+│ │pass --yes to send 300 requests to the game-internal API                                      │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+└─└────────────────────────────────────────────────────────── y / Enter sends   n / Esc declines ┘─┘
+ Enter runs  PgUp/PgDn changes the mode ────────────────────────────────────────────────────────────
+edm route --quick 5
+where to search from; a station name is resolved to its system
+
+log─────────────────────────────────────────────────────────────────────────────────────────────────
+resolving "Sol" through Ardent for quick lookup...
+warning: something the pipeline said on stderr
+
+
+
+ requests 0 / 2,000  no journal  F1 help  Ctrl-L log  Ctrl-C quit

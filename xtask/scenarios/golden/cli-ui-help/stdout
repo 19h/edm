@@ -1,0 +1,42 @@
+edm ui — route, survey and sell, interactively
+
+Usage
+  edm ui [options]
+
+A full-screen front end over `edm route`, `edm route --quick` and `edm sell`.
+Fill in a search, watch it run, pin the route you mean to fly, and the pinned
+route alone is kept fresh in the background: its prices, stock and demand, the
+docking access of any carrier on it, and where your ship is relative to it.
+
+This command plans only. It shows the `edm trade` commands for a route and can
+copy them to the clipboard; nothing here transacts.
+
+Screens
+  1 Search     the form; Enter runs it, Tab moves between fields
+  2 Results    the ranking; Enter pins a route and opens it, p pins in place
+  3 Detail     one pinned route, refreshed on its own; R refreshes now
+  4 Pins       every pinned route and when it is next due
+  5 Sell       the disposal plan for what is aboard
+  L Log        what the pipeline said, as it would have on the console
+  ? Help       the keys for the screen you are on
+
+Refreshing
+  --follow <s>             seconds between background re-prices, default
+                           60, minimum 30. One pinned route
+                           costs its markets per round
+  --max-requests <n>       the session ceiling, default 2,000. Counted
+                           live across every search and refresh; nothing is
+                           sent above it
+  --yes                    searches above 250 requests proceed without
+                           asking
+
+Files
+  --cache-dir <path>       the price and access cache, as `edm route`
+  --from-file <path>       where pins are kept, default beside the cache
+  Every search inside the UI takes the flags `edm route` and `edm sell` take,
+  and is checked exactly as those commands check them.
+
+Examples
+  edm ui
+  edm ui --follow 45 --max-requests 500
+

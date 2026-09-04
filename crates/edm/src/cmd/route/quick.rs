@@ -34,13 +34,14 @@ use crate::ports::{Clock, Entropy, Fs, Timer};
 use crate::route::access::{self, AccessIndex};
 use crate::route::acquire;
 use crate::route::cache::Cache;
+use crate::route::follow::{FollowState, Shortlist};
 use crate::route::pacer::Pacer;
 use crate::route::pool::Job;
 use crate::route::relay::Relayed;
 
 /// One price-index row that survived the per-side cap.
 #[derive(Clone, Debug)]
-struct Candidate {
+pub(crate) struct Candidate {
     commodity: String,
     price: CommodityPrice,
 }
@@ -49,7 +50,7 @@ struct Candidate {
 ///
 /// Reported by name: a lookup over several commodities otherwise prints a table
 /// of the ones that worked and says nothing about the one that was misspelt.
-struct Barren {
+pub(crate) struct Barren {
     commodity: String,
     /// Whether Ardent's price index returned any row for this name, before this
     /// program's own quantity floor and access filters ran.
@@ -57,31 +58,514 @@ struct Barren {
 }
 
 /// The result of filtering one Ardent response before taking its price prefix.
-struct SideSelection {
+pub(crate) struct SideSelection {
     candidates: Vec<Candidate>,
     considered: usize,
     exclusions: Vec<Exclusion>,
 }
 
-/// Run a commodity-first, live-verified route lookup.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the sequence is the safety contract: free index, filters, priced gate, live reads, then rank"
-)]
-/// How many consecutive empty rounds end a `--follow` session \[C46\].
+/// The most tile centres one lookup will query \[C51\].
 ///
-/// Three rather than one, because a single round can come back empty from a
-/// transient failure -- a market that timed out is a market whose route drops
-/// for that round only. Three in a row is the candidate set being genuinely
-/// gone, not a bad read.
-const BARREN_ROUNDS_BEFORE_STOPPING: usize = 3;
+/// Each centre costs three free Ardent pages *per commodity*, so a wide radius
+/// over a whole category is already thousands of requests against somebody
+/// else's server. Twenty-five is enough to cover a 1,000 Ly ball reasonably
+/// from a 500 Ly tile and keeps the worst case finite.
+pub(crate) const MAX_TILES: usize = 25;
 
-pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>(
+/// How many new centres one generation adds.
+pub(crate) const TILES_PER_GENERATION: usize = 12;
+
+/// Picks the next ring of tile centres out of the systems already seen.
+///
+/// Farthest-point sampling over the candidates nearest the current edge: take
+/// the one furthest from the reference, then repeatedly the one furthest from
+/// everything already chosen. That spreads the ring over directions rather than
+/// clustering it in whichever quadrant happens to hold the most markets, which
+/// is what picking by distance alone would do.
+pub(crate) fn tile_centres(
+    answers: &[(
+        String,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+    )],
+    centre: &edm_core::domain::id64::Coordinates,
+    reach: f64,
+    queried: &std::collections::HashSet<String>,
+    budget: usize,
+) -> Vec<String> {
+    // Only the outer band is useful: a centre well inside the covered ball
+    // extends the reach by almost nothing.
+    let floor = reach * 0.6;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut pool: Vec<(String, edm_core::domain::id64::Coordinates, f64)> = Vec::new();
+    for (_, exports, imports, _, _) in answers {
+        for row in exports.iter().chain(imports) {
+            let name = &row.station.system_name;
+            let key = name.to_ascii_lowercase();
+            if queried.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            let away = edm_route::time::distance_ly(*centre, row.station.coordinates);
+            if away >= floor && away <= reach {
+                pool.push((name.clone(), row.station.coordinates, away));
+            }
+        }
+    }
+    if pool.is_empty() {
+        return Vec::new();
+    }
+    // Seed with the furthest out, then spread.
+    let mut chosen: Vec<(String, edm_core::domain::id64::Coordinates)> = Vec::new();
+    // `reduce` with a strict `>` rather than `max_by`, which returns the *last*
+    // maximum \[R27\]; ties here must resolve identically on every run.
+    let first = pool
+        .iter()
+        .enumerate()
+        .reduce(|a, b| if b.1.2 > a.1.2 { b } else { a })
+        .map(|(i, _)| i);
+    if let Some(i) = first {
+        let (name, xyz, _) = pool.swap_remove(i);
+        chosen.push((name, xyz));
+    }
+    while chosen.len() < budget && !pool.is_empty() {
+        let spread = |c: &(String, edm_core::domain::id64::Coordinates, f64)| {
+            chosen
+                .iter()
+                .map(|(_, other)| edm_route::time::distance_ly(c.1, *other))
+                .fold(f64::INFINITY, edm_core::js::js_min)
+        };
+        let pick = pool
+            .iter()
+            .enumerate()
+            .reduce(|a, b| if spread(b.1) > spread(a.1) { b } else { a })
+            .map(|(i, _)| i);
+        let Some(i) = pick else { break };
+        let (name, xyz, _) = pool.swap_remove(i);
+        chosen.push((name, xyz));
+    }
+    chosen.into_iter().map(|(name, _)| name).collect()
+}
+
+/// Folds one tile's answers into the running set, deduplicating by market.
+///
+/// A market inside two tiles is returned by both, and Ardent's row is the same
+/// row, so the first wins and the copy is dropped. Without this the candidate
+/// list would carry duplicates that later look like two markets at one id.
+pub(crate) fn merge_answers(
+    into: &mut [(
+        String,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+    )],
+    from: Vec<(
+        String,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+        Vec<edm_core::ardent::CommodityPrice>,
+    )>,
+) {
+    for (commodity, exports, imports, _, _) in from {
+        let Some(slot) = into.iter_mut().find(|(name, ..)| *name == commodity) else {
+            continue;
+        };
+        for (target, extra) in [(&mut slot.1, exports), (&mut slot.2, imports)] {
+            let known: std::collections::HashSet<u64> =
+                target.iter().map(|row| row.station.market_id.to_bits()).collect();
+            target.extend(
+                extra
+                    .into_iter()
+                    .filter(|row| !known.contains(&row.station.market_id.to_bits())),
+            );
+        }
+    }
+}
+
+
+pub(super) async fn run<H, C, E, F, T, G>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     commander: Option<&edm_core::domain::commander::CommanderState>,
     timer: &T,
-) -> CmdResult {
+    pacer: &Pacer<'_, C, T, crate::ports::PinnedJitter<'_, E>>,
+    entropy: &crate::ports::PinnedJitter<'_, E>,
+    gate: &G,
+) -> CmdResult
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+    G: super::plan::Gate,
+{
+    let out = app.out;
+    let note = |text: String| {
+        if !config.quiet {
+            out.line(&text);
+        }
+    };
+    let Some(mut found) = search(app, config, commander, timer, pacer, entropy, gate).await? else {
+        return Ok(());
+    };
+    super::render_ranked(
+        out,
+        &found.rank_config,
+        &found.ranked,
+        found.origin,
+        &found.coverage,
+        super::SpecialOpportunities::default(),
+        Some(&found.provenance),
+        found.docking_report,
+    );
+
+    // --- --follow: keep re-reading the ranking until told to stop \[C43\] ---
+    //
+    // A round is deliberately the verify pass with the live set cleared: that
+    // code already re-polls exactly the markets behind the ranked routes,
+    // patches them in place by index, and rescores. Nothing here re-solves --
+    // the graph build is 127 s at five thousand markets, so a loop that
+    // re-searched would spend its whole interval searching.
+    if let Some(interval) = config.follow_seconds {
+        let mut follow = FollowState::default();
+        // The ingest counters describe the *first* solve. Re-printing them under
+        // every round would restate a number the re-reads never recomputed, so
+        // they are cleared once they have been shown.
+        found.ranked.crossing = crate::route::ingest::Crossing::default();
+        loop {
+            if let Some(text) = follow.round_cap(config.follow_rounds) {
+                note(text);
+                break;
+            }
+            if let Some(text) = follow.ceiling(pacer.spent().requests, config.max_requests) {
+                note(text);
+                break;
+            }
+            timer.sleep_ms(interval * 1_000.0).await;
+            follow.begin_round();
+            let outcome = round(app, timer, pacer, entropy, &mut found, config.from_here).await?;
+            if outcome.moved_away {
+                // With the origin pinned, moving invalidates the whole
+                // shortlist: every route departs from a station the ship has
+                // left. Rescoring would keep printing hops from the old berth,
+                // which is worse than stopping, because they still price.
+                note(
+                    "you have moved: every route in this list departs from the station you \
+                     were docked at, so the list no longer applies. Re-run to search from \
+                     where you are now"
+                        .to_owned(),
+                );
+                break;
+            }
+            note(format!(
+                "round {}: {} markets re-read, {} requests, {} of {} routes still priced{}",
+                edm_core::js::format_integer(follow.round as f64),
+                edm_core::js::format_integer(outcome.verified.markets as f64),
+                edm_core::js::format_integer(outcome.requests as f64),
+                edm_core::js::format_integer(found.ranked.routes().len() as f64),
+                edm_core::js::format_integer(found.shortlist.len() as f64),
+                if outcome.tripped {
+                    " (the rate limiter tripped this round)"
+                } else {
+                    ""
+                },
+            ));
+            super::render_ranked(
+                out,
+                &found.rank_config,
+                &found.ranked,
+                found.origin,
+                &found.coverage,
+                super::SpecialOpportunities::default(),
+                None,
+                None,
+            );
+            // A follow round re-prices a fixed candidate set; it never
+            // re-nominates. So when every route dies at once -- which is what
+            // happens when a whole ranking shares one buyer and that buyer's
+            // order is filled or withdrawn -- no later round can recover it,
+            // and the loop would otherwise re-read the same dead markets
+            // forever to print "no profitable hop". Stop and say why, rather
+            // than spend the ceiling proving it repeatedly \[C46\].
+            if let Some(barren_rounds) = follow.record(!found.ranked.routes().is_empty()) {
+                note(format!(
+                    "the whole shortlist has been unpriced for {} rounds: every route in it \
+                     has lost a side, and --follow re-prices the routes it was given rather \
+                     than nominating new ones. Re-run to search again",
+                    edm_core::js::format_integer(barren_rounds as f64),
+                ));
+                break;
+            }
+        }
+    }
+
+    // A 410 is a reached answer, exactly as it is in a full survey. A failed
+    // or deadline-abandoned live candidate is not a price that merely ranked
+    // badly, so make the process status carry that distinction.
+    out.set_exit(if found.unreached || found.coverage.breaker_tripped {
+        crate::out::EXIT_FAILURE
+    } else {
+        0
+    });
+    Ok(())
+}
+
+/// What a quick lookup established, kept whole so a follow round — or a
+/// full-screen UI — can re-price it \[C53\].
+pub(crate) struct QuickSearch {
+    pub ranked: super::Ranked,
+    /// The config the ranking was solved under: the run's, with the quantity
+    /// floors and the resolved commodity ids folded in.
+    pub rank_config: RouteConfig,
+    /// Every market the sweep read, which is every market a round may re-read.
+    pub stations: Vec<ardent::ArdentStation>,
+    pub shortlist: Shortlist,
+    /// The markets read live so far in the current round.
+    pub live: HashSet<u64>,
+    pub origin: Option<edm_core::domain::id64::Coordinates>,
+    pub coverage: RouteCoverage,
+    pub provenance: super::QuickProvenance,
+    pub docking_report: Option<access::Report>,
+    /// A candidate that was never read.
+    pub unreached: bool,
+    /// The candidate table and its notes, as first printed.
+    pub candidate_blocks: Vec<Block<'static>>,
+    /// The best-price table and its notes; empty when nothing was read.
+    pub live_blocks: Vec<Block<'static>>,
+}
+
+/// What one follow round did.
+#[derive(Debug)]
+pub(crate) struct RoundOutcome {
+    /// The ship left the berth the shortlist departs from, and the round
+    /// stopped there \[C49\].
+    pub moved_away: bool,
+    pub verified: super::Verified,
+    /// Requests this round sent.
+    pub requests: usize,
+    /// The rate limiter tripped during the round.
+    pub tripped: bool,
+}
+
+/// What a sweep borrows that outlives one `Cx`: the write-side cache, the
+/// EDDN relay state and the relay tally.
+pub(crate) struct SweepLocals {
+    pub write_cache: Cache,
+    relayed_log: Relayed,
+    eddn_options: Option<edm_core::domain::eddn::EddnOptions>,
+    eddn_bucket: Bucket,
+    eddn_tokens: std::cell::RefCell<BucketState>,
+    pub relay_tally: std::cell::RefCell<crate::route::relay::Tally>,
+}
+
+impl SweepLocals {
+    pub(crate) fn new<H, C, E, F>(
+        app: &App<'_, H, C, E, F>,
+        config: &RouteConfig,
+        write_cache: Cache,
+    ) -> Result<Self, String>
+    where
+        H: HttpTransport,
+        C: Clock,
+        E: Entropy,
+        F: Fs,
+    {
+        let relayed_log = Relayed::new(write_cache.root(), config.eddn_max_age_minutes);
+        let eddn_options = config
+            .eddn
+            .then(|| edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials))
+            .transpose()
+            .map_err(|error| error.message().to_owned())?;
+        let eddn_bucket = Bucket {
+            rate: config.eddn_rate_per_second,
+            burst: 1.0,
+            min_rate: edm_core::js::js_min(config.eddn_rate_per_second, 0.5),
+        };
+        let eddn_tokens =
+            std::cell::RefCell::new(BucketState::new(eddn_bucket, app.ports.clock.now_ms()));
+        Ok(Self {
+            write_cache,
+            relayed_log,
+            eddn_options,
+            eddn_bucket,
+            eddn_tokens,
+            relay_tally: std::cell::RefCell::new(crate::route::relay::Tally::default()),
+        })
+    }
+
+    /// The relay, when `--eddn` asked for one.
+    pub(crate) fn eddn<'a, H, C, E, F>(
+        &'a self,
+        app: &'a App<'_, H, C, E, F>,
+        stations: &'a [ardent::ArdentStation],
+    ) -> Option<acquire::Eddn<'a>> {
+        self.eddn_options.as_ref().map(|options| acquire::Eddn {
+            options,
+            url: &app.overrides.eddn_url,
+            relayed: &self.relayed_log,
+            stations,
+            bucket: self.eddn_bucket,
+            tokens: &self.eddn_tokens,
+        })
+    }
+}
+
+/// One follow round: restore the shortlist, follow the ship, re-read the
+/// markets behind the routes, rescore \[C43\], \[C49\].
+///
+/// `stop_if_moved` is `--from-here`: with the origin pinned, leaving the berth
+/// invalidates every route, and the round returns before reading anything.
+pub(crate) async fn round<H, C, E, F, T>(
+    app: &App<'_, H, C, E, F>,
+    timer: &T,
+    pacer: &Pacer<'_, C, T, crate::ports::PinnedJitter<'_, E>>,
+    entropy: &crate::ports::PinnedJitter<'_, E>,
+    found: &mut QuickSearch,
+    stop_if_moved: bool,
+) -> Result<RoundOutcome, String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+{
+    let out = app.out;
+    let config = &found.rank_config;
+    let note = |text: String| {
+        if !config.quiet {
+            out.line(&text);
+        }
+    };
+    let before = pacer.spent();
+    // A fresh deadline window and a cleared breaker latch. `--deadline`
+    // bounds one sweep, and a session is many sweeps with sleep in
+    // between; the latch is first-trip-wins and never healed, so one
+    // transient outage would otherwise silently kill every later round
+    // while the loop ticked on looking healthy.
+    pacer.begin_round();
+    found.live = found.shortlist.restore(&mut found.ranked);
+
+    // Follow the ship. The approach column is measured from wherever
+    // the commander now is, so `To start` stays true as they fly rather
+    // than freezing at the distance it was when the run began.
+    let mut moved = false;
+    if let Some(state) = crate::cmd::reload_commander_state(&app.cli, app.ports) {
+        if let Some(xyz) = state
+            .current_system
+            .as_ref()
+            .and_then(|seen| seen.value.coordinates)
+        {
+            found.origin = Some(edm_core::domain::id64::Coordinates {
+                x: xyz[0],
+                y: xyz[1],
+                z: xyz[2],
+            });
+        }
+        moved = found.shortlist.moved(state.current_market_id());
+    }
+    if stop_if_moved && moved {
+        return Ok(RoundOutcome {
+            moved_away: true,
+            verified: super::Verified::default(),
+            requests: 0,
+            tripped: false,
+        });
+    }
+
+    let stamp_overrides = app.stamp_overrides()?;
+    let query = edm_core::cli::config::starsystem_query(
+        &app.cli,
+        edm_core::cli::config::CachedTimestamp::SweepZero,
+    )
+    .map_err(|error| error.message().to_owned())?;
+    let read_cache = super::cache_for(app, config);
+    let write_cache = Cache::new(
+        read_cache.root().to_path_buf(),
+        config.max_age_minutes,
+        config.cache,
+        true,
+    );
+    let locals = SweepLocals::new(app, config, write_cache)?;
+    let eddn = locals.eddn(app, &found.stations);
+    // The verify rounds re-use the same transport, pacer and write cache, but
+    // not the progress reporter: its `[k/N]` counter belongs to the sweep, and
+    // a second pass restarting it at 1 would read as the sweep beginning again.
+    // The rounds announce themselves instead.
+    let cx = acquire::Cx {
+        http: app.http,
+        clock: &app.ports.clock,
+        timer,
+        entropy,
+        fs: &app.ports.fs,
+        out,
+        origin: &app.overrides.origin,
+        credentials: &app.credentials,
+        headers: &app.headers,
+        method_override: app.session.method_override.as_deref(),
+        nonce_override: stamp_overrides.nonce,
+        frontier_time_override: stamp_overrides.frontier_time,
+        request_time_override: stamp_overrides.request_time,
+        cache: &locals.write_cache,
+        relayed: &locals.relay_tally,
+        eddn: eddn.as_ref(),
+        workers: config.workers as usize,
+        quiet: config.quiet,
+        verify_systems: false,
+        language: &query.language,
+        report: None,
+        trace: None,
+        total: found.stations.len(),
+    };
+    let no_candidates = std::collections::HashMap::new();
+    let (verified, _fresh) = super::verify_ranked(
+        &cx,
+        pacer,
+        config,
+        &mut found.ranked,
+        &found.stations,
+        &no_candidates,
+        &mut found.live,
+        &note,
+    )
+    .await;
+    let spent = pacer.spent();
+    Ok(RoundOutcome {
+        moved_away: false,
+        verified,
+        requests: spent.requests - before.requests,
+        tripped: pacer.tripped().is_some(),
+    })
+}
+
+/// The lookup itself: nominate from Ardent, filter, gate, read live, rank,
+/// verify. Prints its progress and its tables; the ranking is returned, and
+/// `None` means the run ended at a gate.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the sequence is the safety contract: free index, filters, priced gate, live reads, then rank"
+)]
+pub(crate) async fn search<H, C, E, F, T, G>(
+    app: &App<'_, H, C, E, F>,
+    config: &RouteConfig,
+    commander: Option<&edm_core::domain::commander::CommanderState>,
+    timer: &T,
+    pacer: &Pacer<'_, C, T, crate::ports::PinnedJitter<'_, E>>,
+    entropy: &crate::ports::PinnedJitter<'_, E>,
+    gate: &G,
+) -> Result<Option<QuickSearch>, String>
+where
+    H: HttpTransport,
+    C: Clock,
+    E: Entropy,
+    F: Fs,
+    T: Timer,
+    G: super::plan::Gate,
+{
     let quick = config
         .quick
         .as_ref()
@@ -209,54 +693,110 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     // `buffered` keeps at most the usual number of commodity lookups in
     // flight and yields in the user/item order, making tied selection stable.
     let price_index = &ardent;
-    let system_name = centre.name.as_str();
     let radius_ly = config.radius_ly;
     let include_carriers = config.include_carriers;
-    let answers =
-        futures_util::stream::iter(wanted.iter().cloned().map(move |commodity| async move {
-            let exports = price_index
-                .commodity_nearby(
-                    system_name,
-                    &commodity,
-                    CommodityDirection::Exports,
-                    radius_ly,
-                    include_carriers,
-                    seller_minimum,
-                )
-                .await
-                .map_err(|error| {
-                    format!("querying Ardent seller prices for {commodity}: {error}")
-                })?;
-            let imports = price_index
-                .commodity_nearby(
-                    system_name,
-                    &commodity,
-                    CommodityDirection::Imports,
-                    radius_ly,
-                    include_carriers,
-                    buyer_minimum,
-                )
-                .await
-                .map_err(|error| {
-                    format!("querying Ardent buyer prices for {commodity}: {error}")
-                })?;
-            let (local_exports, local_imports) = price_index
-                .commodity_in_system(system_name, &commodity)
-                .await
-                .map_err(|error| {
-                    format!("querying Ardent reference-system prices for {commodity}: {error}")
-                })?;
-            Ok::<_, String>((commodity, exports, imports, local_exports, local_imports))
+    // Ardent clamps `maxDistance` at 500 Ly and neither refuses nor reports it
+    // \[C51\], so anything wider is covered by *tiling*: query the reference,
+    // harvest the system names its own rows carry, pick spread-out ones near
+    // the edge of what has been reached, and query those too. Tile centres have
+    // to be real systems because the endpoint is addressed by name -- there is
+    // no coordinate lookup -- and the rows are the only source of names out at
+    // the shell.
+    let tile_radius = edm_core::js::js_min(radius_ly, edm_core::ardent::ARDENT_MAX_DISTANCE_LY);
+    let wanted_ref = &wanted;
+    let nominate_at = move |origin: String| async move {
+        futures_util::stream::iter(wanted_ref.iter().cloned().map({
+            let origin = origin.clone();
+            move |commodity| {
+                let origin = origin.clone();
+                async move {
+                    let exports = price_index
+                        .commodity_nearby(
+                            &origin,
+                            &commodity,
+                            CommodityDirection::Exports,
+                            tile_radius,
+                            include_carriers,
+                            seller_minimum,
+                        )
+                        .await
+                        .map_err(|error| {
+                            format!("querying Ardent seller prices for {commodity}: {error}")
+                        })?;
+                    let imports = price_index
+                        .commodity_nearby(
+                            &origin,
+                            &commodity,
+                            CommodityDirection::Imports,
+                            tile_radius,
+                            include_carriers,
+                            buyer_minimum,
+                        )
+                        .await
+                        .map_err(|error| {
+                            format!("querying Ardent buyer prices for {commodity}: {error}")
+                        })?;
+                    let (local_exports, local_imports) = price_index
+                        .commodity_in_system(&origin, &commodity)
+                        .await
+                        .map_err(|error| {
+                            format!("querying Ardent reference-system prices for {commodity}: {error}")
+                        })?;
+                    Ok::<_, String>((commodity, exports, imports, local_exports, local_imports))
+                }
+            }
         }))
         .buffered(super::ARDENT_CONCURRENCY)
         .collect::<Vec<_>>()
-        .await;
+        .await
+    };
 
-    // Hoisted out of the loop so the first Ardent error still ends the run
-    // before a single Spansh request is spent on candidates that will not be
-    // used. `collect` on a `Result` yields the first `Err` in iteration order,
-    // which is exactly what the `?` inside the loop used to do.
-    let answers = answers.into_iter().collect::<Result<Vec<_>, String>>()?;
+    let mut answers = nominate_at(centre.name.clone())
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut tiles_queried = 1usize;
+    if radius_ly > tile_radius {
+        let mut queried: std::collections::HashSet<String> =
+            std::collections::HashSet::from([centre.name.to_ascii_lowercase()]);
+        let mut reach = tile_radius;
+        while reach < radius_ly && tiles_queried < MAX_TILES {
+            let budget = (MAX_TILES - tiles_queried).min(TILES_PER_GENERATION);
+            let next = tile_centres(&answers, &centre.coordinates, reach, &queried, budget);
+            if next.is_empty() {
+                break;
+            }
+            note(format!(
+                "radius {} Ly is past Ardent's {} Ly ceiling: tiling with {} more {}...",
+                edm_core::js::format_integer(radius_ly),
+                edm_core::js::format_integer(tile_radius),
+                edm_core::js::format_integer(next.len() as f64),
+                if next.len() == 1 { "centre" } else { "centres" },
+            ));
+            for name in &next {
+                queried.insert(name.to_ascii_lowercase());
+            }
+            let batches =
+                futures_util::future::join_all(next.into_iter().map(&nominate_at)).await;
+            for batch in batches {
+                tiles_queried += 1;
+                merge_answers(&mut answers, batch.into_iter().collect::<Result<Vec<_>, String>>()?);
+            }
+            reach += tile_radius;
+        }
+        // Every tile is a ball around somewhere else, so it reaches outside the
+        // ball that was asked for. Rows beyond the requested radius are dropped
+        // rather than reported: `--radius` is a promise about the answer, not
+        // about how it was gathered.
+        let centre_xyz = centre.coordinates;
+        for (_, exports, imports, _, _) in &mut answers {
+            for rows in [exports, imports] {
+                rows.retain(|row| {
+                    edm_route::time::distance_ly(centre_xyz, row.station.coordinates) <= radius_ly
+                });
+            }
+        }
+    }
 
     // Hoisted: the carrier-access phase spends metered requests now, and
     // everything metered belongs behind one pacer \[C37\].
@@ -266,11 +806,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         edm_core::cli::config::CachedTimestamp::SweepZero,
     )
     .map_err(|error| error.message().to_owned())?;
-    let entropy = crate::ports::PinnedJitter {
-        inner: &app.ports.entropy,
-        unit: app.overrides.jitter.unwrap_or(f64::NAN),
-    };
-    let pacer = Pacer::new(super::pacing(config), &app.ports.clock, timer, &entropy);
+    pacer.begin_round();
 
     // One resolution for the whole lookup, before any side is selected: every
     // commodity's price pages draw on the same regional pool of carriers, so
@@ -281,8 +817,9 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
             app,
             config,
             &configured_cache,
-            &pacer,
+            pacer,
             &stamp_overrides,
+            gate,
             &answers,
             &centre.coordinates,
             wanted.len(),
@@ -326,16 +863,17 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         }
     }
 
+    let candidate_blocks = candidate_blocks(
+        &candidates,
+        &barren,
+        seller_minimum,
+        buyer_minimum,
+        quick.markets_per_side,
+        &centre.coordinates,
+        tiles_queried > 1,
+    );
     if !config.json {
-        emit_candidates(
-            out,
-            &candidates,
-            &barren,
-            seller_minimum,
-            buyer_minimum,
-            quick.markets_per_side,
-            &centre.coordinates,
-        );
+        out.emit(&candidate_blocks);
         // Only reachable when the shape was asked for by name: the config layer
         // already defaults a one-commodity lookup to a single hop. Say it here,
         // before the spend gate, because the alternative is paying for every
@@ -415,7 +953,15 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         // Two remote price prefixes plus the reference-system commodity page
         // per item, and the commodity catalogue when it was not already local.
         // They are free Ardent reads, not paid Frontier work.
-        ardent_requests: (wanted.len().saturating_mul(3) + usize::from(catalogue_fetched)) as u32,
+        // Three pages per commodity per *tile*, not per run: a tiled radius
+        // multiplies the free Ardent side by the number of centres queried, and
+        // reporting the untiled figure understates it by an order of magnitude
+        // \[C51\].
+        ardent_requests: (wanted
+            .len()
+            .saturating_mul(3)
+            .saturating_mul(tiles_queried)
+            + usize::from(catalogue_fetched)) as u32,
         counts: Counts {
             // Already spent. Folded forward so the ceiling stays cumulative
             // across the run's two gates rather than resetting at each.
@@ -428,35 +974,15 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         },
         exclusions,
     };
-    let decision = super::plan::gate(out, config, &survey, SizePrior::default());
+    let decision = super::plan::gate(out, gate, config, &survey, SizePrior::default()).await;
     if !decision.proceeds() {
-        return Ok(());
+        return Ok(None);
     }
 
     let started_ms = app.ports.clock.now_ms();
 
-    let relayed_log = Relayed::new(write_cache.root(), config.eddn_max_age_minutes);
-    let eddn_options = config
-        .eddn
-        .then(|| edm_core::cli::config::eddn_config(&app.cli, &app.session.credentials))
-        .transpose()
-        .map_err(|error| error.message().to_owned())?;
-    let eddn_bucket = Bucket {
-        rate: config.eddn_rate_per_second,
-        burst: 1.0,
-        min_rate: edm_core::js::js_min(config.eddn_rate_per_second, 0.5),
-    };
-    let eddn_tokens =
-        std::cell::RefCell::new(BucketState::new(eddn_bucket, app.ports.clock.now_ms()));
-    let eddn = eddn_options.as_ref().map(|options| acquire::Eddn {
-        options,
-        url: &app.overrides.eddn_url,
-        relayed: &relayed_log,
-        stations: &stations,
-        bucket: eddn_bucket,
-        tokens: &eddn_tokens,
-    });
-    let relay_tally = std::cell::RefCell::new(crate::route::relay::Tally::default());
+    let locals = SweepLocals::new(app, config, write_cache)?;
+    let eddn = locals.eddn(app, &stations);
 
     let total = stations.len();
     let report = |job: &Job,
@@ -483,7 +1009,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         http: app.http,
         clock: &app.ports.clock,
         timer,
-        entropy: &entropy,
+        entropy,
         fs: &app.ports.fs,
         out,
         origin: &app.overrides.origin,
@@ -493,8 +1019,8 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         nonce_override: stamp_overrides.nonce,
         frontier_time_override: stamp_overrides.frontier_time,
         request_time_override: stamp_overrides.request_time,
-        cache: &write_cache,
-        relayed: &relay_tally,
+        cache: &locals.write_cache,
+        relayed: &locals.relay_tally,
         eddn: eddn.as_ref(),
         workers: config.workers as usize,
         quiet: config.quiet,
@@ -521,11 +1047,11 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     let expired = || clock.now_ms() >= deadline_ms;
     let watch = edm_route::watch::Watch::unlimited().until(&expired);
 
-    let acquired = acquire::sweep(&cx, &pacer, prepared, &[]).await;
-    // The verify rounds re-use the same transport, pacer and write cache, but
+    let acquired = acquire::sweep(&cx, pacer, prepared, &[]).await;
+    // The verify pass re-uses the same transport, pacer and write cache, but
     // not the progress reporter: its `[k/N]` counter belongs to the sweep, and
     // a second pass restarting it at 1 would read as the sweep beginning again.
-    // The rounds announce themselves instead.
+    // The pass announces itself instead.
     let verify_cx = acquire::Cx {
         report: None,
         trace: None,
@@ -564,7 +1090,7 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
     // this a no-op: everything is already live.
     let (verified, fresh) = super::verify_ranked(
         &verify_cx,
-        &pacer,
+        pacer,
         &rank_config,
         &mut ranked,
         &stations,
@@ -632,189 +1158,30 @@ pub(super) async fn run<H: HttpTransport, C: Clock, E: Entropy, F: Fs, T: Timer>
         config.include_illegal,
         &centre.coordinates,
     );
-    if !config.json {
-        emit_live_prices(out, &best, &wanted);
+    let live_blocks = live_price_blocks(&best, &wanted);
+    if !config.json && !live_blocks.is_empty() {
+        out.emit(&live_blocks);
     }
     provenance.best_live = best;
 
     let unreached = !acquired.unreached.is_empty() || acquired.tally.markets_out_of_time > 0;
-    super::render_ranked(
-        out,
-        &rank_config,
-        &ranked,
+    // Where the ship was when this shortlist was built \[C49\].
+    let pinned_at =
+        commander.and_then(edm_core::domain::commander::CommanderState::current_market_id);
+    Ok(Some(QuickSearch {
+        shortlist: Shortlist::new(&ranked, pinned_at),
+        ranked,
+        rank_config,
+        stations,
+        live,
         origin,
-        &coverage,
-        super::SpecialOpportunities::default(),
-        Some(&provenance),
+        coverage,
+        provenance,
         docking_report,
-    );
-
-    // --- --follow: keep re-reading the ranking until told to stop \[C43\] ---
-    //
-    // A round is deliberately the verify pass with the live set cleared: that
-    // code already re-polls exactly the markets behind the ranked routes,
-    // patches them in place by index, and rescores. Nothing here re-solves --
-    // the graph build is 127 s at five thousand markets, so a loop that
-    // re-searched would spend its whole interval searching.
-    if let Some(interval) = config.follow_seconds {
-        // The shortlist as first solved. Every round is re-evaluated against
-        // *this*, not against what survived the previous round, because
-        // `rescore` only ever filters: without the restore, a carrier offline
-        // for one poll would be deleted from the ranking permanently and could
-        // never come back, so a long session would erode to nothing.
-        let baseline = ranked.routes().to_vec();
-        let mut round: usize = 0;
-        // Where the ship was when this shortlist was built. Re-read from the
-        // journal each round: it is a local file, so noticing a jump costs
-        // nothing \[C49\].
-        let mut pinned_at = commander
-            .and_then(edm_core::domain::commander::CommanderState::current_market_id);
-        let mut origin = origin;
-        // Consecutive rounds in which the whole shortlist came back unpriced.
-        let mut barren_rounds: usize = 0;
-        // The ingest counters describe the *first* solve. Re-printing them under
-        // every round would restate a number the re-reads never recomputed, so
-        // they are cleared once they have been shown.
-        ranked.crossing = crate::route::ingest::Crossing::default();
-        loop {
-            if let Some(limit) = config.follow_rounds
-                && round >= limit
-            {
-                note(format!(
-                    "--follow-rounds {} reached",
-                    edm_core::js::format_integer(limit as f64)
-                ));
-                break;
-            }
-            // The only live ceiling this program has. `--max-requests` is
-            // checked at the gate against an *estimate* and never against what
-            // was actually sent, so without this an indefinite loop would be
-            // bounded by nothing at all.
-            let before = pacer.spent();
-            if before.requests as f64 >= config.max_requests {
-                note(format!(
-                    "--max-requests {} reached after {} {}",
-                    edm_core::js::format_integer(config.max_requests),
-                    edm_core::js::format_integer(round as f64),
-                    if round == 1 { "round" } else { "rounds" },
-                ));
-                break;
-            }
-            timer.sleep_ms(interval * 1_000.0).await;
-            round += 1;
-            // A fresh deadline window and a cleared breaker latch. `--deadline`
-            // bounds one sweep, and a session is many sweeps with sleep in
-            // between; the latch is first-trip-wins and never healed, so one
-            // transient outage would otherwise silently kill every later round
-            // while the loop ticked on looking healthy.
-            pacer.begin_round();
-            *ranked.routes_mut() = baseline.clone();
-            live.clear();
-
-            // Follow the ship. The approach column is measured from wherever
-            // the commander now is, so `To start` stays true as they fly rather
-            // than freezing at the distance it was when the run began.
-            let now_state = crate::cmd::reload_commander_state(&app.cli, &app.ports);
-            if let Some(state) = now_state.as_ref() {
-                if let Some(xyz) = state
-                    .current_system
-                    .as_ref()
-                    .and_then(|seen| seen.value.coordinates)
-                {
-                    origin = Some(edm_core::domain::id64::Coordinates {
-                        x: xyz[0],
-                        y: xyz[1],
-                        z: xyz[2],
-                    });
-                }
-                // With the origin pinned, moving invalidates the whole
-                // shortlist: every route departs from a station the ship has
-                // left. Rescoring would keep printing hops from the old berth,
-                // which is worse than stopping, because they still price.
-                let now_at = state.current_market_id();
-                if config.from_here && now_at != pinned_at {
-                    note(
-                        "you have moved: every route in this list departs from the station you \
-                         were docked at, so the list no longer applies. Re-run to search from \
-                         where you are now"
-                            .to_owned(),
-                    );
-                    pinned_at = now_at;
-                    break;
-                }
-                pinned_at = now_at;
-            }
-
-            let (verified, _fresh) = super::verify_ranked(
-                &verify_cx,
-                &pacer,
-                &rank_config,
-                &mut ranked,
-                &stations,
-                &no_candidates,
-                &mut live,
-                &note,
-            )
-            .await;
-
-            let spent = pacer.spent();
-            note(format!(
-                "round {}: {} markets re-read, {} requests, {} of {} routes still priced{}",
-                edm_core::js::format_integer(round as f64),
-                edm_core::js::format_integer(verified.markets as f64),
-                edm_core::js::format_integer((spent.requests - before.requests) as f64),
-                edm_core::js::format_integer(ranked.routes().len() as f64),
-                edm_core::js::format_integer(baseline.len() as f64),
-                if pacer.tripped().is_some() {
-                    " (the rate limiter tripped this round)"
-                } else {
-                    ""
-                },
-            ));
-            super::render_ranked(
-                out,
-                &rank_config,
-                &ranked,
-                origin,
-                &coverage,
-                super::SpecialOpportunities::default(),
-                None,
-                None,
-            );
-
-            // A follow round re-prices a fixed candidate set; it never
-            // re-nominates. So when every route dies at once -- which is what
-            // happens when a whole ranking shares one buyer and that buyer's
-            // order is filled or withdrawn -- no later round can recover it,
-            // and the loop would otherwise re-read the same dead markets
-            // forever to print "no profitable hop". Stop and say why, rather
-            // than spend the ceiling proving it repeatedly \[C46\].
-            if ranked.routes().is_empty() {
-                barren_rounds += 1;
-                if barren_rounds >= BARREN_ROUNDS_BEFORE_STOPPING {
-                    note(format!(
-                        "the whole shortlist has been unpriced for {} rounds: every route in it \
-                         has lost a side, and --follow re-prices the routes it was given rather \
-                         than nominating new ones. Re-run to search again",
-                        edm_core::js::format_integer(barren_rounds as f64),
-                    ));
-                    break;
-                }
-            } else {
-                barren_rounds = 0;
-            }
-        }
-    }
-
-    // A 410 is a reached answer, exactly as it is in a full survey. A failed
-    // or deadline-abandoned live candidate is not a price that merely ranked
-    // badly, so make the process status carry that distinction.
-    out.set_exit(if unreached || coverage.breaker_tripped {
-        crate::out::EXIT_FAILURE
-    } else {
-        0
-    });
-    Ok(())
+        unreached,
+        candidate_blocks,
+        live_blocks,
+    }))
 }
 
 /// One commodity's best live seller or best live buyer among the markets this
@@ -855,7 +1222,7 @@ pub(crate) struct BestLive {
     clippy::too_many_arguments,
     reason = "every one is a rule the answer depends on; folding them into a struct would hide which"
 )]
-fn best_live_prices(
+pub(crate) fn best_live_prices(
     listings: &[crate::route::acquire::Listing],
     candidates: &[Candidate],
     stations: &[ardent::ArdentStation],
@@ -962,7 +1329,7 @@ fn beats(challenger: &BestLive, held: &BestLive) -> bool {
 /// a lookup that does not check here reports "no candidates" for a typo and
 /// exits successfully. A category that expands to nothing is the same silent
 /// empty answer, just for a class instead of a spelling.
-fn resolve_items(
+pub(crate) fn resolve_items(
     quick: &edm_core::cli::config::QuickLookup,
     catalogue: &[String],
     note: &impl Fn(String),
@@ -1036,7 +1403,7 @@ fn resolve_items(
 
 /// One commodity's five Ardent price pages: the name, the two nearby sides,
 /// and the two reference-system sides.
-type CommodityAnswer = (
+pub(crate) type CommodityAnswer = (
     String,
     Vec<CommodityPrice>,
     Vec<CommodityPrice>,
@@ -1061,12 +1428,13 @@ type CommodityAnswer = (
     clippy::too_many_lines,
     reason = "the same linear free-then-gate-then-spend sequence as the full sweep's phase, and the order is the safeguard"
 )]
-async fn quick_docking_access<H, C, E, F, J, T>(
+pub(crate) async fn quick_docking_access<H, C, E, F, J, T, G>(
     app: &App<'_, H, C, E, F>,
     config: &RouteConfig,
     cache: &Cache,
     pacer: &Pacer<'_, C, T, J>,
     stamp_overrides: &crate::cmd::StampOverrides,
+    gate: &G,
     answers: &[CommodityAnswer],
     centre: &edm_core::domain::id64::Coordinates,
     ardent_requests: usize,
@@ -1080,6 +1448,7 @@ where
     F: Fs,
     J: Entropy,
     T: Timer,
+    G: super::plan::Gate,
 {
     if !config.carrier_access.filters() {
         return Ok((AccessIndex::default(), None));
@@ -1155,12 +1524,14 @@ where
         };
         let decision = super::plan::gate_titled(
             app.out,
+            gate,
             config,
             &survey,
             SizePrior::default(),
             "CARRIER ACCESS PLAN",
             super::plan::Stage::Intermediate,
-        );
+        )
+        .await;
         if decision.ends_the_run() {
             return Err(String::new());
         }
@@ -1341,7 +1712,7 @@ fn select_side(
     clippy::too_many_arguments,
     reason = "the hop scorer has to see both Ardent sides, both quantity floors, the ship, and the access filters; folding those into a struct would hide which"
 )]
-fn select_commodity(
+pub(crate) fn select_commodity(
     exports: Vec<CommodityPrice>,
     imports: Vec<CommodityPrice>,
     wanted: &str,
@@ -1469,7 +1840,7 @@ fn price_order(
     clippy::too_many_lines,
     reason = "the scoring is one loop over pairs; splitting it would hide the quantity, credit, and time rules"
 )]
-fn nominate_hops(
+pub(crate) fn nominate_hops(
     wanted: &str,
     sellers: &[CommodityPrice],
     buyers: &[CommodityPrice],
@@ -1597,7 +1968,7 @@ fn floor_positive(value: f64) -> Option<i64> {
 /// treats it as cargo-limited rather than as zero demand, so candidate lookup
 /// must retain it too; otherwise the price-index prefix and normal ranking
 /// disagree about which buyers are eligible.
-fn has_unpublished_import_demand(row: &CommodityPrice) -> bool {
+pub(crate) fn has_unpublished_import_demand(row: &CommodityPrice) -> bool {
     row.direction == CommodityDirection::Imports
         && row.volume == 0.0
         && row.volume_bracket.is_some_and(|bracket| bracket >= 1.0)
@@ -1620,7 +1991,7 @@ fn meets_volume(row: &CommodityPrice, minimum: f64) -> bool {
 /// filters actually run so the merged list still explains the arithmetic from
 /// the top down; the hop-rate cap has no rank here and therefore lands last,
 /// which is also when it applies.
-fn merge_exclusions(into: &mut Vec<Exclusion>, from: Vec<Exclusion>) {
+pub(crate) fn merge_exclusions(into: &mut Vec<Exclusion>, from: Vec<Exclusion>) {
     for exclusion in from {
         if let Some(existing) = into
             .iter_mut()
@@ -1635,21 +2006,27 @@ fn merge_exclusions(into: &mut Vec<Exclusion>, from: Vec<Exclusion>) {
 }
 
 /// Show exactly what Ardent nominated before a Frontier request can happen.
-fn emit_candidates(
-    out: &crate::out::Out,
+/// The candidate table and its notes, as blocks \[C53\].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a fact the table's own heading or notes state"
+)]
+pub(crate) fn candidate_blocks(
     candidates: &[Candidate],
     barren: &[Barren],
     seller_minimum: f64,
     buyer_minimum: f64,
     per_side: usize,
     centre: &edm_core::domain::id64::Coordinates,
-) {
+    tiled: bool,
+) -> Vec<Block<'static>> {
     let floor = format!(
         "{} t seller / {} t published-buyer minimum",
         edm_core::js::format_integer(seller_minimum),
         edm_core::js::format_integer(buyer_minimum),
     );
     let prefix_note = "Ardent returns a price-index prefix, not a complete regional survey; hops are scored by estimated credits per hour (spread × cargo / travel time) after local station filters, and Ardent's 1,000-row per-side page cap still applies before that";
+    let tiled_note = "beyond 500 Ly this is a union of overlapping 500 Ly queries, each with its own 1,000-row cap, centred on systems the first pass happened to name: the outer shell is sampled rather than surveyed, and a market there can be missed entirely";
     if candidates.is_empty() {
         let mut blocks = vec![
             Block::Heading("QUICK LOOKUP  no eligible Ardent candidates".to_owned()),
@@ -1659,8 +2036,10 @@ fn emit_candidates(
         ];
         blocks.extend(barren_notes(barren));
         blocks.push(Block::Note(prefix_note.to_owned()));
-        out.emit(&blocks);
-        return;
+        if tiled {
+            blocks.push(Block::Note(tiled_note.to_owned()));
+        }
+        return blocks;
     }
     let rows = candidates
         .iter()
@@ -1696,6 +2075,9 @@ fn emit_candidates(
         columns: columns::QUICK_LOOKUP_COLUMNS,
         rows,
     }];
+    if tiled {
+        blocks.push(Block::Note(tiled_note.to_owned()));
+    }
     if candidates
         .iter()
         .any(|candidate| has_unpublished_import_demand(&candidate.price))
@@ -1723,7 +2105,7 @@ fn emit_candidates(
         )));
     }
     blocks.push(Block::Note(prefix_note.to_owned()));
-    out.emit(&blocks);
+    blocks
 }
 
 /// Name each `--item` that contributed nothing, and say which kind of nothing.
@@ -1731,7 +2113,7 @@ fn emit_candidates(
 /// Silence here is the failure mode that matters: `--item gold,unobtainium`
 /// otherwise prints a table of gold and never mentions that half the request
 /// was a typo.
-fn barren_notes(barren: &[Barren]) -> Vec<Block<'static>> {
+pub(crate) fn barren_notes(barren: &[Barren]) -> Vec<Block<'static>> {
     barren
         .iter()
         .map(|item| {
@@ -1750,10 +2132,11 @@ fn barren_notes(barren: &[Barren]) -> Vec<Block<'static>> {
         .collect()
 }
 
-/// Print the answer the lookup was asked for, in the order `--item` named.
-fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String]) {
+/// The best-price table and its notes, as blocks; empty when there is no
+/// answer \[C53\].
+pub(crate) fn live_price_blocks(best: &[BestLive], wanted: &[String]) -> Vec<Block<'static>> {
     if best.is_empty() {
-        return;
+        return Vec::new();
     }
     let mut rows = Vec::new();
     for commodity in wanted {
@@ -1817,7 +2200,7 @@ fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String])
                 .to_owned(),
         ));
     }
-    out.emit(&blocks);
+    blocks
 }
 
 /// The subset coverage a quick lookup can honestly claim.
@@ -1825,7 +2208,7 @@ fn emit_live_prices(out: &crate::out::Out, best: &[BestLive], wanted: &[String])
     clippy::too_many_arguments,
     reason = "a coverage block is a report of what happened, and each argument is one measured fact it states"
 )]
-fn coverage_of(
+pub(crate) fn coverage_of(
     acquired: &acquire::Acquired,
     verified_markets: usize,
     markets_found: usize,

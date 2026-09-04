@@ -22,12 +22,14 @@
 
 pub mod access;
 pub mod config;
+pub mod cz;
 pub mod feed;
 pub mod flag;
 pub mod parse;
 pub mod route_usage;
 pub mod usage;
 pub mod sell;
+pub mod ui;
 pub mod vendor;
 
 pub use access::{Cli, CliError, EnvSnapshot, POISON_TYPE_ERROR};
@@ -54,7 +56,7 @@ pub fn is_known_command(command: &str) -> bool {
 /// Kept disjoint from [`KNOWN_COMMANDS`] rather than appended to it, because
 /// that constant's contents and R48's ordering around it are both pinned by the
 /// parity harness. Bun rejects each extension as an unknown command.
-pub const EXTENDED_COMMANDS: [&str; 4] = ["route", "eddn", "vendor", "sell"];
+pub const EXTENDED_COMMANDS: [&str; 6] = ["route", "eddn", "vendor", "sell", "cz", "ui"];
 
 #[must_use]
 pub fn is_extended_command(command: &str) -> bool {
@@ -100,6 +102,8 @@ pub fn usage_for(command: &str) -> String {
         "eddn" => super::cli::feed::feed_usage(),
         "vendor" => super::cli::vendor::vendor_usage(),
         "sell" => super::cli::sell::sell_usage(),
+        "cz" => super::cli::cz::cz_usage(),
+        "ui" => super::cli::ui::ui_usage(),
         "route" => route_usage(),
         _ => usage(),
     }
@@ -160,6 +164,8 @@ mod dispatch_tests {
             (&["sell", "--worth"][..], "sell"),
             (&["vendor", "--radius"][..], "vendor"),
             (&["eddn", "--rps"][..], "eddn"),
+            (&["cz", "--radius"][..], "cz"),
+            (&["ui", "--follow"][..], "ui"),
         ] {
             let parsed = parse_dispatch(&argv(tokens));
             assert_eq!(
@@ -192,6 +198,8 @@ mod dispatch_tests {
             &["route", "--quick", "--radius", "200", "--eddn", "FROG"][..],
             &["route", "--radius", "--top", "5", "Sol"][..],
             &["vendor", "--radius", "--json"][..],
+            &["cz", "--radius", "--json"][..],
+            &["ui", "--follow", "--yes"][..],
         ] {
             let parsed = parse_dispatch(&argv(tokens));
             assert!(

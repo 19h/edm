@@ -280,8 +280,45 @@ pub struct CommanderState {
     /// in `Statistics`, which follows `LoadGame` in every file that has both,
     /// so it lands *after* `reset_for_load_game` and needs no exemption.
     pub notoriety: f64,
+    /// Systems this commander has been in, newest first, bounded \[C54\].
+    ///
+    /// History rather than session state, so it survives `LoadGame` as the
+    /// carrier doors do: the point is to offer names a commander has typed
+    /// before, and a name is no less familiar for a restart.
+    #[serde(default)]
+    pub visited_systems: Vec<VisitedSystem>,
+    /// Stations this commander has docked at, newest first, bounded \[C54\].
+    #[serde(default)]
+    pub visited_stations: Vec<VisitedStation>,
     #[serde(skip)]
     next_ordinal: u64,
+}
+
+/// How many visited systems and stations are remembered.
+///
+/// A completion list, not a log: sixty-four is more than a session's worth of
+/// jumps and small enough to scan every keystroke.
+pub const VISITED_LIMIT: usize = 64;
+
+/// A system the journal has placed the commander in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VisitedSystem {
+    pub name: String,
+    pub address: Option<u64>,
+    pub coordinates: Option<[f64; 3]>,
+    /// The journal timestamp of the latest visit.
+    pub last_seen: Option<String>,
+}
+
+/// A station the journal has docked the commander at.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisitedStation {
+    pub station: String,
+    /// The system the docking was in, when the journal said.
+    pub system: Option<String>,
+    pub market_id: Option<u64>,
+    pub station_type: Option<String>,
+    pub last_seen: Option<String>,
 }
 
 impl CommanderState {
@@ -411,12 +448,58 @@ impl CommanderState {
     fn reset_for_load_game(&mut self) {
         let warnings = std::mem::take(&mut self.warnings);
         let doors = std::mem::take(&mut self.carrier_doors);
+        let systems = std::mem::take(&mut self.visited_systems);
+        let stations = std::mem::take(&mut self.visited_stations);
         let next_ordinal = self.next_ordinal;
         *self = Self::default();
         self.warnings = warnings;
-        // See the field: a door is not a session value.
+        // See the fields: a door is not a session value, and neither is a
+        // name the commander has been to.
         self.carrier_doors = doors;
+        self.visited_systems = systems;
+        self.visited_stations = stations;
         self.next_ordinal = next_ordinal;
+    }
+
+    /// Remember a system at the front of the history, once \[C54\].
+    fn remember_system(&mut self, location: &SystemLocation, timestamp: Option<&str>) {
+        self.visited_systems
+            .retain(|seen| seen.name != location.name);
+        self.visited_systems.insert(
+            0,
+            VisitedSystem {
+                name: location.name.clone(),
+                address: location.address,
+                coordinates: location.coordinates,
+                last_seen: timestamp.map(ToOwned::to_owned),
+            },
+        );
+        self.visited_systems.truncate(VISITED_LIMIT);
+    }
+
+    /// Remember a station at the front of the history, once \[C54\].
+    fn remember_station(&mut self, docking: &DockingState, timestamp: Option<&str>) {
+        let Some(station) = docking.station_name.clone() else {
+            return;
+        };
+        let system = self
+            .current_system
+            .as_ref()
+            .map(|seen| seen.value.name.clone());
+        self.visited_stations.retain(|seen| {
+            !(seen.station == station && (seen.market_id.is_none() || seen.market_id == docking.market_id))
+        });
+        self.visited_stations.insert(
+            0,
+            VisitedStation {
+                station,
+                system,
+                market_id: docking.market_id,
+                station_type: docking.station_type.clone(),
+                last_seen: timestamp.map(ToOwned::to_owned),
+            },
+        );
+        self.visited_stations.truncate(VISITED_LIMIT);
     }
 
     fn apply_event(&mut self, value: &Value, source: ObservationSource, line: Option<usize>) {
@@ -548,6 +631,9 @@ impl CommanderState {
             coordinates: coordinates_field(object, "StarPos"),
             arrival,
         };
+        if source == ObservationSource::Journal {
+            self.remember_system(&location, timestamp);
+        }
         let incoming = self.observe(source, timestamp, location);
         if source == ObservationSource::Journal {
             self.current_system = Some(incoming);
@@ -626,6 +712,9 @@ impl CommanderState {
             services: string_array_field(object, "StationServices"),
             arrived_at: timestamp.map(ToOwned::to_owned),
         };
+        if source == ObservationSource::Journal {
+            self.remember_station(&docking, timestamp);
+        }
         let incoming = self.observe(source, timestamp, docking.clone());
         let accepted = if source == ObservationSource::Journal {
             self.docking = Some(incoming);
@@ -1769,6 +1858,61 @@ mod carrier_door_tests {
             .iter()
             .find(|(id, _)| *id == market_id)
             .map(|(_, observation)| observation)
+    }
+
+    /// Systems and stations are remembered newest first, once each, and are
+    /// not forgotten by a `LoadGame` — a name is no less familiar for a
+    /// restart \[C54\].
+    #[test]
+    fn visited_systems_and_stations_are_a_bounded_history_that_survives_load_game() {
+        let state = replay(&[
+            r#"{"timestamp":"3309-01-01T00:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"Docked":true,"StationName":"Galileo","StationType":"Ocellus","MarketID":128016384}"#,
+            r#"{"timestamp":"3309-01-01T00:01:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":7267755828641,"StarPos":[3.03125,-0.09375,3.15625]}"#,
+            r#"{"timestamp":"3309-01-01T00:02:00Z","event":"Docked","StationName":"Hutton Orbital","StationType":"Outpost","MarketID":3228345344}"#,
+            r#"{"timestamp":"3309-01-01T00:03:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}"#,
+            r#"{"timestamp":"3309-01-02T00:00:00Z","event":"LoadGame","Commander":"Test","Ship":"Type9","Credits":1,"Loan":0}"#,
+        ]);
+        let names: Vec<&str> = state
+            .visited_systems
+            .iter()
+            .map(|seen| seen.name.as_str())
+            .collect();
+        assert_eq!(names, ["Sol", "Alpha Centauri"], "newest first, Sol once");
+        assert_eq!(
+            state.visited_systems[0].last_seen.as_deref(),
+            Some("3309-01-01T00:03:00Z")
+        );
+        assert_eq!(state.visited_systems[1].coordinates, Some([3.03125, -0.09375, 3.15625]));
+        let stations: Vec<(&str, Option<&str>)> = state
+            .visited_stations
+            .iter()
+            .map(|seen| (seen.station.as_str(), seen.system.as_deref()))
+            .collect();
+        assert_eq!(
+            stations,
+            [
+                ("Hutton Orbital", Some("Alpha Centauri")),
+                ("Galileo", Some("Sol"))
+            ]
+        );
+        assert_eq!(state.visited_stations[0].market_id, Some(3_228_345_344));
+        // The session values were cleared by LoadGame; the history was not.
+        assert!(state.current_system.is_none());
+    }
+
+    #[test]
+    fn the_visited_history_is_bounded() {
+        let mut lines = Vec::new();
+        for n in 0..(VISITED_LIMIT + 10) {
+            lines.push(format!(
+                r#"{{"timestamp":"3309-01-01T00:00:{:02}Z","event":"FSDJump","StarSystem":"System {n}","SystemAddress":{n}}}"#,
+                n % 60
+            ));
+        }
+        let borrowed: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let state = replay(&borrowed);
+        assert_eq!(state.visited_systems.len(), VISITED_LIMIT);
+        assert_eq!(state.visited_systems[0].name, format!("System {}", VISITED_LIMIT + 9));
     }
 
     fn replay(lines: &[&str]) -> CommanderState {

@@ -18,3 +18,4 @@ pub mod route;
 pub mod secret;
 pub mod sweep;
 pub mod sys;
+pub mod tui;

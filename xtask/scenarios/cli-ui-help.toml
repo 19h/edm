@@ -1,0 +1,5 @@
+# cli-ui-help
+why = "The interactive front end has no oracle (C53), so its help is pinned the way route's is: no bun run, the Rust side diffed against xtask/scenarios/golden/cli-ui-help/. The text is the promise the screens keep — in particular that nothing in the UI transacts."
+argv = ["ui", "--help"]
+oracle = "none"
+network = false

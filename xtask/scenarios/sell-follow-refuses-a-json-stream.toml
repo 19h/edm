@@ -1,0 +1,8 @@
+# sell-follow-refuses-a-json-stream
+why = "The same refusal route makes [C43], for the same reason: a document is one well-formed document or nothing, and a follow loop emits one per round. Refused before the hold is read, so a commander with no journal at all still learns that it is the combination that is wrong rather than their setup [C52]."
+argv = ["sell", "--from", "Sol", "--follow", "60", "--json"]
+oracle = "none"
+expect-frontier-requests = 0
+
+[env]
+EDM_JOURNAL_DIR = "xtask/scenarios/journals/one-stack"

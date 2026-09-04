@@ -29,7 +29,11 @@ the most profitable routes in that data. The loop search is exact: it returns
 the best repeatable route there is, not the best one it happened to find.
 
 Search
-  --radius <ly>            default {radius}, ceiling {max_radius} (Ardent's own clamp).
+  --radius <ly>            default {radius}, ceiling {max_radius}. Ardent clamps a single
+                           query at {ardent_radius} Ly and does not say so, so a wider radius is
+                           covered by tiling several queries centred on systems
+                           the first pass named; the outer shell is then sampled
+                           rather than surveyed, and the table says so.
                            It bounds how far each *market* is from the
                            reference, not how long a leg may be: two markets
                            each within 40 Ly can be 80 Ly apart. A wide radius
@@ -212,6 +216,7 @@ Examples
 ",
         radius = n(config::DEFAULT_RADIUS_LY),
         max_radius = n(spend::MAX_RADIUS_LY),
+        ardent_radius = n(spend::ARDENT_MAX_RADIUS_LY),
         top = n(config::DEFAULT_TOP),
         min_profit = n(config::DEFAULT_MIN_PROFIT),
         jump = n(config::DEFAULT_JUMP_RANGE_LY),
@@ -256,7 +261,7 @@ mod tests {
     fn the_help_advertises_the_real_defaults() {
         let text = route_usage();
         for expected in [
-            "--radius <ly>            default 30, ceiling 500",
+            "--radius <ly>            default 30, ceiling 1,000.",
             "default round-trip",
             "--max-requests <n>       ceiling, default 2,000",
             "required above 250 requests",

@@ -403,20 +403,20 @@ fn name(markets: &[Market], index: u32) -> String {
     )
 }
 
-fn money(credits: i64) -> String {
+pub fn money(credits: i64) -> String {
     format!("{} cr", js::format_integer(credits as f64))
 }
 
 /// Credits per hour, floored — the rounding law says every quantisation moves
 /// the reported rate down, so the number is never an overstatement.
-fn per_hour(rate: Ratio) -> String {
+pub fn per_hour(rate: Ratio) -> String {
     format!(
         "{}/h",
         js::format_integer(rate.credits_per_hour_floor() as f64)
     )
 }
 
-fn duration(millis: i64) -> String {
+pub fn duration(millis: i64) -> String {
     let seconds = millis / 1_000;
     if seconds < 60 {
         return format!("{}s", js::format_integer(seconds as f64));
@@ -430,7 +430,7 @@ fn duration(millis: i64) -> String {
 
 /// What the search claims. Short enough for a column, and never softer than the
 /// truth.
-fn claim(guarantee: Guarantee) -> String {
+pub fn claim(guarantee: Guarantee) -> String {
     match guarantee {
         Guarantee::ProvedOptimal => "proved optimal".to_owned(),
         Guarantee::OptimalForStartingCredits => "optimal at start credits".to_owned(),
@@ -453,7 +453,7 @@ fn claim(guarantee: Guarantee) -> String {
     }
 }
 
-fn limiter(limiter: Limiter) -> &'static str {
+pub fn limiter(limiter: Limiter) -> &'static str {
     match limiter {
         Limiter::Cargo => "hold full",
         Limiter::Stock => "stock",
@@ -487,7 +487,7 @@ fn distinct_caveats(routes: &[Route]) -> Vec<Caveat> {
 ///
 /// Each one names a way the *model* is narrower than the game — never a doubt
 /// about the search, which is what `Guarantee` is for.
-fn explain(caveat: Caveat) -> &'static str {
+pub fn explain(caveat: Caveat) -> &'static str {
     match caveat {
         Caveat::StockDepletion => {
             "stock depletes as you fly this; a second lap may carry less than the first"
